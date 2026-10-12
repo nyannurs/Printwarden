@@ -248,10 +248,9 @@ export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 
  *   turning, in the air even while still lying on their pile (waiting to go, or about to
  *   land), so a page in the air under one can carry it (with `only`, those are turning)
  */
-export function layoutBook(book, leaves, { closed, side, opening }, { cache = null, only = null, turning = null } = {}) {
+export function layoutBook(book, leaves, { closed, side }, { cache = null, only = null, turning = null } = {}) {
   const { style, cum, thickness, total, ground, leafCount: n } = book;
   if (style.spine === "coil") {
-    const split = opening === 0 ? 0 : cum[opening - 1] + thickness[opening - 1] / 2;
     // Pages run straight from the ring, bent by their curl toward the fore-edge: kept in
     // order at the ring (angle) and at the fore-edge (angle plus curl), so a page left
     // behind in a fast flip is carried along instead of passing through the next. Pages at
@@ -264,6 +263,13 @@ export function layoutBook(book, leaves, { closed, side, opening }, { cache = nu
     const fan = [0];
     for (let i = 1; i < leaves.length; i++) fan.push(fan[i - 1] + (still[i] || still[i - 1] ? 0 : FAN));
     const tip = isotonic(leaves.map((l, i) => l.theta + l.curl - fan[i]), still).map((v, i) => v + fan[i]);
+    // Where the block divides (how much paper lies left of the ring, which places every page on
+    // it): from the leaves as they lie now, each counting as it crosses over, not from the
+    // opening asked for. (From that, pressing Close jumped it to every page lying right while
+    // they still lay as before: the right pile dropped below the table, 0.9 mm from pages 26/27,
+    // and the table's footprint shadow showed on it as a band with a sharp edge.) At rest the
+    // same as the opening's.
+    const split = leaves.reduce((sum, _, i) => sum + thickness[i] * Math.min(1, Math.max(0, (90 - theta[i]) / 180)), 0);
     for (const [i, l] of leaves.entries()) leafProfile(book, i, theta[i], closed, split, tip[i] - theta[i], l.s, l.profile, side);
     return;
   }

@@ -53,7 +53,7 @@ function outlineOf(scene, leaf) {
   return [...front, ...back]; // along the front, back along the back
 }
 
-test("coil books closing from anywhere, pages still in the air: no sheet passes through another, frame by frame", async () => {
+test("coil books closing from anywhere, pages still in the air: no sheet passes through another, none sinks into the table, frame by frame", async () => {
   const box = document.createElement("div");
   box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 320px; height: 200px;";
   document.body.append(box);
@@ -75,12 +75,19 @@ test("coil books closing from anywhere, pages still in the air: no sheet passes 
             scene.clock += 120;
             scene.debugStep();
           }
+          // No page lower than the lowest lies at rest: a pile placed for the opening asked for
+          // before its pages moved dropped below the table (0.17.40, see layoutBook).
+          const lowest = () => Math.min(...scene.leaves.map((l) => Math.min(...l.profile.y.slice(1)) - scene.model.thickness[l.i] / 2));
+          const floor = lowest() - 0.05;
+          const where = (t) => `${binding}, ${pageCount} pages, from ${from}${flipTo != null ? ` flipping to ${flipTo}` : ""}, ${t} ms (closed ${scene.closed.toFixed(2)})`;
           scene.close();
           for (let t = 0; t < 3000 && bad.length < 8; t += 8) {
             scene.clock += 8;
             scene.debugStep();
             const pairs = crossingPairs(scene.leaves.map((l) => outlineOf(scene, l)));
-            if (pairs.length) bad.push(`${binding}, ${pageCount} pages, from ${from}${flipTo != null ? ` flipping to ${flipTo}` : ""}, ${t} ms (closed ${scene.closed.toFixed(2)}): ${pairs.slice(0, 3).map((q) => q.join("/")).join(" ")}`);
+            if (pairs.length) bad.push(`${where(t)}: ${pairs.slice(0, 3).map((q) => q.join("/")).join(" ")}`);
+            const low = lowest();
+            if (low < floor) bad.push(`${where(t)}: a page ${(floor + 0.05 - low).toFixed(2)} mm below the lowest at rest`);
           }
           ok(scene.isClosed && scene.closed === 1, `${binding} ${pageCount} from ${from}: closed at the end`);
         }
