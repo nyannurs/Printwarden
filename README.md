@@ -47,7 +47,7 @@ The first start downloads Electron, which is a few hundred MB. If you want to bu
 - **Imposed PDF export**: you can export an imposed PDF with creep compensation.
 - **Screenshots and videos**: you can render screenshots or a flipbook animation.
 - **Color**: CMYK is rendered with the PDF's output intent if it has one, otherwise with a CMYK profile from your computer.
-- **Your files are safe**: Printwarden only reads the PDF you open and only writes the files you save yourself. It won't overwrite the PDF you imported, it doesn't go online and it doesn't ask for any permissions.
+- **Your files are safe**: Printwarden only reads the PDF you open and only writes the files you save yourself. It won't overwrite the PDF you imported. It only goes online once at startup to check for a new update.
 
 ## Controls
 
