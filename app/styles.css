@@ -265,7 +265,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   justify-self: center;
   margin-top: 16px;
   color: var(--wire);
-  font: var(--weight-mono) var(--type) var(--font-mono);
+  font: var(--weight) var(--type) var(--font); /* as everything on the welcome screen: no Space Mono here */
   text-decoration: underline;
   text-underline-offset: 3px;
 }
