@@ -18,7 +18,7 @@ There's no installer. Printwarden keeps its settings, cache and logs in a folder
 
 ## Usage
 
-Download the zip for your system from the Releases page, unzip it into its own folder and run `Printwarden.exe` or `Printwarden.app`. The Mac version runs on both Apple Silicon and Intel.
+Download the zip for your system from the Releases page, unzip it into its own folder and run `Printwarden.exe`. Mac users should place `Printwarden.app` in the Applications folder before running. The Mac version runs on both Apple Silicon and Intel.
 
 I don't sign the builds, so Windows and macOS will complain the first time you open the app:
 
