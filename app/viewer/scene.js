@@ -250,6 +250,10 @@ export class BookScene {
     // How much the view is framed as one page (0 the spread … 1 a page), gliding on its own:
     // from one page to the other the aim crosses the spine, the framing stays a page's.
     this.pageFrame = 0;
+    // Of that page framing, how much is a cover's (all pages on one side, a coil book open at
+    // its cover: framed as the closed book, so closing it moves the camera no further) rather
+    // than a page asked for (never farther than the spread). Glides on its own too.
+    this.coverFrame = 0;
     this.focus = 0; // the page the camera centers on, open: -1 left, 0 the spread, 1 right (setFocus)
     this.closeAnim = null;
     this.lastRequest = 0;
@@ -360,6 +364,7 @@ export class BookScene {
     this.geometryDirty = true;
     this.coverShift = this.#shiftGoal();
     this.pageFrame = Math.abs(this.coverShift);
+    this.coverFrame = this.#coverSide() ? 1 : 0;
     this.#frameCamera();
   }
 
@@ -656,6 +661,7 @@ export class BookScene {
     if (!animate) {
       this.coverShift = this.#shiftGoal();
       this.pageFrame = Math.abs(this.coverShift);
+      this.coverFrame = this.#coverSide() ? 1 : 0;
       this.#frameCamera();
     }
     this.#updateHome();
@@ -1154,9 +1160,11 @@ export class BookScene {
     // So is the one page asked for (focus).
     const s = this.coverShift;
     const p = this.pageFrame;
-    // Never farther than the spread: in a wide view both fill its height, and a page framed
-    // with the closed book's room above and below drew back as it was asked for.
-    const openFit = lerp(spreadFit, Math.min(closedFit, spreadFit), p);
+    // A page asked for: never farther than the spread (in a wide view both fill its height, and
+    // a page framed with the closed book's room above and below drew back as it was asked for).
+    // At a cover: as the closed book, which it is about to be (a coil book closing from there
+    // stepped back as it tilted onto its coil, 0.17.24 to 0.17.38).
+    const openFit = lerp(spreadFit, lerp(Math.min(closedFit, spreadFit), closedFit, this.coverFrame), p);
     this.fitDistance = 1.08 * lerp(openFit, closedFit, c);
     const openY = lerp(w * 0.2, total / 2, p);
     this.target.set(lerp((s * w) / 2, (this.closedSide * w) / 2, c), ground + lerp(openY, total / 2, c), h * 0.03);
@@ -1408,11 +1416,13 @@ export class BookScene {
     // aim and its framing each on its own (a page to the other page: the framing stays).
     const coverGoal = this.#shiftGoal();
     const frameGoal = Math.abs(coverGoal);
-    if (this.coverShift !== coverGoal || this.pageFrame !== frameGoal) {
+    const coverFrameGoal = this.#coverSide() ? 1 : 0;
+    if (this.coverShift !== coverGoal || this.pageFrame !== frameGoal || this.coverFrame !== coverFrameGoal) {
       const dt = Math.min(0.05, (time - (this.lastFrameTime ?? time)) / 1000) || 1 / 60;
       const glide = (now, goal) => (Math.abs(goal - now) < 0.002 ? goal : now + (goal - now) * (1 - Math.exp(-dt / 0.2)));
       this.coverShift = glide(this.coverShift, coverGoal);
       this.pageFrame = glide(this.pageFrame, frameGoal);
+      this.coverFrame = glide(this.coverFrame, coverFrameGoal);
       this.#frameCamera();
       this.cameraChanged = true;
     }
