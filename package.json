@@ -1,0 +1,22 @@
+{
+  "name": "printwarden-dev",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Development checks only (lint, types). The app itself has no build step; the desktop shell is in _build/.",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "types": "tsc -p jsconfig.json && tsc -p jsconfig.workers.json",
+    "check": "eslint . && tsc -p jsconfig.json && tsc -p jsconfig.workers.json"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/three": "^0.170.0",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "mp4-muxer": "^5.2.2",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.3.289",
+    "typescript": "^7.0.2"
+  }
+}

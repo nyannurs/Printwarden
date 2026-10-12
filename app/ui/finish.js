@@ -1,0 +1,72 @@
+// Spot finish: a gloss varnish or a foil, from a PDF of its own (the finish's layer alone),
+// shown on the 3D pages.
+
+import { openPdf } from "../pdf/load.js";
+import { renderMany } from "../pdf/render.js";
+import { pickPdf } from "../platform.js";
+import { scene, state } from "./app.js";
+import { profileBytes } from "./colour.js";
+import { finishDialog } from "./dialogs.js";
+import { toast } from "./dom.js";
+
+const FINISH_KINDS = { gloss: 1, gold: 2, silver: 3, copper: 4 };
+const FINISH_HEIGHT = 1600; // px per page: masks are soft-edged shapes, not type
+
+/**
+ * A finish PDF (the varnish or foil layer on its own): its pages render as masks, in the
+ * same page geometry as the document's (spreads split alike), or onto the covers when it
+ * has one or two pages. Belongs to the document (reset on import).
+ */
+export async function importFinish(file = null) {
+  file ??= await pickPdf();
+  if (!file) return;
+  try {
+    const a = state.analysis;
+    const { pages } = await openPdf(file.bytes);
+    const n = a.book.pages.length;
+    let jobs;
+    if (pages.length === a.document.pages.length) {
+      jobs = a.book.pages
+        .map((p, k) => (p.source && a.geometry[k] ? { folio: k + 1, index: p.source.index, rectMm: a.geometry[k].trim } : null))
+        .filter(Boolean);
+    } else if (pages.length <= 2) {
+      const box = (i) => pages[i].trimBox ?? pages[i].mediaBox;
+      jobs = [{ folio: 1, index: 0, rectMm: box(0) }];
+      if (pages.length === 2) jobs.push({ folio: n, index: 1, rectMm: box(1) });
+    } else {
+      throw new Error(`it has ${pages.length} pages: it needs as many as the document (${a.document.pages.length}), or one or two for the covers`);
+    }
+    const profile = await profileBytes(state.colour, state.colour.choice);
+    const images = await renderMany(file.bytes, jobs.map((j) => ({ ...j, height: FINISH_HEIGHT })), profile);
+    for (const image of state.finish?.images.values() ?? []) image.close();
+    state.finish = { name: file.name, pages: pages.length, kind: state.finish?.kind ?? state.pendingFinishKind ?? "gloss", images: new Map(jobs.map((j, k) => [j.folio, images[k]])) };
+    applyFinish();
+  } catch (err) {
+    console.error(err);
+    toast(`Couldn't use ${file.name} as the finish: ${err.message}`, "error");
+  }
+}
+
+export function applyFinish() {
+  const f = state.finish;
+  scene.setFinish({ kind: f ? FINISH_KINDS[f.kind] : 0, images: f?.images ?? new Map() });
+}
+
+export function openFinishDialog() {
+  if (!state.analysis) return;
+  finishDialog({
+    info: () => ({ name: state.finish?.name ?? null, pages: state.finish?.pages ?? 0, kind: state.finish?.kind ?? state.pendingFinishKind ?? "gloss" }),
+    importPdf: () => importFinish(),
+    setKind: (kind) => {
+      if (state.finish) {
+        state.finish.kind = kind;
+        applyFinish();
+      } else state.pendingFinishKind = kind;
+    },
+    remove: () => {
+      for (const image of state.finish?.images.values() ?? []) image.close();
+      state.finish = null;
+      applyFinish();
+    },
+  });
+}

@@ -1,0 +1,26 @@
+# Personal test documents: never commit
+_testfiles/
+node_modules/
+dist/
+out/
+*_imposed.pdf
+_build/node_modules/
+_build/dist/
+_build/web/
+_build/dev-data/
+_build/dev-data-smoke/
+_build/dev-data-smoke-*/
+_build/ffmpeg/
+_build/ffmpeg-cache/
+_lab/
+_build/icons/
+# Rendered videos
+*.mov
+*.mp4
+_build/test-out/
+# The public repository's copy (tools/publish.py)
+_publish/
+# Files systems make by themselves
+.DS_Store
+Thumbs.db
+desktop.ini

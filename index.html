@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' data: blob:">
+  <title></title>
+  <link rel="stylesheet" href="app/theme.css">
+  <link rel="stylesheet" href="app/styles.css">
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/three-addons/" } }</script>
+</head>
+<body>
+  <div class="app" id="app" data-state="empty">
+    <header class="toolbar">
+      <button class="pill" id="import-btn" type="button">Import</button>
+      <button class="pill" id="export-btn" type="button" disabled>Export</button>
+      <div class="pill pill-label" id="doc-name"></div>
+      <div class="spacer"></div>
+      <div class="loadbar" id="loadbar" hidden><div class="loadbar-fill" id="loadbar-fill"></div></div>
+      <button class="pill" id="about-btn" type="button">About</button>
+    </header>
+
+    <main class="viewport" id="viewport">
+      <div class="empty" id="empty">
+        <div class="empty-card">
+          <div class="welcome-glyph" role="img" aria-label="Printwarden"></div>
+          <h1 id="welcome"></h1>
+          <div class="welcome-choices">
+            <div class="welcome-buttons">
+              <div class="empty-actions">
+                <button class="btn primary" id="empty-import" type="button">Import</button>
+                <button class="btn" id="sample-btn" type="button">Try out sample</button>
+              </div>
+              <div class="empty-actions">
+                <button class="btn" id="empty-about" type="button">About</button>
+                <button class="btn" id="quit-btn" type="button" hidden>Quit</button>
+              </div>
+            </div>
+            <p class="welcome-status">Opening…</p>
+          </div>
+        </div>
+      </div>
+      <div class="viewport-hud">
+        <div class="menu">
+          <button class="pill" id="view-btn" type="button" aria-haspopup="menu" aria-expanded="false">Camera</button>
+          <div class="menu-list" id="view-menu" role="menu" hidden></div>
+        </div>
+        <button class="pill" id="focus-btn" type="button">Left page</button>
+        <button class="pill" id="close-btn" type="button">Close</button>
+        <button class="pill" id="shot-btn" type="button">Screenshot</button>
+        <button class="pill" id="video-btn" type="button">Video</button>
+      </div>
+      <div class="zoom-hud" id="zoom-hud">
+        <output class="zoom-value" id="zoom-value" for="zoom-slider">100 %</output>
+        <div class="pill zoom-track" id="zoom-track" style="--w: 5">
+          <input class="zoom-slider" id="zoom-slider" type="range" min="0" step="1" aria-label="Zoom">
+        </div>
+      </div>
+      <div class="view-toggle" id="view-toggle"></div>
+      <output class="fps-hud" id="fps-hud"></output>
+      <div class="drop-overlay" id="drop-overlay">Drop PDF to import</div>
+    </main>
+
+    <aside class="inspector" id="inspector" aria-label="Settings and preflight"></aside>
+
+    <footer class="filmstrip" id="filmstrip" aria-label="Timeline"></footer>
+  </div>
+  <script type="module" src="app/ui/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "lib": [
+      "es2023",
+      "dom",
+      "dom.iterable"
+    ]
+  },
+  "include": [
+    "app/**/*.js",
+    "types/*.d.ts"
+  ],
+  "exclude": [
+    "app/**/*-worker.js",
+    "vendor"
+  ]
+}

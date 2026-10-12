@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Printwarden tests</title>
+  <style>
+    body { font: 13px/1.5 system-ui, sans-serif; margin: 24px; background: #fff; color: #222; }
+    h1 { font-size: 18px; }
+    .pass { color: #2a7a3a; }
+    .fail { color: #b3261e; font-weight: 600; }
+    pre { font-weight: 400; background: #fbeceb; padding: 6px 10px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="out">Running…</div>
+  <script type="importmap">{ "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/three-addons/" } }</script>
+  <script type="module">
+    import { run } from "./harness.js";
+    import "./core.test.js";
+    import "./v2.test.js";
+    import "./pdf.test.js";
+    import "./cull.test.js";
+    import "./geometry.test.js";
+    import "./vectortext.test.js";
+    import "./motion.test.js";
+    import "./scene.test.js";
+    run(document.getElementById("out"));
+  </script>
+</body>
+</html>

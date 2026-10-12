@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Printwarden's Windows icon: the glyph (icon.svg in the project folder) on a light tile
+       filling the square (Windows has no set icon shape; on its dark taskbar the bare glyph
+       would vanish). The macOS one, also the About window's, is icon.svg next to this file. -->
+  <defs>
+    <linearGradient id="pv-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e9e9ed"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="992" height="992" rx="190" fill="url(#pv-tile)" stroke="#000" stroke-opacity="0.12" stroke-width="10"/>
+  <g transform="translate(512 512) scale(0.730932) translate(-512 -512.5)">
+    <path fill="#1c1c1e" d="M514.723,744.869c-129.8,0-233.277-103.477-233.277-233.277s103.477-233.277,233.277-233.277,233.277,103.477,233.277,233.277-103.477,233.277-233.277,233.277ZM661.769,566.054l-86.231,81.692h-60.815v-136.154h147.046v54.462ZM514.723,792.977c181.538,0,313.154-125.262,469.277-281.385-156.123-156.123-287.738-279.569-469.277-279.569-183.354,0-316.785,123.446-474.723,279.569,157.938,156.123,291.369,281.385,474.723,281.385ZM367.677,457.131l86.231-81.692h60.815v136.154h-147.046v-54.462ZM514.723,647.746c75.338,0,136.154-60.815,136.154-136.154s-60.815-136.154-136.154-136.154-136.154,60.815-136.154,136.154,60.815,136.154,136.154,136.154ZM514.723,672.254c-88.046,0-160.662-72.615-160.662-160.662s72.615-160.662,160.662-160.662,160.662,72.615,160.662,160.662-72.615,160.662-160.662,160.662Z"/>
+  </g>
+</svg>

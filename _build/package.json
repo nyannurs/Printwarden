@@ -1,0 +1,18 @@
+{
+  "name": "printwarden-desktop",
+  "private": true,
+  "license": "Apache-2.0",
+  "version": "0.0.0",
+  "description": "Desktop shell. App name and version live in ../product.json.",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build": "node build.mjs",
+    "build:win": "node build.mjs win",
+    "build:mac": "node build.mjs mac"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  }
+}

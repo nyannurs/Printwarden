@@ -1,0 +1,35 @@
+# Builds the desktop app for Windows and macOS on GitHub's machines, so a Mac build
+# doesn't need a Mac. Run it from the repository's Actions tab ("Run workflow"); the
+# portable zips appear as downloadable artifacts on the run's page.
+name: Build desktop app
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: macos-latest
+            target: mac
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: _build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - run: npm ci
+      - run: node build.mjs ${{ matrix.target }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.target }}
+          path: _build/dist/*.zip
+          if-no-files-found: error

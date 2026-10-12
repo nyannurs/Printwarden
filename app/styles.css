@@ -1,0 +1,598 @@
+/* The look, built only from theme.css's values: dark with a white wireframe. Pills for every
+   button, dropdown and field; Space Grotesk Medium for type, Space Mono for labels and
+   readouts (the `mono` rules); square-cornered frames for the panel, timeline and dialogs. */
+
+* { box-sizing: border-box; scrollbar-width: none; } /* our own scrollbars instead (addScrollbar, dom.js) */
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--ink);
+  color: var(--wire);
+  font: var(--weight) var(--type)/1.4 var(--font);
+  overflow: hidden;
+}
+[hidden] { display: none !important; }
+h1, h2, h3, strong, b { font-weight: var(--weight); }
+
+/* Labels and readouts in the monospaced face. */
+.fps-hud, .zoom-value, .section h2, .badge, .dims .num span, .box-group-head strong,
+.cell, .strip-note, .finding .sev, .panel-section h3, .stack, .license-text, .report-text {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-mono);
+}
+
+/* The frame, on the grid (theme.css): the top row, the 3D view, the panel from the second
+   row down, the timeline under the view. The view takes what the whole squares leave. */
+.app {
+  position: relative; /* the panel's scrollbar is placed in it */
+  display: grid;
+  grid-template-columns: 1fr calc(var(--panel-cols) * var(--u));
+  grid-template-rows: calc(var(--bar-rows) * var(--u)) 1fr calc(var(--strip-rows) * var(--u));
+  grid-template-areas: "bar bar" "view side" "strip side";
+  height: 100vh;
+  background: var(--ink);
+}
+/* macOS's title bar covers the page's top row of pixels: the top row's pills lost their top
+   line there. The frame starts a line lower (the view gives up that line). */
+:root[data-os="darwin"] .app { padding-top: var(--stroke); }
+/* macOS rounds the window's lower corners (not in fullscreen): the timeline's and the panel's
+   outer lines follow them (--window-corner, platform.js). */
+:root[data-os="darwin"]:not([data-full-screen]) .filmstrip { border-bottom-left-radius: var(--window-corner); }
+:root[data-os="darwin"]:not([data-full-screen]) .inspector { border-bottom-right-radius: var(--window-corner); }
+
+/* ---------- top row ---------- */
+.toolbar { grid-area: bar; position: relative; display: flex; align-items: center; }
+.spacer { flex: 1; }
+.loadbar { position: absolute; left: 0; right: 0; bottom: 0; height: var(--stroke); }
+.loadbar-fill { height: 100%; width: 0; background: var(--wire); transition: width 0.2s; }
+
+/* ---------- pills ---------- */
+/* On the grid (.pill): a square tall, `--w` squares wide, flush against its neighbours.
+   Inside the panel and dialogs (.btn, dropdowns, fields): the same shape, --control tall.
+   Selected: inverted, with a black outline (unseen on black, the edge on a light backdrop).
+   Hovered: the other state, for a selected one; a lighter black otherwise. */
+.pill, .btn, select, input.unit-number {
+  --edge: var(--wire); /* the outline's color, also its extra weight's (--round-extra) */
+  margin: 0;
+  border: var(--stroke) solid var(--edge);
+  border-radius: 999px;
+  background-color: var(--ink);
+  box-shadow: inset var(--round-extra) 0 var(--edge), inset calc(-1 * var(--round-extra)) 0 var(--edge); /* the ends only: theme.css */
+  color: var(--wire);
+  font: var(--weight) var(--type) var(--font);
+  white-space: nowrap;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.pill {
+  --w: 2;
+  flex: none;
+  display: inline-block;
+  vertical-align: top;
+  width: calc(var(--w) * var(--u));
+  height: var(--u);
+  padding: 0 calc(var(--u) * 0.1);
+  font-size: var(--type-pill);
+  line-height: calc(var(--u) - 2 * var(--stroke));
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.btn {
+  display: inline-block;
+  height: var(--control);
+  padding: 0 calc(var(--control) * 0.55);
+  line-height: calc(var(--control) - 2 * var(--stroke));
+  text-align: center;
+  cursor: pointer;
+}
+/* Just pressed (.pressed, dom.js): its new state shows, not the hover, until the pointer leaves. */
+.pill:hover:not(:disabled, .pressed), .btn:hover:not(:disabled, .pressed), select:hover:not(:disabled, .pressed) { background-color: var(--ink-raised); }
+.pill.on, .pill[aria-checked="true"], .pill[aria-expanded="true"],
+.btn.primary, .btn[aria-pressed="true"] { background-color: var(--wire); color: var(--ink); }
+.pill.on:hover:not(.pressed), .pill[aria-checked="true"]:hover:not(.pressed), .pill[aria-expanded="true"]:hover:not(.pressed),
+.btn.primary:hover:not(:disabled, .pressed), .btn[aria-pressed="true"]:hover:not(.pressed) { background-color: var(--ink); color: var(--wire); }
+.pill:focus-visible, .btn:focus-visible, select:focus-visible { outline: var(--stroke) solid var(--wire); outline-offset: 2px; }
+.pill:disabled, .btn:disabled, select:disabled { --edge: var(--wire-muted); color: var(--wire-muted); cursor: default; }
+.btn.primary:disabled { background-color: var(--ink); } /* not white on white */
+/* A pill's outline is the color of what is round it, never its state's, so it never seems to
+   grow or shrink: white on the interface's black; over the 3D view, black or white with the
+   backdrop (--over, as the type there). States change fills and type only. */
+.viewport .pill:not(:disabled) { --edge: var(--over); transition: background-color 0.12s, color 0.12s, border-color 0.3s, box-shadow 0.3s; }
+.pill-label { cursor: default; }
+.pill-label:hover { background-color: var(--ink) !important; }
+.pill-label:empty { display: none; }
+.pill-row { display: flex; }
+/* Touching pills share one line: each overlaps the one before by a line's width, and pills
+   on the view's edges slide that far under the frame's line (the view clips them). */
+.toolbar > .pill + .pill, .pill-row > .pill + .pill { margin-left: calc(-1 * var(--stroke)); }
+.viewport-hud > * + *, .menu-list > .pill + .pill { margin-top: calc(-1 * var(--stroke)); }
+
+/* Dropdowns and number fields: pills inside panels and dialogs. */
+select, input.unit-number {
+  width: 100%;
+  min-width: 0;
+  height: var(--control);
+  padding: 0 calc(var(--control) * 0.45);
+}
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: calc(var(--control) * 0.45 + 14px);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  cursor: pointer;
+  /* the arrow, in the line's white */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='white' stroke-width='1.2'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right calc(var(--control) * 0.45) center;
+}
+select option { background: var(--ink); color: var(--wire); }
+input.unit-number:focus, select:focus { outline: none; }
+input.unit-number:focus { background-color: var(--ink-raised); } /* being typed in */
+/* A dropdown: raised while its list is open (dom.js), or reached with the keyboard; not once a
+   click has closed it. It keeps the focus then (for the keyboard), and the browser counts that
+   focus as the keyboard's (the app gives it): `data-pointer` marks it the pointer's until a key
+   is pressed. Like a pill, a clicked one isn't raised by the hover until the pointer leaves. */
+select.open, select:focus-visible:not([data-pointer]) { background-color: var(--ink-raised); }
+
+/* ---------- 3D view ---------- */
+/* Plain type over the view takes --over, black or white for the backdrop (view.js). */
+.viewport {
+  grid-area: view;
+  position: relative;
+  overflow: hidden;
+  background: #4d4e52;
+  --over: var(--wire);
+  /* The line under the top row: on the top row's lower edge, joining the panel's top line. */
+  margin-top: calc(-1 * var(--stroke));
+  border-top: var(--stroke) solid var(--wire);
+}
+.viewport canvas { display: block; touch-action: none; }
+/* Camera, Open/Close, Screenshot, Video: top right, stacked; the camera menu to its left. */
+.viewport-hud { position: absolute; top: calc(-1 * var(--stroke)); right: calc(-1 * var(--stroke)); display: flex; flex-direction: column; align-items: flex-end; }
+.menu { position: relative; }
+.menu-list { position: absolute; top: 0; right: calc(100% - var(--stroke)); display: flex; flex-direction: column; z-index: 5; }
+/* Reading order / Press sheets: bottom left (see filmstrip.js). */
+.view-toggle { position: absolute; left: 0; bottom: calc(-1 * var(--stroke)); }
+
+/* Zoom: a pill that is the slider, its 10 steps two notches a square (a thumb half a square
+   wide puts each step in the middle of its half square); the value beside it, plain type. */
+.zoom-hud { position: absolute; right: calc(-1 * var(--stroke)); bottom: calc(-1 * var(--stroke)); display: flex; align-items: center; --thumb: calc(var(--u) * 0.5); }
+.zoom-track { position: relative; padding: 0; cursor: default; }
+.zoom-track:hover { background-color: var(--ink) !important; }
+.zoom-tick {
+  position: absolute;
+  top: 50%;
+  width: var(--stroke);
+  height: calc(var(--u) * 0.2);
+  transform: translate(-50%, -50%);
+  background: var(--wire-muted);
+  pointer-events: none;
+}
+.zoom-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+}
+.zoom-slider::-webkit-slider-runnable-track {
+  height: var(--stroke);
+  background: linear-gradient(to right, var(--wire) var(--fill, 0%), var(--wire-muted) var(--fill, 0%));
+}
+.zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc((var(--stroke) - var(--thumb)) / 2);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--wire) 0 34%, transparent 36%);
+}
+.zoom-slider:focus-visible { outline: none; }
+.zoom-slider:focus-visible::-webkit-slider-thumb { background: radial-gradient(circle, var(--wire) 0 34%, var(--wire-faint) 36% 70%, transparent 72%); }
+.zoom-value { padding-right: calc(var(--u) * 0.25); font-size: var(--type-small); color: var(--over); transition: color 0.3s; }
+/* Frame counter (see showFrameStats in view.js). */
+.fps-hud {
+  position: absolute;
+  top: calc(var(--u) * 0.25);
+  left: calc(var(--u) * 0.25);
+  font-size: var(--type-small);
+  color: var(--over);
+  transition: color 0.3s;
+  white-space: pre;
+  pointer-events: none;
+}
+
+/* Before a document is open: the app's own black, not the chosen backdrop. */
+.empty { position: absolute; inset: 0; display: none; place-items: center; }
+.app[data-state="empty"] .viewport,
+.app[data-state="loading"] .viewport { background: var(--ink) !important; }
+.app[data-state="empty"] .viewport canvas,
+.app[data-state="loading"] .viewport canvas { visibility: hidden; }
+.app[data-state="empty"] .empty,
+.app[data-state="loading"] .empty { display: grid; }
+.app[data-state="empty"] :is(.viewport-hud, .zoom-hud, .fps-hud, .view-toggle),
+.app[data-state="loading"] :is(.viewport-hud, .zoom-hud, .fps-hud, .view-toggle) { display: none; }
+/* The welcome screen: the author's glyph in white, as wide as the pills under it; the name;
+   two rows of pills, all four alike. Nothing else of the frame (no top row, no outlines)
+   until a document is open. */
+.empty-card { display: grid; justify-items: stretch; width: max-content; text-align: center; padding: 28px; }
+.welcome-glyph {
+  aspect-ratio: 944 / 561; /* glyph.svg's frame */
+  margin-bottom: calc(var(--u) * 0.6);
+  background: var(--wire);
+  -webkit-mask: url("glyph.svg") center / contain no-repeat;
+  mask: url("glyph.svg") center / contain no-repeat;
+}
+.empty-card h1 { font-size: var(--type-large); margin: 0 0 24px; }
+.empty-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* While the first document opens, "Opening…" takes the buttons' place (nothing moves). */
+.welcome-choices { display: grid; }
+.welcome-choices > * { grid-area: 1 / 1; }
+.welcome-status {
+  margin: 0;
+  align-self: center;
+  visibility: hidden;
+  color: var(--wire-muted);
+  font: var(--weight-mono) var(--type) var(--font-mono);
+}
+.app[data-state="loading"] .welcome-buttons { visibility: hidden; }
+.app[data-state="loading"] .welcome-status { visibility: visible; }
+.empty-actions + .empty-actions { margin-top: 8px; }
+.empty-actions .btn { min-width: calc(var(--u) * 3); }
+.empty-actions:has(.btn[hidden]) { grid-template-columns: 1fr; } /* a browser: no Quit */
+.app:is([data-state="empty"], [data-state="loading"]) .toolbar { visibility: hidden; }
+/* Centered in the whole window, not the view's part of it: nothing else shows yet. */
+.app:is([data-state="empty"], [data-state="loading"]) .empty { position: fixed; inset: 0; z-index: 4; }
+.app:is([data-state="empty"], [data-state="loading"]) :is(.viewport, .filmstrip, .inspector) { border-color: transparent; }
+
+.drop-overlay {
+  position: absolute;
+  inset: calc(var(--u) * 0.25);
+  display: none;
+  place-items: center;
+  border: var(--stroke) dashed var(--wire);
+  border-radius: var(--window-radius);
+  background: rgba(0, 0, 0, 0.6);
+  font-size: var(--type-large);
+}
+.app.dragging .drop-overlay { display: grid; }
+/* Opening another document (one is showing): over the view. The first: on the welcome screen. */
+.app[data-state="reloading"] .viewport::after {
+  content: "Opening…";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- timeline ---------- */
+.filmstrip {
+  grid-area: strip;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--ink);
+  border: var(--stroke) solid var(--wire);
+  border-right: 0; /* the panel's line */
+}
+.strip-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--wire-muted); font-size: var(--type-small); }
+.strip-note:empty { display: none; }
+.strip {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.cell {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: var(--stroke) solid transparent;
+  border-radius: 7px; /* the thumbnail sits 5 px in: the curve clears its corners */
+  background: none;
+  color: var(--wire-muted);
+  font-size: var(--type-small);
+  line-height: 1.2;
+  cursor: pointer;
+}
+.cell:hover { border-color: var(--wire-muted); }
+.cell.active { border-color: var(--wire); color: var(--wire); }
+.cell:focus-visible { outline: var(--stroke) solid var(--wire); }
+/* As tall as the timeline allows under two caption lines (pages, and a press sheet's side). */
+.cell .pages { display: flex; height: calc(var(--strip-rows) * var(--u) - 2.4 * var(--type-small) - 1.5 * var(--scrollbar) - 26px); }
+.cell .page { height: 100%; background: #fff; position: relative; overflow: hidden; }
+.cell .page + .page { border-left: 1px solid rgba(0, 0, 0, 0.2); }
+.cell .page canvas { width: 100%; height: 100%; display: block; }
+.cell .page.blank { background: repeating-linear-gradient(135deg, #fff 0 5px, #e6e4df 5px 6px); }
+.cell.flagged .pages { outline: 2px solid var(--error); outline-offset: 2px; }
+
+/* ---------- info panel ---------- */
+.inspector {
+  grid-area: side;
+  margin-top: calc(-1 * var(--stroke)); /* its top line is About's lower edge */
+  overflow-y: auto;
+  background: var(--ink);
+  border: var(--stroke) solid var(--wire);
+}
+.section { padding: 14px 16px; border-bottom: var(--stroke) solid var(--wire); }
+.section h2 {
+  margin: 0 0 10px;
+  font-size: var(--type-small);
+  text-transform: uppercase;
+  color: var(--wire-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.section h2 .badge { text-transform: none; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
+.facts dt { color: var(--wire-muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+/* The interface's own words (labels, headings, captions) can't be selected: only what is about
+   the document is, its details and Preflight's notes, to copy. Fields are typed in as ever. */
+.app { user-select: none; }
+.facts dd, .finding p { user-select: text; }
+
+.field { display: grid; grid-template-columns: minmax(6.5em, auto) 1fr; align-items: center; gap: 10px; margin-bottom: 7px; }
+.field > label { color: var(--wire-muted); }
+.field.wide { grid-template-columns: 1fr; gap: 5px; }
+.dims { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-bottom: 10px; }
+.dims .num { display: flex; flex-direction: column; gap: 2px; }
+.dims .num span { font-size: var(--type-small); color: var(--wire-muted); }
+.box-group { margin-bottom: 10px; }
+.box-group-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+.box-group-head strong { font-size: var(--type-small); text-transform: uppercase; color: var(--wire-muted); }
+.mode-note { color: var(--wire-muted); margin: 0 0 10px; }
+.mode-note button { margin-left: 4px; }
+
+/* Color swatches: circles; the chosen one ringed. */
+/* As tall as the pills; in the panel spread across the field column, so the first and last
+   line up with the pills below (in dialogs, side by side). */
+.swatches { display: flex; align-items: center; gap: 8px; }
+.field .swatches { justify-content: space-between; gap: 4px; }
+.swatch {
+  flex: none;
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+  border-radius: 50%;
+  border: var(--stroke) solid rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 var(--stroke) var(--wire-muted); /* dark colours stand out from the panel */
+  cursor: pointer;
+}
+.swatch[aria-pressed="true"] { outline: var(--stroke) solid var(--wire); outline-offset: 3px; }
+/* A swatch whose colour isn't known yet (sampled from a cover that is still rendering). */
+.swatch.pending { background: repeating-linear-gradient(45deg, #444 0 3px, #222 3px 6px); }
+/* The custom colour: a swatch in a rainbow ring (it opens a picker). */
+.custom-swatch {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  width: var(--control);
+  height: var(--control);
+  padding: 3px;
+  border: none;
+  border-radius: 50%;
+  background: conic-gradient(#ff4d4d, #ffcf3d, #54e36a, #3dd8ff, #5b6bff, #e05bff, #ff4d4d);
+  cursor: pointer;
+}
+.custom-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.custom-swatch::-webkit-color-swatch { border: 1px solid rgba(0, 0, 0, 0.45); border-radius: 50%; }
+.custom-swatch.chosen, .custom-swatch:focus-visible { outline: var(--stroke) solid var(--wire); outline-offset: 3px; }
+
+/* Preflight: outlined, the severity in its color. */
+.findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.finding { padding: 10px 12px; border: var(--stroke) solid var(--wire-muted); border-radius: calc(var(--window-radius) / 2); }
+.finding.error { border-color: var(--error); }
+.finding.warning { border-color: var(--warning); }
+.finding .sev { font-size: var(--type-small); text-transform: uppercase; }
+.finding.error .sev { color: var(--error); }
+.finding.warning .sev { color: var(--warning); }
+.finding.info .sev { color: var(--info); }
+.finding p { margin: 3px 0 0; }
+.finding .fix, .finding .goto { margin-top: 8px; }
+.muted { color: var(--wire-muted); }
+
+/* ---------- dialogs ---------- */
+.dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  color: var(--wire);
+  background: var(--ink);
+  border: var(--stroke) solid var(--wire);
+  border-radius: var(--window-radius);
+}
+.dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.dialog h2 { margin: 0; padding: 20px 24px 0; font-size: var(--type-large); }
+.dialog-body { padding: 14px 24px 22px; display: flex; flex-direction: column; gap: 12px; }
+.dialog .row { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 10px; }
+.dialog .row > label { color: var(--wire-muted); }
+.file-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.choices { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.choices legend { color: var(--wire-muted); padding: 0; margin-bottom: 6px; }
+.choice { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.choice input { margin: 3px 0 0; accent-color: var(--wire); }
+.choice-text { display: flex; flex-direction: column; gap: 1px; }
+.hint { color: var(--wire-muted); }
+.sub-options { display: flex; flex-direction: column; gap: 8px; padding-left: 24px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-left: 160px; }
+.stack { display: flex; flex-direction: column; gap: 2px; font-size: var(--type-small); color: var(--wire-muted); }
+.dialog-summary { margin: 0; }
+.dialog-note { margin: 0; color: var(--wire-muted); }
+.dialog-note:empty { display: none; }
+.dialog-errors { margin: 0; padding-left: 18px; color: var(--error); }
+.dialog-errors:empty { display: none; }
+.dialog-errors-line { margin: 0; color: var(--error); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+/* A dialog that doesn't block the window (the book spine panel): dragged by its title. */
+.dialog.floating { position: fixed; margin: 0; z-index: 30; width: min(460px, calc(100vw - 32px)); }
+.dialog.floating h2 { cursor: move; user-select: none; padding-bottom: 4px; }
+.panel-section { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: var(--stroke) solid var(--wire); }
+.panel-section:first-child { border-top: 0; padding-top: 0; }
+.panel-section h3 { margin: 0; font-size: var(--type-small); text-transform: uppercase; color: var(--wire-muted); }
+.panel-section input.unit-number { width: 110px; }
+.spine-artboard { color: var(--wire); }
+.spine-file { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spine-actions { justify-content: flex-start; margin-top: 0; }
+
+/* About: like macOS's About windows. */
+.dialog.about { width: 340px; padding: 28px 24px 18px; text-align: center; }
+.about-icon { width: 128px; height: 128px; margin: 0 auto 14px; display: block; }
+.about-name { margin: 0 0 8px; font-size: var(--type-large); }
+.about-line { margin: 0 0 4px; color: var(--wire-muted); }
+.about-actions { justify-content: center; margin-top: 16px; }
+.licenses { width: min(640px, calc(100vw - 32px)); }
+.license-list { max-height: min(60vh, 560px); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.license { position: relative; } /* a license text's scrollbar moves with it as the list scrolls */
+.license summary { cursor: pointer; padding: 4px 0; color: var(--wire-muted); }
+.license summary strong { color: var(--wire); }
+.report-text { max-height: min(60vh, 560px); user-select: text; }
+
+/* ---------- dropdowns' open lists (dom.js) ---------- */
+/* Rounded and outlined like the windows; items as the pills: chosen inverted, the one under the
+   pointer or keyboard a lighter black, the chosen one under it the other way. */
+/* The room round the items is the list's own padding, and the popup clips the list to its
+   round inside: items scrolled away pass under the outline, never past it, also the first
+   and last, which scroll fully clear of the edge. */
+.select-popup {
+  position: fixed;
+  z-index: 50;
+  overflow: hidden;
+  background: var(--ink);
+  border: var(--stroke) solid var(--wire);
+  border-radius: calc(var(--control) / 2 + 4px);
+}
+.select-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 4px; scroll-padding-block: 4px; }
+/* With a scrollbar, the items end well short of it (half its width plus 3 px in, see dom.js);
+   without one, they run the list's full width. */
+.select-list.scrolls-y { padding-right: 4px; }
+.select-list.overflows-y { padding-right: calc(var(--scrollbar) * 2.1 + 4px); }
+.select-item {
+  flex: none;
+  height: var(--control);
+  padding: 0 calc(var(--control) * 0.45);
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--wire);
+  font: var(--weight) var(--type) var(--font);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.select-item.active { background: var(--ink-raised); }
+.select-item[aria-selected="true"] { background: var(--wire); color: var(--ink); }
+.select-item[aria-selected="true"].active { background: var(--ink); color: var(--wire); box-shadow: inset 0 0 0 var(--stroke) var(--wire), inset calc(var(--stroke) + var(--round-extra)) 0 var(--wire), inset calc(-1 * (var(--stroke) + var(--round-extra))) 0 var(--wire); }
+.select-item:disabled { color: var(--wire-muted); cursor: default; }
+.select-item:focus-visible { outline: none; }
+
+/* ---------- scrollbars ---------- */
+/* An outlined pill along the scroller's edge, a circle for its head (addScrollbar, dom.js),
+   inside the pill with a little room all round, also at either end. Hovered or dragged, the
+   head turns black, ringed. */
+.scrollbar {
+  --gap: round(calc(var(--scrollbar) * 0.15), 1px); /* whole pixels: the same room on both sides */
+  position: absolute;
+  z-index: 6;
+  border: var(--stroke) solid var(--wire);
+  border-radius: 999px;
+  background: var(--ink);
+  touch-action: none;
+}
+.scrollbar.vertical { width: var(--scrollbar); box-shadow: inset 0 var(--round-extra) var(--wire), inset 0 calc(-1 * var(--round-extra)) var(--wire); }
+.scrollbar.horizontal { height: var(--scrollbar); box-shadow: inset var(--round-extra) 0 var(--wire), inset calc(-1 * var(--round-extra)) 0 var(--wire); }
+.scrollbar-head {
+  position: absolute;
+  top: var(--gap);
+  left: var(--gap);
+  width: calc(var(--scrollbar) - 2 * var(--stroke) - 2 * var(--gap));
+  height: calc(var(--scrollbar) - 2 * var(--stroke) - 2 * var(--gap));
+  border-radius: 50%;
+  background: var(--wire);
+  box-shadow: inset 0 0 0 calc(var(--stroke) + var(--round-extra)) var(--wire);
+  cursor: grab;
+  transition: background-color 0.12s;
+}
+.scrollbar-head:hover, .scrollbar.dragging .scrollbar-head { background: var(--ink); }
+.scrollbar.dragging .scrollbar-head { cursor: grabbing; }
+/* Room for it beside what scrolls. */
+.scrolls-y { padding-right: calc(var(--scrollbar) * 2); }
+.inspector.scrolls-y { padding-right: 0; }
+.inspector.scrolls-y .section { padding-right: calc(var(--scrollbar) * 2 + 6px); }
+.strip.scrolls-x { padding-bottom: calc(var(--scrollbar) * 1.5); }
+.license-text {
+  margin: 4px 0 10px;
+  padding: 10px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: var(--type-small);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  border: var(--stroke) solid var(--wire-muted);
+  border-radius: calc(var(--window-radius) / 2);
+}
+
+/* ---------- progress window ---------- */
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 20;
+}
+.busy-box {
+  width: calc(var(--u) * 5);
+  height: calc(var(--u) * 5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+  background: var(--ink);
+  border: var(--stroke) solid var(--wire);
+  border-radius: var(--window-radius);
+  padding: 24px;
+}
+.busy-title { margin: 0; }
+.busy-bar { width: 100%; height: var(--stroke); background: var(--wire-muted); overflow: hidden; }
+.busy-bar > div { width: 0; height: 100%; background: var(--wire); }
+.busy-percent { margin: 0; color: var(--wire-muted); font-family: var(--font-mono); font-weight: var(--weight-mono); font-size: var(--type-small); }
+
+/* ---------- messages ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--u) + 8px);
+  transform: translate(-50%, -8px);
+  max-width: min(560px, calc(100vw - 32px));
+  background: var(--ink);
+  border: var(--stroke) solid var(--error);
+  border-radius: var(--window-radius);
+  padding: 9px 18px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 10;
+}
+.toast[data-kind="ok"], .toast[data-kind="info"] { border-color: var(--wire); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }

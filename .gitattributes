@@ -1,0 +1,8 @@
+# Mac scripts must keep Unix line endings (bash fails on Windows ones); Windows scripts
+# keep theirs. The colour profile is binary: never touch it.
+*.command text eol=lf
+*.sh      text eol=lf
+*.bat     text eol=crlf
+*.icc     binary
+_build/ffmpeg-lgpl/*/ffmpeg     binary
+_build/ffmpeg-lgpl/*/ffmpeg.exe binary

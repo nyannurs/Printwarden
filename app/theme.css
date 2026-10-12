@@ -1,0 +1,81 @@
+/*
+ * The design settings: everything the look is built from, in one place. styles.css only
+ * ever uses these. To change the typeface, change --font (and add its @font-face below).
+ *
+ * Dark, with a white wireframe: black surfaces, white hairlines, white type, pills with a
+ * black fill and a white outline. The 3D view keeps the backdrop color the user chooses.
+ *
+ * The grid: the window is 38 squares across (32 for the 3D view, 6 for the panel). A square
+ * is sized from the window's width; the 3D view takes whatever height is left over, so the
+ * panel, the timeline and every button are whole squares, and the view's lower edge needn't
+ * be. Kept between 32 and 64 px (a window 1280 to 2432 px wide); wider still, the 3D view
+ * takes the extra width too.
+ *
+ * Type: Space Grotesk, Medium, for everything; its monospaced sibling Space Mono, Regular,
+ * for plain type over the view (frame counter, zoom value) and the miniature labels (section
+ * heads, badges, field captions, timeline captions). Both SIL Open Font License, in
+ * vendor/fonts with their licenses. Three sizes: --type, --type-small, --type-large.
+ */
+
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("../vendor/fonts/SpaceGrotesk-Variable.woff2") format("woff2");
+  font-weight: 300 700;
+  font-display: block;
+}
+@font-face {
+  font-family: "Space Mono";
+  src: url("../vendor/fonts/SpaceMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+
+:root {
+  /* Grid */
+  --cols: 38;
+  --u: clamp(32px, calc(100vw / var(--cols)), 64px); /* one square */
+  --panel-cols: 6; /* the info panel, squares wide (5 in the first sketch: too narrow for its fields) */
+  --strip-rows: 3; /* the timeline, squares tall */
+  --bar-rows: 1; /* the top row, squares tall */
+
+  /* Type: sizes are shares of a square, never smaller than readable (the same from 1600 px
+     wide up; pills on the grid scale all the way, so their labels always fit: "Reading order"
+     takes 93 % of a 2-square pill) */
+  --font: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
+  --type: max(11px, calc(var(--u) * 0.24));
+  --type-small: max(9.5px, calc(var(--u) * 0.2));
+  --type-large: max(15px, calc(var(--u) * 0.38));
+  --type-pill: calc(var(--u) * 0.24);
+  --weight: 500;
+  --weight-mono: 400;
+
+  /* Color */
+  --ink: #000; /* surfaces, pill fills */
+  --wire: #fff; /* lines, type */
+  --wire-muted: rgba(255, 255, 255, 0.62); /* secondary type */
+  --wire-faint: rgba(255, 255, 255, 0.14); /* selected, hovered fills */
+  --ink-raised: #262626; /* a pill hovered: opaque, it sits over the backdrop */
+  --error: #ff6b5e; /* status colors keep their meaning */
+  --warning: #f2b544;
+  --info: #3a7bff; /* the highlight, a signal blue: Preflight's INFO (5.4:1 on black; 0/0/255 was 2.4:1) */
+
+  /* Lines and shapes */
+  --stroke: 1px;
+  /* The round ends of pills and scrollbars on standard-density screens: up to three quarters
+     of a pixel more, drawn inside, full at the tip and none where the end meets the straight
+     edges (an inset shadow moved sideways). A 1 px curve smooths out into two dim gray pixels where a
+     straight line is one white one, so the ends looked thin and stepped. The straight edges
+     stay 1 px like every other line, also where pills share one. On HiDPI screens a pixel is
+     two or more, and the 1 px curve is smooth as it is. */
+  --round-extra: 0px;
+  --control: max(26px, calc(var(--u) * 0.6)); /* pills inside the panel and dialogs, height */
+  --window-radius: calc(var(--u) / 2); /* dialogs, the progress window, messages: a pill's rounding */
+  /* a scrollbar's width: whole pixels, so its head (styles.css) sits exactly in the middle */
+  --scrollbar: round(max(8px, calc(var(--u) / 4)), 1px);
+
+  color-scheme: dark;
+}
+@media (max-resolution: 1.5dppx) {
+  :root { --round-extra: 0.75px; }
+}

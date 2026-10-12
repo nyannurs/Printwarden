@@ -1,0 +1,11 @@
+FFmpeg (https://ffmpeg.org) writes the transparent videos (ProRes 4444). It runs as a
+program of its own, shipped in the app's "ffmpeg" folder (Windows: resources\ffmpeg next
+to Printwarden.exe; macOS: Printwarden.app/Contents/Resources/ffmpeg). Next to it are its
+license (LICENSE.txt) and NOTICE.txt: which FFmpeg it is, how it was built, and where its
+source code is.
+
+It is FFmpeg 9.0.2, unmodified, built from the official source with only what Printwarden
+uses (raw frames in, the scaler, the ProRes encoder, the MOV container) and no other
+library: licensed under the GNU Lesser General Public License 2.1 or later. Printwarden
+starts it with fixed arguments and passes it frames; it is not linked into Printwarden,
+and it can be replaced with any other build of FFmpeg.

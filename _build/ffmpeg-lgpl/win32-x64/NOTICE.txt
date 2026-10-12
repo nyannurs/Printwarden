@@ -1,0 +1,11 @@
+FFmpeg 9.0.2, built for Printwarden (win32-x64), from the official source release:
+  https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+  SHA-256 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+Unmodified. License: GNU Lesser General Public License 2.1 or later (LICENSE.txt);
+nothing under the GPL is built in, and no other library.
+Built with tools/build-ffmpeg.sh from the Printwarden source; configured with:
+  "--disable-everything --disable-autodetect --disable-network --disable-doc --disable-debug --disable-ffplay --disable-ffprobe --disable-avdevice --disable-swresample --enable-protocol='file,pipe' --enable-demuxer=rawvideo --enable-decoder=rawvideo --enable-encoder=prores_aw --enable-muxer=mov --enable-filter=scale --pkg-config=false --target-os=mingw32 --arch=x86_64 --extra-ldflags=-static"
+
+Printwarden uses it to write ProRes 4444 videos: it starts it with fixed arguments and
+passes it frames; it is not linked into Printwarden. You may replace it with your own
+build of FFmpeg (keep the name and place).
