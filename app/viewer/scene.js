@@ -28,6 +28,11 @@ const TURN_MS = 720;
 const FAST_TURN_MS = 360; // for requests in quick succession (rapid clicks, scrubbing)
 const CLOSE_MS = 900;
 const FAST_SCRUB_MS = 160; // requests closer than this count as quick succession
+// A coil book closing from a spread: its closing (the ring turning round the spine, the book
+// settling onto it) starts this share of the pages' turn before they land, so pages and book
+// move as one; begun only after they landed, the book stopped, then buckled. (Its sheets never
+// meet, however much the two overlap: tests/scene.test.js, frame by frame.)
+const CLOSE_OVERLAP = 0.5;
 const SETTLE_MS = 120; // quiet time before the view counts as settled
 // After pages turned: longer, so pages only flipped past aren't sharpened (rendered from the
 // PDF and sent to the GPU, four times the pixels on a Retina screen) as the next click comes.
@@ -780,18 +785,20 @@ export class BookScene {
   }
 
   /**
-   * Close the book: from a spread, turn back to the front cover first (the pages turn, then
-   * it closes), so it closes on the first page.
+   * Close the book: from a spread, turn back to the front cover first (the pages turn back and
+   * it closes as they do), so it closes on the first page.
    */
   close() {
     if (!this.model || this.isClosed) return;
     this.goTo(0); // glued, sewn and stitched books close by themselves at the cover
     if (this.model.style.spine !== "coil") return;
-    // A coil book closes as its cover turns, one move; with pages in the air too, once they
-    // have landed (closing under a pile still in the air pressed its sheets into each other).
+    // A coil book closes as its pages turn back, one move: the closing starts while they are
+    // still coming down (CLOSE_OVERLAP) and ends a little after they land.
     const now = this.#now();
     const pages = this.leaves.filter((l) => l.i > 0 && l.start != null);
-    this.setClosed(true, { delay: pages.length ? Math.max(0, ...pages.map((l) => l.start + l.duration - now)) : 0 });
+    const lands = pages.length ? Math.max(...pages.map((l) => l.start + l.duration)) : now;
+    const last = pages.length ? Math.max(...pages.map((l) => l.duration)) : 0;
+    this.setClosed(true, { delay: Math.max(0, lands - now - CLOSE_OVERLAP * last) });
   }
 
   /** Open a closed book, or one flipped all the way to a cover, at its first or last spread. */
