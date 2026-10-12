@@ -11,10 +11,11 @@ import { coverMmFor, hasSpine, paperForSpine } from "../core/spine.js";
 import { openForRendering, openPdf, writeImposed } from "../pdf/load.js";
 import { createRenderer, prepareSpareWorkers } from "../pdf/render.js";
 import { makeSamplePdf } from "../pdf/sample.js";
-import { APP_NAME, APP_VERSION, canQuit, onMenuCommand, quit, savePdf } from "../platform.js";
+import { APP_NAME, APP_VERSION, canQuit, latestRelease, onMenuCommand, openReleases, quit, savePdf } from "../platform.js";
 import { BookScene } from "../viewer/scene.js";
 import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js";
 import { colourOptions, profileBytes, setColourProfile } from "./colour.js";
+import { makeCompass } from "./compass.js";
 import { aboutDialog, exportDialog, importDialog } from "./dialogs.js";
 import { $, addScrollbar, fitPill, showLoad, toast } from "./dom.js";
 import { Filmstrip } from "./filmstrip.js";
@@ -47,6 +48,8 @@ export const state = {
   exportOptions: null, // remembered between exports
 };
 
+const updateCompass = makeCompass($("compass"));
+
 export const scene = new BookScene($("viewport"), {
   onTurnRequest: (delta) => scene.goTo(scene.opening + delta),
   onOpenRequest: () => scene.open(),
@@ -55,6 +58,7 @@ export const scene = new BookScene($("viewport"), {
   // Moving: what was being sharpened for the view that was is no longer wanted.
   onViewMoving: () => state.renderer?.cancel(isSharp),
   onZoom: (percent) => showZoom(percent),
+  onCamera: (camera) => updateCompass(camera),
 });
 
 export const filmstrip = new Filmstrip($("filmstrip"), {
@@ -275,6 +279,15 @@ $("welcome").textContent = `Welcome to ${APP_NAME}`;
 $("empty-about").addEventListener("click", () => aboutDialog({ name: APP_NAME, version: APP_VERSION }));
 $("quit-btn").hidden = !canQuit;
 $("quit-btn").addEventListener("click", quit);
+// A newer release on GitHub: "Update available" under the welcome's buttons, opening the
+// releases page (the check: once a start, see platform.js).
+$("update-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  openReleases();
+});
+latestRelease().then((latest) => {
+  if (latest?.newer) $("update-link").hidden = false;
+});
 $("focus-btn").addEventListener("click", () => scene.setFocus(NEXT_FOCUS.get(scene.focus)));
 $("close-btn").addEventListener("click", () => {
   if (scene.isClosed || scene.atCover) scene.open();

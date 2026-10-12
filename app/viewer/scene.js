@@ -75,7 +75,8 @@ export class BookScene {
    * @param {HTMLElement} container
    * @param {{onTurnRequest?: (delta: number) => void, onOpenRequest?: () => void,
    *          onChange?: () => void, onViewSettled?: () => void, onViewMoving?: () => void,
-   *          onZoom?: (percent: number) => void}} callbacks
+   *          onZoom?: (percent: number) => void, onCamera?: (camera: THREE.PerspectiveCamera) => void}} callbacks
+   *   onCamera: after the camera is placed for a frame drawn (the compass)
    */
   constructor(container, callbacks = {}) {
     this.container = container;
@@ -1223,6 +1224,7 @@ export class BookScene {
     this.idleFrames = 0;
     this.dirty = false;
     this.#placeCamera();
+    this.callbacks.onCamera?.(this.camera);
     shadows(this);
     drawOrder(this);
     const low = inMotion && this.motion.scale < 1 && this.clock == null;

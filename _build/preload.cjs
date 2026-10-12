@@ -22,5 +22,7 @@ contextBridge.exposeInMainWorld("desktop", {
   osVersion: process.getSystemVersion(), // macOS 26 rounds windows more (platform.js)
   onFullScreen: (handler) => ipcRenderer.on("full-screen", (_event, on) => handler(on)),
   memory: process.getSystemMemoryInfo().total * 1024, // bytes of RAM: how many render threads fit
-  quit: () => ipcRenderer.invoke("quit"), // the welcome screen's Quit (on macOS closing the window wouldn't)
+  quit: () => ipcRenderer.invoke("quit"),
+  latestRelease: () => ipcRenderer.invoke("latest-release"), // see "updates" in main.cjs
+  openReleases: () => ipcRenderer.invoke("open-releases"), // the welcome screen's Quit (on macOS closing the window wouldn't)
 });

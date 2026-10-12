@@ -2,7 +2,7 @@
 // so ES modules and the PDF worker load exactly as in a browser, and exposes native
 // open/save dialogs through preload.cjs. The app itself knows nothing about Electron.
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, screen } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, screen, session, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -135,6 +135,51 @@ ipcMain.handle("open-pdf", async (event) => {
 });
 
 ipcMain.handle("quit", () => app.quit());
+
+// --- updates -------------------------------------------------------------------------
+//
+// The app's only request to the internet: once a start, GitHub's answer to "the latest
+// release of this repository" (its tag, e.g. v0.17.37), compared with this version number by
+// number. Made here, not by the page (whose every request outside the app is refused, see
+// lockDown), in a session of its own kept in memory (nothing written to disk), with nothing
+// sent but the request itself. Offline or anything unexpected: no answer, no notice.
+const RELEASES = `https://github.com/${product.repository}/releases`;
+let latest = null;
+
+/** [major, minor, patch] of "v1.2.3" or "1.2.3", or null. */
+const versionOf = (tag) => {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(tag ?? "").trim());
+  return m ? m.slice(1).map(Number) : null;
+};
+const isNewer = (a, b) => {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
+};
+
+ipcMain.handle("latest-release", () => {
+  latest ??= (async () => {
+    // Development: BOOKVIEW_LATEST=<tag> stands in for GitHub's answer; the smoke tests ask
+    // nothing, unless BOOKVIEW_SMOKE_NETWORK is set (to try the request itself).
+    let tag = !app.isPackaged ? process.env.BOOKVIEW_LATEST : undefined;
+    if (tag === undefined && !app.isPackaged && process.env.BOOKVIEW_SMOKE && !process.env.BOOKVIEW_SMOKE_NETWORK) return null;
+    if (tag === undefined) {
+      const ses = session.fromPartition("updates", { cache: false });
+      const response = await ses.fetch(`https://api.github.com/repos/${product.repository}/releases/latest`, {
+        headers: { Accept: "application/vnd.github+json", "User-Agent": product.name },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) return null;
+      tag = (await response.json())?.tag_name;
+    }
+    const found = versionOf(tag);
+    const own = versionOf(product.version);
+    return found && own ? { tag: String(tag), newer: isNewer(found, own) } : null;
+  })().catch(() => null);
+  return latest;
+});
+
+// Only ever this one page, in the system's browser.
+ipcMain.handle("open-releases", () => shell.openExternal(RELEASES));
 
 ipcMain.handle("remember-source", (_event, file) => {
   if (file) rememberSource(file);
@@ -523,7 +568,6 @@ function buildMenu() {
  * downloads. Everything else is refused here, whatever the page asks for.
  */
 function lockDown() {
-  const { session } = require("electron");
   const ses = session.defaultSession;
   // Only the app's own files (app://), and data it makes in memory (blob:, data:).
   ses.webRequest.onBeforeRequest((details, callback) => {

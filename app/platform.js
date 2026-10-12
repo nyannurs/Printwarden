@@ -105,6 +105,21 @@ export async function readProfile(path) {
   return bytes ? new Uint8Array(bytes) : null; // (never an empty profile)
 }
 
+/**
+ * The newest release on GitHub, asked once a start (desktop only; a browser asks nothing):
+ * {tag, newer} with `newer` if it is a later version than this one, or null if it couldn't
+ * be asked (offline, say). The shell asks GitHub for the latest release, nothing else.
+ */
+export async function latestRelease() {
+  return desktop?.latestRelease ? desktop.latestRelease().catch(() => null) : null;
+}
+
+/** Open the releases page in the browser (desktop; in a browser, a new tab). */
+export function openReleases() {
+  if (desktop?.openReleases) desktop.openReleases();
+  else window.open(`https://github.com/${product.repository}/releases`, "_blank", "noopener");
+}
+
 /** Menu commands from the desktop shell (File > Import…, File > Export…). */
 export function onMenuCommand(handler) {
   desktop?.onMenu(handler);

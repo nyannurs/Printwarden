@@ -157,6 +157,24 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 
 /* Zoom: a pill that is the slider, its 10 steps two notches a square (a thumb half a square
    wide puts each step in the middle of its half square); the value beside it, plain type. */
+/* The compass (compass.js): a round pill a square wide, on the zoom's top line, flush with the
+   view's right edge as the pills there are; its outline the colour over the view. */
+.compass {
+  position: absolute;
+  right: calc(-1 * var(--stroke));
+  bottom: calc(var(--u) - 2 * var(--stroke));
+  width: var(--u);
+  height: var(--u);
+  border: var(--stroke) solid var(--over);
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: inset var(--round-extra) 0 var(--over), inset calc(-1 * var(--round-extra)) 0 var(--over); /* see theme.css */
+  pointer-events: none;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.compass svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.compass line { stroke: var(--wire); stroke-width: 0.045; stroke-linecap: round; }
+.compass text { fill: var(--wire); font: var(--weight-mono) 0.3px var(--font-mono); }
 .zoom-hud { position: absolute; right: calc(-1 * var(--stroke)); bottom: calc(-1 * var(--stroke)); display: flex; align-items: center; --thumb: calc(var(--u) * 0.5); }
 .zoom-track { position: relative; padding: 0; cursor: default; }
 .zoom-track:hover { background-color: var(--ink) !important; }
@@ -215,8 +233,8 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .app[data-state="loading"] .viewport canvas { visibility: hidden; }
 .app[data-state="empty"] .empty,
 .app[data-state="loading"] .empty { display: grid; }
-.app[data-state="empty"] :is(.viewport-hud, .zoom-hud, .fps-hud, .view-toggle),
-.app[data-state="loading"] :is(.viewport-hud, .zoom-hud, .fps-hud, .view-toggle) { display: none; }
+.app[data-state="empty"] :is(.viewport-hud, .zoom-hud, .fps-hud, .view-toggle, .compass),
+.app[data-state="loading"] :is(.viewport-hud, .zoom-hud, .fps-hud, .view-toggle, .compass) { display: none; }
 /* The welcome screen: the author's glyph in white, as wide as the pills under it; the name;
    two rows of pills, all four alike. Nothing else of the frame (no top row, no outlines)
    until a document is open. */
@@ -242,6 +260,17 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 }
 .app[data-state="loading"] .welcome-buttons { visibility: hidden; }
 .app[data-state="loading"] .welcome-status { visibility: visible; }
+/* A newer version on GitHub (app.js): a link under the welcome's buttons, to the releases. */
+.update-link {
+  justify-self: center;
+  margin-top: 16px;
+  color: var(--wire);
+  font: var(--weight-mono) var(--type) var(--font-mono);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.update-link[hidden] { display: none; }
+.app[data-state="loading"] .update-link { visibility: hidden; }
 .empty-actions + .empty-actions { margin-top: 8px; }
 .empty-actions .btn { min-width: calc(var(--u) * 3); }
 .empty-actions:has(.btn[hidden]) { grid-template-columns: 1fr; } /* a browser: no Quit */
