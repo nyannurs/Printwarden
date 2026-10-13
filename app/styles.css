@@ -148,8 +148,28 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   border-top: var(--stroke) solid var(--wire);
 }
 .viewport canvas { display: block; touch-action: none; }
-/* Camera, Open/Close, Screenshot, Video: top right, stacked; the camera menu to its left. */
+/* Camera, Left page/Spread/Right page, Open/Close, Screenshot, Video: top right, stacked, a square
+   each; the camera menu to its left. */
 .viewport-hud { position: absolute; top: calc(-1 * var(--stroke)); right: calc(-1 * var(--stroke)); display: flex; flex-direction: column; align-items: flex-end; }
+/* Icon pills: a square, the icon's square artboard (app/icons/, 1000 × 1000) at 70 % of it,
+   centered, as drawn. Its white is the pill's type colour, its black lets the fill through (a
+   luminance mask), so every state (hover, open, disabled) shows as on a pill with type. */
+.pill.icon { --w: 1; position: relative; padding: 0; }
+.pill.icon::before {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--stroke));
+  background-color: currentColor;
+  mask: none center / 70% 70% no-repeat luminance;
+}
+.pill.icon[data-icon="camera"]::before { mask-image: url("icons/camera.svg"); }
+.pill.icon[data-icon="open"]::before { mask-image: url("icons/open.svg"); }
+.pill.icon[data-icon="close"]::before { mask-image: url("icons/close.svg"); }
+.pill.icon[data-icon="left-page"]::before { mask-image: url("icons/left-page.svg"); }
+.pill.icon[data-icon="right-page"]::before { mask-image: url("icons/right-page.svg"); }
+.pill.icon[data-icon="spread"]::before { mask-image: url("icons/spread.svg"); }
+.pill.icon[data-icon="screenshot"]::before { mask-image: url("icons/screenshot.svg"); }
+.pill.icon[data-icon="video"]::before { mask-image: url("icons/video.svg"); }
 .menu { position: relative; }
 .menu-list { position: absolute; top: 0; right: calc(100% - var(--stroke)); display: flex; flex-direction: column; z-index: 5; }
 /* Reading order / Press sheets: bottom left (see filmstrip.js). */

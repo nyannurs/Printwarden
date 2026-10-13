@@ -26,3 +26,5 @@ Thumbs.db
 desktop.ini
 UIsketch.pdf
 referencescreenshot.pdf
+# The author's icon workspace (Illustrator file, exports); the app's copies are in app/icons/
+/icons/

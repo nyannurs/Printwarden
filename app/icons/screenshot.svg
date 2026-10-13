@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+  <g id="a" data-name="Layer 1">
+    <rect width="1000" height="1000"/>
+  </g>
+  <g id="b" data-name="Layer 2">
+    <rect x="150" y="255" width="700" height="490" fill="#fff"/>
+    <circle cx="709.345" cy="388.602" r="65.669"/>
+    <polygon points="800.092 695.092 680.035 509.535 546.713 656.526 376.791 393.802 199.908 695.092 800.092 695.092"/>
+  </g>
+</svg>

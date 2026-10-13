@@ -251,17 +251,24 @@ function scenePaper(paper, setup, pageCount) {
 
 export function onOpeningChanged() {
   if (state.capturing) return; // a video turning pages: the window stays as it was
-  $("close-btn").textContent = scene.isClosed || scene.atCover ? "Open" : "Close";
+  showIcon($("close-btn"), scene.isClosed || scene.atCover ? "open" : "close");
   showFocus();
   if (state.analysis) filmstrip.setActive(scene.opening);
 }
 
-// The view's center, in turn: the spread, the left page, the right page. The pill names the
+/** An icon pill (styles.css, app/icons/) shows `icon`: its picture and its name for screen readers. */
+const ICON_NAMES = { open: "Open", close: "Close", "left-page": "Left page", spread: "Spread", "right-page": "Right page" };
+function showIcon(button, icon) {
+  button.dataset.icon = icon;
+  button.setAttribute("aria-label", ICON_NAMES[icon]);
+}
+
+// The view's center, in turn: the spread, the left page, the right page. The pill shows the
 // next; closed or at a cover (one page showing) it has nothing to do.
 const NEXT_FOCUS = new Map([[0, -1], [-1, 1], [1, 0]]);
-const FOCUS_LABEL = new Map([[-1, "Left page"], [0, "Spread"], [1, "Right page"]]);
+const FOCUS_ICON = new Map([[-1, "left-page"], [0, "spread"], [1, "right-page"]]);
 function showFocus() {
-  $("focus-btn").textContent = FOCUS_LABEL.get(NEXT_FOCUS.get(scene.focus));
+  showIcon($("focus-btn"), FOCUS_ICON.get(NEXT_FOCUS.get(scene.focus)));
   /** @type {HTMLButtonElement} */ ($("focus-btn")).disabled = scene.isClosed || scene.atCover;
 }
 

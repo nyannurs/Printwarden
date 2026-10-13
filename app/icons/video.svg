@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+  <g id="a" data-name="Layer 1">
+    <rect width="1000" height="1000"/>
+  </g>
+  <g id="b" data-name="Layer 2">
+    <rect x="150" y="255" width="700" height="490" fill="#fff"/>
+    <rect x="756.657" y="304.908" width="43.333" height="43.333"/>
+    <rect x="200.009" y="391.574" width="43.333" height="43.333"/>
+    <rect x="200.009" y="304.908" width="43.333" height="43.333"/>
+    <rect x="200.009" y="478.241" width="43.333" height="43.333"/>
+    <rect x="200.009" y="651.574" width="43.333" height="43.333"/>
+    <rect x="293.251" y="304.908" width="413.499" height="390"/>
+    <rect x="200.009" y="564.908" width="43.333" height="43.333"/>
+    <rect x="756.657" y="478.241" width="43.333" height="43.333"/>
+    <rect x="756.657" y="391.574" width="43.333" height="43.333"/>
+    <rect x="756.657" y="564.908" width="43.333" height="43.333"/>
+    <rect x="756.657" y="651.574" width="43.333" height="43.333"/>
+    <polygon points="433.787 363.111 433.787 500 433.787 636.889 599.213 500 433.787 363.111" fill="#fff"/>
+  </g>
+</svg>

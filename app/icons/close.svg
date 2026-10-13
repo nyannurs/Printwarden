@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+  <g id="a" data-name="Layer 1">
+    <rect width="1000" height="1000"/>
+  </g>
+  <g id="b" data-name="Layer 2">
+    <rect x="325" y="255" width="350" height="490" fill="#fff"/>
+  </g>
+</svg>

@@ -6,3 +6,5 @@
 *.icc     binary
 _build/ffmpeg-lgpl/*/ffmpeg     binary
 _build/ffmpeg-lgpl/*/ffmpeg.exe binary
+# The author's icons, byte for byte as drawn: line endings never converted.
+app/icons/*.svg -text
