@@ -155,7 +155,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
    centered, as drawn. Its white is the pill's type colour, its black lets the fill through (a
    luminance mask), so every state (hover, open, disabled) shows as on a pill with type.
    Hovered (or reached with the keyboard), its name on a pill to its left, sharing its line, as
-   the camera menu's choices; not while that menu is open. */
+   the camera menu's choices; none while that menu is open (they'd cover it). */
 .pill.icon { --w: 1; position: relative; padding: 0; overflow: visible; }
 .pill.icon::before {
   content: "";
@@ -185,7 +185,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   visibility: hidden;
 }
 .pill.icon:hover::after, .pill.icon:focus-visible::after { visibility: visible; }
-.pill.icon[aria-expanded="true"]::after { display: none; }
+.viewport-hud:has([aria-expanded="true"]) .pill.icon::after { display: none; }
 .pill.icon[data-icon="camera"]::before { mask-image: url("icons/camera.svg"); }
 .pill.icon[data-icon="open"]::before { mask-image: url("icons/open.svg"); }
 .pill.icon[data-icon="close"]::before { mask-image: url("icons/close.svg"); }
