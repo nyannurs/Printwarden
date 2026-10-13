@@ -32,13 +32,13 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
   position: relative; /* the panel's scrollbar is placed in it */
   display: grid;
   grid-template-columns: 1fr calc(var(--panel-cols) * var(--u));
-  grid-template-rows: calc(var(--bar-rows) * var(--u)) 1fr calc(var(--strip-rows) * var(--u));
-  grid-template-areas: "bar bar" "view side" "strip side";
+  grid-template-rows: 1fr calc(var(--strip-rows) * var(--u));
+  grid-template-areas: "view side" "strip side";
   height: 100vh;
   background: var(--ink);
 }
-/* macOS's title bar covers the page's top row of pixels: the top row's pills lost their top
-   line there. The frame starts a line lower (the view gives up that line). */
+/* macOS's title bar covers the page's top row of pixels: the frame's top line (and the pills
+   on it) lost it there. The frame starts a line lower (the view gives up that line). */
 :root[data-os="darwin"] .app { padding-top: var(--stroke); }
 /* macOS rounds the window's lower corners (not in fullscreen): the timeline's and the panel's
    outer lines follow them (--window-corner, platform.js). */
@@ -46,9 +46,11 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
 :root[data-os="darwin"]:not([data-full-screen]) .inspector { border-bottom-right-radius: var(--window-corner); }
 
 /* ---------- top row ---------- */
-.toolbar { grid-area: bar; position: relative; display: flex; align-items: center; }
-.spacer { flex: 1; }
-.loadbar { position: absolute; left: 0; right: 0; bottom: 0; height: var(--stroke); }
+/* Import, Export, the file's name: in the view, top left, on its top line and left edge as the
+   pills on its other edges are. Loading: the frame's top line fills from the left. */
+.toolbar { position: absolute; top: calc(-1 * var(--stroke)); left: calc(-1 * var(--stroke)); z-index: 3; display: flex; }
+.loadbar { position: absolute; left: 0; right: 0; top: 0; z-index: 6; height: var(--stroke); }
+:root[data-os="darwin"] .loadbar { top: var(--stroke); } /* see .app */
 .loadbar-fill { height: 100%; width: 0; background: var(--wire); transition: width 0.2s; }
 
 /* ---------- pills ---------- */
@@ -167,8 +169,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   overflow: hidden;
   background: #4d4e52;
   --over: var(--wire);
-  /* The line under the top row: on the top row's lower edge, joining the panel's top line. */
-  margin-top: calc(-1 * var(--stroke));
+  /* The frame's top line, under the window's title bar, joining the panel's. */
   border-top: var(--stroke) solid var(--wire);
 }
 .viewport canvas { display: block; touch-action: none; }
@@ -288,7 +289,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 /* Frame counter (see showFrameStats in view.js). */
 .fps-hud {
   position: absolute;
-  top: round(calc(var(--u) * 0.25), 1px);
+  top: calc(var(--u) + round(calc(var(--u) * 0.25), 1px)); /* under Import, Export and the name */
   left: round(calc(var(--u) * 0.25), 1px);
   font-size: var(--type-small);
   color: var(--over);
@@ -426,12 +427,13 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 /* ---------- info panel ---------- */
 .inspector {
   grid-area: side;
-  margin-top: calc(-1 * var(--stroke)); /* its top line is About's lower edge */
   overflow-y: auto;
   background: var(--ink);
   border: var(--stroke) solid var(--wire);
 }
 .section { padding: 14px 16px; border-bottom: var(--stroke) solid var(--wire); }
+.section.about { border-bottom: 0; } /* the panel's last: About, across it; the frame's line under it */
+.section.about .btn { width: 100%; }
 .section h2 {
   margin: 0 0 10px;
   font-size: var(--type-small);

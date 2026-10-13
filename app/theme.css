@@ -39,7 +39,6 @@
   --u: clamp(32px, round(down, calc(100vw / var(--cols)), 2px), 64px);
   --panel-cols: 6; /* the info panel, squares wide (5 in the first sketch: too narrow for its fields) */
   --strip-rows: 3; /* the timeline, squares tall */
-  --bar-rows: 1; /* the top row, squares tall */
 
   /* Type: sizes are shares of a square, never smaller than readable (the same from 1600 px
      wide up; pills on the grid scale all the way, so their labels always fit: "Reading order"

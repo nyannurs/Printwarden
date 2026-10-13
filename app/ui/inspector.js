@@ -30,7 +30,8 @@ export class Inspector {
    *          onPaperPreview: (colors: {color?: string, coverColor?: string}) => void,
    *          onWirePreview: (color: string) => void,
    *          onColourProfile: (id: string) => void, onSpine: () => void, onFinish: () => void,
-   *          onBackground: (color: string, commit: boolean) => void, background: () => string}} deps
+   *          onBackground: (color: string, commit: boolean) => void, background: () => string,
+   *          onAbout: () => void}} deps
    */
   constructor(el, deps) {
     this.el = el;
@@ -56,11 +57,19 @@ export class Inspector {
       this.#backgroundSection(),
       ...(colour ? [this.#colourSection(colour)] : []),
       this.#findingsSection(findings, book, colour),
+      this.#aboutSection(),
     );
     if (refocus) {
       /** @type {HTMLElement} */ (this.el.querySelector(`[data-key="${CSS.escape(refocus)}"]`))?.focus();
       refocus = null;
     }
+  }
+
+  /** Last, under Preflight: About, across the panel. */
+  #aboutSection() {
+    const s = el("section", "section about");
+    s.append(button("About", () => this.deps.onAbout()));
+    return s;
   }
 
   #docSection(a, docName) {

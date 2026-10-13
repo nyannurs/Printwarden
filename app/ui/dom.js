@@ -91,7 +91,7 @@ export function toast(message, kind = "error") {
 }
 let toastTimer = null;
 
-/** The loading bar under the toolbar: a fraction done, or null (hidden). */
+/** The loading bar, along the frame's top line: a fraction done, or null (hidden). */
 export function showLoad(fraction) {
   const bar = $("loadbar");
   if (fraction == null || fraction >= 1) {

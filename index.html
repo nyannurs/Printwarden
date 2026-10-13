@@ -12,16 +12,14 @@
 </head>
 <body>
   <div class="app" id="app" data-state="empty">
-    <header class="toolbar">
-      <button class="pill" id="import-btn" type="button">Import</button>
-      <button class="pill" id="export-btn" type="button" disabled>Export</button>
-      <div class="pill pill-label" id="doc-name"></div>
-      <div class="spacer"></div>
-      <div class="loadbar" id="loadbar" hidden><div class="loadbar-fill" id="loadbar-fill"></div></div>
-      <button class="pill" id="about-btn" type="button">About</button>
-    </header>
+    <div class="loadbar" id="loadbar" hidden><div class="loadbar-fill" id="loadbar-fill"></div></div>
 
     <main class="viewport" id="viewport">
+      <header class="toolbar">
+        <button class="pill" id="import-btn" type="button">Import</button>
+        <button class="pill" id="export-btn" type="button" disabled>Export</button>
+        <div class="pill pill-label" id="doc-name"></div>
+      </header>
       <div class="empty" id="empty">
         <div class="empty-card">
           <div class="welcome-glyph" role="img" aria-label="Printwarden"></div>

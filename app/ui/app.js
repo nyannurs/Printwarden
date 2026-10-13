@@ -79,6 +79,7 @@ export const inspector = new Inspector($("inspector"), {
   onColourProfile: (id) => setColourProfile(id),
   onBackground: (color, commit) => setBackground(color, commit),
   background: () => state.background,
+  onAbout: () => aboutDialog({ name: APP_NAME, version: APP_VERSION }),
 });
 
 // --- import ------------------------------------------------------------------------
@@ -280,7 +281,6 @@ $("sample-btn").addEventListener("click", async () => {
 });
 $("shot-btn").addEventListener("click", renderScreenshot);
 $("video-btn").addEventListener("click", () => renderVideo());
-$("about-btn").addEventListener("click", () => aboutDialog({ name: APP_NAME, version: APP_VERSION }));
 // The welcome screen: the name, About, Quit (desktop only).
 $("welcome").textContent = `Welcome to ${APP_NAME}`;
 $("empty-about").addEventListener("click", () => aboutDialog({ name: APP_NAME, version: APP_VERSION }));
