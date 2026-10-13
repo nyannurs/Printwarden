@@ -110,21 +110,23 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
 /* Words in pills, buttons and fields: centred on their capitals, the band from the baseline to
    the capitals' tops (what reads as the middle: the font's own box has more room above them
    than below), with `text-box` trimming the line to that band. The baseline on a whole pixel:
-   where the room can't be split evenly, the half pixel left goes above (mixed-case words
-   centred on their capitals look a little high, never low). A button or field centres what it
-   holds, from the top padding down; the label pill (no button) is placed from the top.
+   where the room can't be split evenly, the half pixel left goes below: the words then sit on
+   the same line as the labels beside them in the panel (the author's correction: a pixel lower
+   looked off centre). A button centres what it holds between its paddings (the shift, top or
+   bottom); the label pill (no button) is placed from the top.
    Dropdowns and number fields aren't trimmed: a field's typing line is a box of its own, and
    trimmed, the descenders (the g of "gsm") were cut off and it scrolled up and down. */
 .pill { --h: var(--u); }
 .btn, select, input.unit-number, .select-item { --h: var(--control); }
 .pill:not(.icon, .zoom-track), .btn, select, input.unit-number, .select-item, .pill.icon::after {
   --room: calc(var(--h) - 2 * var(--stroke)); /* inside the outline */
-  --baseline: round(up, calc((var(--room) + round(1cap, 1px)) / 2), 1px); /* from the room's top */
+  --baseline: round(down, calc((var(--room) + round(1cap, 1px)) / 2), 1px); /* from the room's top */
 }
 .pill:not(.icon, .zoom-track), .btn, .select-item, .pill.icon::after {
   text-box: trim-both cap alphabetic;
-  padding-top: max(0px, calc(2 * var(--baseline) - 1cap - var(--room)));
-  padding-bottom: 0;
+  --shift: calc(2 * var(--baseline) - 1cap - var(--room));
+  padding-top: max(0px, var(--shift));
+  padding-bottom: max(0px, -1 * var(--shift));
 }
 /* A line as tall as the room (nothing over to scroll, the descenders inside), moved by the
    padding so its baseline is the one above: the line's baseline is its half-leading plus the
