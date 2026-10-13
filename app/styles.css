@@ -206,7 +206,10 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   position: absolute;
   inset: calc(-1 * var(--stroke));
   background-color: currentColor;
-  mask: none center / 70% 70% no-repeat luminance;
+  /* 70 % of the square, in whole even pixels: then it starts on a whole pixel too, in the exact
+     middle (at 70 % of 58 px, 40.6 px, the browser drew it half a pixel right). */
+  --icon: round(calc(var(--u) * 0.7), 2px);
+  mask: none center / var(--icon) var(--icon) no-repeat luminance;
 }
 .pill.icon::after {
   content: attr(aria-label);
