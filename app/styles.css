@@ -2,7 +2,8 @@
    button, dropdown and field; Space Grotesk Medium for type, Space Mono for labels and
    readouts (the `mono` rules); square-cornered frames for the panel, timeline and dialogs. */
 
-* { box-sizing: border-box; scrollbar-width: none; } /* our own scrollbars instead (addScrollbar, dom.js) */
+*, ::before, ::after { box-sizing: border-box; } /* sizes include padding and outline: pseudo-elements too (the icons' names) */
+* { scrollbar-width: none; } /* our own scrollbars instead (addScrollbar, dom.js) */
 /* Lines of type on whole pixels: 1.4 times the type (--leading where it differs), rounded, so
    what follows them starts on a whole pixel (11 px type made lines of 15.4 px, and every pill
    after a few of them sat a fraction of a pixel off). Even, as the pills are: a label centred
