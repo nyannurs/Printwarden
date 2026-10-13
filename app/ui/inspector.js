@@ -7,6 +7,7 @@ import { SpreadMode } from "../core/detect.js";
 import { coverOf, PAPER_COLORS, PAPER_FINISHES } from "../core/paper.js";
 import { bookThicknessMm, hasSpine } from "../core/spine.js";
 import { formatMm, formatSize, paperName } from "../core/units.js";
+import { snapToPixels } from "./dom.js";
 
 const SIDES = ["top", "bottom", "inside", "outside"];
 
@@ -252,6 +253,10 @@ function colourSwatches(presets, current, what, { pick, preview }) {
   custom.addEventListener("input", () => preview(custom.value));
   custom.addEventListener("change", () => pick(custom.value));
   row.append(custom);
+  // Spread across the column, the room between them comes in fractions: each on a whole pixel
+  // (dom.js), again when the row's width changes (a scrollbar appearing).
+  snapToPixels([row], { x: false, y: false });
+  snapToPixels([...row.children], { y: false });
   return row;
 }
 

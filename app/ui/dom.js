@@ -3,6 +3,61 @@
 
 export const $ = (id) => document.getElementById(id);
 
+// --- whole pixels ------------------------------------------------------------------------
+//
+// The layout is made of whole pixels (theme.css), but what the browser centres (a dialog, the
+// welcome, the progress window, a message) lands on half a pixel when the room round it is odd,
+// and an outline there is drawn a pixel off; what is as wide as its words is a fraction wide.
+// These are put back on whole pixels: moved the fraction back (`translate`), made a whole
+// (even) number of pixels wide, or tall; again whenever their size, the window's or the type
+// changes. In the order given: a box before what is inside it.
+/** @type {Map<HTMLElement, {x: boolean, y: boolean, width: boolean, height: boolean, shown?: boolean}>} */
+const snapped = new Map();
+function snapAll() {
+  for (const [el, o] of snapped) {
+    if (!el.isConnected) {
+      if (o.shown) snapped.delete(el); // gone (not yet placed: kept)
+      continue;
+    }
+    o.shown = true;
+    el.style.translate = "";
+    if (o.width) el.style.width = "";
+    if (o.height) el.style.height = "";
+  }
+  for (const [el, o] of snapped) {
+    const r = el.getBoundingClientRect();
+    if (!r.width && !r.height) continue;
+    if (o.width) el.style.width = `${Math.ceil(r.width / 2 - 0.001) * 2}px`;
+    if (o.height) el.style.height = `${Math.round(r.height)}px`;
+  }
+  for (const [el, o] of snapped) {
+    const r = el.getBoundingClientRect();
+    if (!r.width && !r.height) continue;
+    const dx = o.x ? Math.round(r.x) - r.x : 0;
+    const dy = o.y ? Math.round(r.y) - r.y : 0;
+    if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) el.style.translate = `${dx}px ${dy}px`;
+  }
+}
+const snapResized = new ResizeObserver(snapAll); // before the frame is drawn
+window.addEventListener("resize", snapAll);
+document.fonts.addEventListener("loadingdone", snapAll);
+
+/**
+ * Keep these elements on whole pixels (see above): moved (`y: false` for one that moves up and
+ * down), and with `width` or `height`, that size made whole.
+ * @param {Element[]} elements
+ */
+export function snapToPixels(elements, { x = true, y = true, width = false, height = false } = {}) {
+  for (const el of elements) {
+    const was = snapped.get(/** @type {HTMLElement} */ (el)); // given again: both asks
+    snapped.set(/** @type {HTMLElement} */ (el), was
+      ? { x: was.x || x, y: was.y || y, width: was.width || width, height: was.height || height }
+      : { x, y, width, height });
+    snapResized.observe(el);
+  }
+  snapAll();
+}
+
 export function toast(message, kind = "error") {
   let el = /** @type {HTMLElement} */ (document.querySelector(".toast"));
   if (!el) {
@@ -14,6 +69,7 @@ export function toast(message, kind = "error") {
   el.textContent = message;
   el.dataset.kind = kind;
   el.classList.add("show");
+  snapToPixels([el], { y: false }); // centred across; it slides in from above
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), 7000);
 }
@@ -66,6 +122,7 @@ export function showBusy(text, onCancel = null) {
   }
   el.append(box);
   document.body.append(el);
+  snapToPixels([box, ...box.children]);
   return {
     progress(fraction) {
       const f = Math.min(1, Math.max(0, fraction));
@@ -143,7 +200,7 @@ export function addScrollbar(scroller, axis = "y", { nudge = 0 } = {}) {
     if (y) Object.assign(track.style, { left: px(left + s.width - thick - inset), top: px(top + inset), height: px(s.height - 2 * inset) });
     else Object.assign(track.style, { left: px(left + inset), top: px(top + s.height - thick - inset), width: px(s.width - 2 * inset) });
     const at = (metrics().travel * (y ? scroller.scrollTop : scroller.scrollLeft)) / room();
-    head.style.transform = y ? `translateY(${at}px)` : `translateX(${at}px)`;
+    head.style.transform = y ? `translateY(${Math.round(at)}px)` : `translateX(${Math.round(at)}px)`;
   };
   const schedule = () => { pending ||= requestAnimationFrame(place); };
   scroller.addEventListener("scroll", schedule, { passive: true });
@@ -271,8 +328,8 @@ function openSelect(select) {
   const dropBar = addScrollbar(list, "y", { nudge: -1 });
   const w = popup.offsetWidth;
   const h = popup.offsetHeight;
-  const left = Math.min(Math.max(margin, r.left), innerWidth - margin - w);
-  const top = below >= h || below >= above ? r.bottom + 4 : r.top - 4 - h;
+  const left = Math.round(Math.min(Math.max(margin, r.left), innerWidth - margin - w));
+  const top = Math.round(below >= h || below >= above ? r.bottom + 4 : r.top - 4 - h);
   Object.assign(popup.style, { left: `${left}px`, top: `${top}px` });
   items[active]?.scrollIntoView({ block: "nearest" }); // marked only once pointed at or keyed to
 

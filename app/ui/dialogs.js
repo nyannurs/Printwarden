@@ -468,8 +468,8 @@ function makeDraggable(box, handle) {
     handle.setPointerCapture(e.pointerId);
     const start = { x: e.clientX, y: e.clientY, left: box.offsetLeft, top: box.offsetTop };
     const move = (ev) => {
-      const left = Math.min(window.innerWidth - 80, Math.max(-box.offsetWidth + 80, start.left + ev.clientX - start.x));
-      const top = Math.min(window.innerHeight - 40, Math.max(0, start.top + ev.clientY - start.y));
+      const left = Math.round(Math.min(window.innerWidth - 80, Math.max(-box.offsetWidth + 80, start.left + ev.clientX - start.x)));
+      const top = Math.round(Math.min(window.innerHeight - 40, Math.max(0, start.top + ev.clientY - start.y)));
       box.style.left = `${left}px`;
       box.style.top = `${top}px`;
     };

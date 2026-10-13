@@ -97,7 +97,8 @@ export function initView() {
   for (let i = 0; i < ZOOM_STEPS.length; i++) {
     const tick = document.createElement("span");
     tick.className = "zoom-tick";
-    tick.style.left = `calc(var(--thumb) / 2 + (100% - var(--thumb)) * ${i / (ZOOM_STEPS.length - 1)})`;
+    // The thumb's middle at this step, the 1 px notch on the whole pixel there.
+    tick.style.left = `round(down, calc(var(--thumb) / 2 + (100% - var(--thumb)) * ${i / (ZOOM_STEPS.length - 1)}), 1px)`;
     $("zoom-track").prepend(tick);
   }
   zoomSlider.addEventListener("input", () => {

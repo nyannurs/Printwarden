@@ -33,7 +33,10 @@
 :root {
   /* Grid */
   --cols: 38;
-  --u: clamp(32px, calc(100vw / var(--cols)), 64px); /* one square */
+  /* One square. Whole pixels, and even, as is everything the layout is made of (a half square,
+     a pill's middle, whole too): an edge on a fraction of a pixel is drawn a pixel off, so two
+     pills alike came out a pixel apart in height. */
+  --u: clamp(32px, round(down, calc(100vw / var(--cols)), 2px), 64px);
   --panel-cols: 6; /* the info panel, squares wide (5 in the first sketch: too narrow for its fields) */
   --strip-rows: 3; /* the timeline, squares tall */
   --bar-rows: 1; /* the top row, squares tall */
@@ -73,7 +76,7 @@
      stay 1 px like every other line, also where pills share one. On HiDPI screens a pixel is
      two or more, and the 1 px curve is smooth as it is. */
   --round-extra: 0px;
-  --control: max(26px, calc(var(--u) * 0.6)); /* pills inside the panel and dialogs, height */
+  --control: max(26px, round(calc(var(--u) * 0.6), 2px)); /* pills inside the panel and dialogs, height */
   --window-radius: calc(var(--u) / 2); /* dialogs, the progress window, messages: a pill's rounding */
   /* a scrollbar's width: whole pixels, so its head (styles.css) sits exactly in the middle */
   --scrollbar: round(max(8px, calc(var(--u) / 4)), 1px);

@@ -3,6 +3,12 @@
    readouts (the `mono` rules); square-cornered frames for the panel, timeline and dialogs. */
 
 * { box-sizing: border-box; scrollbar-width: none; } /* our own scrollbars instead (addScrollbar, dom.js) */
+/* Lines of type on whole pixels: 1.4 times the type (--leading where it differs), rounded, so
+   what follows them starts on a whole pixel (11 px type made lines of 15.4 px, and every pill
+   after a few of them sat a fraction of a pixel off). Even, as the pills are: a label centred
+   beside one sits on a whole pixel too. Inside pills and fields: their own. */
+* { line-height: round(calc(var(--leading, 1.4) * 1em), 2px); }
+:is(.pill, .btn, .select-item) * { line-height: inherit; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--ink);
@@ -69,7 +75,7 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
   vertical-align: top;
   width: calc(var(--w) * var(--u));
   height: var(--u);
-  padding: calc(2 * var(--optical)) calc(var(--u) * 0.1) 0; /* --optical: theme.css */
+  padding: calc(2 * var(--optical)) round(calc(var(--u) * 0.1), 1px) 0; /* --optical: theme.css */
   font-size: var(--type-pill);
   line-height: calc(var(--u) - 2 * var(--stroke) - 2 * var(--optical));
   text-align: center;
@@ -79,8 +85,9 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
 }
 .btn {
   display: inline-block;
+  width: calc-size(fit-content, round(up, size, 2px)); /* as wide as its words, in whole pixels */
   height: var(--control);
-  padding: calc(2 * var(--optical)) calc(var(--control) * 0.55) 0;
+  padding: calc(2 * var(--optical)) round(calc(var(--control) * 0.55), 1px) 0;
   line-height: calc(var(--control) - 2 * var(--stroke) - 2 * var(--optical));
   text-align: center;
   cursor: pointer;
@@ -112,19 +119,19 @@ select, input.unit-number {
   width: 100%;
   min-width: 0;
   height: var(--control);
-  padding: calc(2 * var(--optical)) calc(var(--control) * 0.45) 0;
+  padding: calc(2 * var(--optical)) round(calc(var(--control) * 0.45), 1px) 0;
 }
 select {
   -webkit-appearance: none;
   appearance: none;
-  padding-right: calc(var(--control) * 0.45 + 14px);
+  padding-right: calc(round(calc(var(--control) * 0.45), 1px) + 14px);
   text-overflow: ellipsis;
   overflow: hidden;
   cursor: pointer;
   /* the arrow, in the line's white */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='white' stroke-width='1.2'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right calc(var(--control) * 0.45) center;
+  background-position: right round(calc(var(--control) * 0.45), 1px) center;
 }
 select option { background: var(--ink); color: var(--wire); }
 input.unit-number:focus, select:focus { outline: none; }
@@ -172,7 +179,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   z-index: 5;
   width: calc(2 * var(--u));
   height: var(--u);
-  padding: calc(2 * var(--optical)) calc(var(--u) * 0.1) 0;
+  padding: calc(2 * var(--optical)) round(calc(var(--u) * 0.1), 1px) 0;
   border: var(--stroke) solid var(--edge);
   border-radius: 999px;
   background-color: var(--ink);
@@ -219,15 +226,20 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .compass svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .compass line { stroke: var(--wire); stroke-width: 0.045; stroke-linecap: round; }
 .compass text { fill: var(--wire); font: var(--weight-mono) 0.3px var(--font-mono); }
-.zoom-hud { position: absolute; right: calc(-1 * var(--stroke)); bottom: calc(-1 * var(--stroke)); display: flex; align-items: center; --thumb: calc(var(--u) * 0.5); }
+/* On whole pixels: the slider an odd height (its 1 px line then whole, in the middle), the thumb
+   and the notches odd too, centred on the line. */
+.zoom-hud {
+  position: absolute; right: calc(-1 * var(--stroke)); bottom: calc(-1 * var(--stroke)); display: flex; align-items: center;
+  --thumb: calc(round(down, calc(var(--u) * 0.5 - 1px), 2px) + 1px);
+  --tick: calc(round(down, calc(var(--u) * 0.2 - 1px), 2px) + 1px);
+}
 .zoom-track { position: relative; padding: 0; cursor: default; }
 .zoom-track:hover { background-color: var(--ink) !important; }
 .zoom-tick {
   position: absolute;
-  top: 50%;
+  top: calc((100% - var(--stroke) - var(--tick)) / 2);
   width: var(--stroke);
-  height: calc(var(--u) * 0.2);
-  transform: translate(-50%, -50%);
+  height: var(--tick);
   background: var(--wire-muted);
   pointer-events: none;
 }
@@ -237,7 +249,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   position: relative;
   display: block;
   width: 100%;
-  height: 100%;
+  height: calc(100% - var(--stroke));
   margin: 0;
   background: none;
   cursor: pointer;
@@ -256,12 +268,12 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 }
 .zoom-slider:focus-visible { outline: none; }
 .zoom-slider:focus-visible::-webkit-slider-thumb { background: radial-gradient(circle, var(--wire) 0 34%, var(--wire-faint) 36% 70%, transparent 72%); }
-.zoom-value { padding-right: calc(var(--u) * 0.25); font-size: var(--type-small); color: var(--over); transition: color 0.3s; }
+.zoom-value { padding-right: round(calc(var(--u) * 0.25), 1px); font-size: var(--type-small); color: var(--over); transition: color 0.3s; }
 /* Frame counter (see showFrameStats in view.js). */
 .fps-hud {
   position: absolute;
-  top: calc(var(--u) * 0.25);
-  left: calc(var(--u) * 0.25);
+  top: round(calc(var(--u) * 0.25), 1px);
+  left: round(calc(var(--u) * 0.25), 1px);
   font-size: var(--type-small);
   color: var(--over);
   transition: color 0.3s;
@@ -285,7 +297,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .empty-card { display: grid; justify-items: stretch; width: max-content; text-align: center; padding: 28px; }
 .welcome-glyph {
   aspect-ratio: 944 / 561; /* glyph.svg's frame */
-  margin-bottom: calc(var(--u) * 0.6);
+  margin-bottom: round(calc(var(--u) * 0.6), 1px);
   background: var(--wire);
   -webkit-mask: url("glyph.svg") center / contain no-repeat;
   mask: url("glyph.svg") center / contain no-repeat;
@@ -317,6 +329,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .app[data-state="loading"] .update-link { visibility: hidden; }
 .empty-actions + .empty-actions { margin-top: 8px; }
 .empty-actions .btn { min-width: calc(var(--u) * 3); }
+.empty-actions .btn, .field .btn { width: auto; } /* as wide as their column */
 .empty-actions:has(.btn[hidden]) { grid-template-columns: 1fr; } /* a browser: no Quit */
 .app:is([data-state="empty"], [data-state="loading"]) .toolbar { visibility: hidden; }
 /* Centered in the whole window, not the view's part of it: nothing else shows yet. */
@@ -325,7 +338,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 
 .drop-overlay {
   position: absolute;
-  inset: calc(var(--u) * 0.25);
+  inset: round(calc(var(--u) * 0.25), 1px);
   display: none;
   place-items: center;
   border: var(--stroke) dashed var(--wire);
@@ -379,15 +392,16 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   background: none;
   color: var(--wire-muted);
   font-size: var(--type-small);
-  line-height: 1.2;
+  --leading: 1.2;
   cursor: pointer;
 }
 .cell:hover { border-color: var(--wire-muted); }
 .cell.active { border-color: var(--wire); color: var(--wire); }
 .cell:focus-visible { outline: var(--stroke) solid var(--wire); }
 /* As tall as the timeline allows under two caption lines (pages, and a press sheet's side). */
-.cell .pages { display: flex; height: calc(var(--strip-rows) * var(--u) - 2.4 * var(--type-small) - 1.5 * var(--scrollbar) - 26px); }
-.cell .page { height: 100%; background: #fff; position: relative; overflow: hidden; }
+/* Even, as the timeline's room is (its scrollbar's room too): a cell centred in it on a whole pixel. */
+.cell .pages { display: flex; height: round(down, calc(var(--strip-rows) * var(--u) - 2.4 * var(--type-small) - 1.5 * var(--scrollbar) - 26px), 2px); }
+.cell .page { height: 100%; width: calc-size(auto, round(size, 1px)); background: #fff; position: relative; overflow: hidden; } /* its shape's width, whole pixels */
 .cell .page + .page { border-left: 1px solid rgba(0, 0, 0, 0.2); }
 .cell .page canvas { width: 100%; height: 100%; display: block; }
 .cell .page.blank { background: repeating-linear-gradient(135deg, #fff 0 5px, #e6e4df 5px 6px); }
@@ -412,7 +426,9 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   justify-content: space-between;
 }
 .section h2 .badge { text-transform: none; }
-.facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
+/* The labels' column: whole pixels, wide enough for the longest ("Paper weight"); the values
+   start where the panel's pills do. */
+.facts { display: grid; grid-template-columns: round(up, 6.5em, 1px) 1fr; gap: 3px 10px; margin: 0; }
 .facts dt { color: var(--wire-muted); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 /* The interface's own words (labels, headings, captions) can't be selected: only what is about
@@ -420,7 +436,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .app { user-select: none; }
 .facts dd, .finding p { user-select: text; }
 
-.field { display: grid; grid-template-columns: minmax(6.5em, auto) 1fr; align-items: center; gap: 10px; margin-bottom: 7px; }
+.field { display: grid; grid-template-columns: minmax(round(up, 6.5em, 1px), auto) 1fr; align-items: center; gap: 10px; margin-bottom: 7px; }
 .field > label { color: var(--wire-muted); }
 .field.wide { grid-template-columns: 1fr; gap: 5px; }
 .dims { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-bottom: 10px; }
@@ -555,11 +571,11 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 /* With a scrollbar, the items end well short of it (half its width plus 3 px in, see dom.js);
    without one, they run the list's full width. */
 .select-list.scrolls-y { padding-right: 4px; }
-.select-list.overflows-y { padding-right: calc(var(--scrollbar) * 2.1 + 4px); }
+.select-list.overflows-y { padding-right: calc(round(calc(var(--scrollbar) * 2.1), 1px) + 4px); }
 .select-item {
   flex: none;
   height: var(--control);
-  padding: calc(2 * var(--optical)) calc(var(--control) * 0.45) 0;
+  padding: calc(2 * var(--optical)) round(calc(var(--control) * 0.45), 1px) 0;
   border: 0;
   border-radius: 999px;
   background: var(--ink);
@@ -610,14 +626,14 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .scrolls-y { padding-right: calc(var(--scrollbar) * 2); }
 .inspector.scrolls-y { padding-right: 0; }
 .inspector.scrolls-y .section { padding-right: calc(var(--scrollbar) * 2 + 6px); }
-.strip.scrolls-x { padding-bottom: calc(var(--scrollbar) * 1.5); }
+.strip.scrolls-x { padding-bottom: round(calc(var(--scrollbar) * 1.5), 2px); }
 .license-text {
   margin: 4px 0 10px;
   padding: 10px;
   max-height: 260px;
   overflow: auto;
   font-size: var(--type-small);
-  line-height: 1.45;
+  --leading: 1.45;
   white-space: pre-wrap;
   border: var(--stroke) solid var(--wire-muted);
   border-radius: calc(var(--window-radius) / 2);

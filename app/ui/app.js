@@ -17,7 +17,7 @@ import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js"
 import { colourOptions, profileBytes, setColourProfile } from "./colour.js";
 import { makeCompass } from "./compass.js";
 import { aboutDialog, exportDialog, importDialog } from "./dialogs.js";
-import { $, addScrollbar, fitPill, showLoad, toast } from "./dom.js";
+import { $, addScrollbar, fitPill, showLoad, snapToPixels, toast } from "./dom.js";
 import { Filmstrip } from "./filmstrip.js";
 import { importFinish, openFinishDialog } from "./finish.js";
 import { Inspector } from "./inspector.js";
@@ -286,6 +286,16 @@ $("welcome").textContent = `Welcome to ${APP_NAME}`;
 $("empty-about").addEventListener("click", () => aboutDialog({ name: APP_NAME, version: APP_VERSION }));
 $("quit-btn").hidden = !canQuit;
 $("quit-btn").addEventListener("click", quit);
+// On whole pixels (dom.js): the welcome, centred in the window; every dialog as it opens.
+{
+  const card = document.querySelector(".empty-card");
+  snapToPixels([card], { width: true }); // as wide as "Try out sample": whole pixels, even
+  snapToPixels([card.querySelector(".welcome-glyph")], { height: true }); // its height from that width
+  snapToPixels([...card.children]);
+}
+document.addEventListener("toggle", (e) => {
+  if (e.target instanceof HTMLDialogElement && e.target.open && !e.target.classList.contains("floating")) snapToPixels([e.target]);
+}, true);
 // A newer release on GitHub: "Update available" under the welcome's buttons, opening the
 // releases page (the check: once a start, see platform.js).
 $("update-link").addEventListener("click", (e) => {
