@@ -4,7 +4,7 @@
 
 ## This software is entirely vibe-coded.
 
-This software was built using Claude Code. I wrote no line of code myself. I did however design the software's visual identity, and UI, I architected standard workflows from my experience as a print designer and thoroughly tested its functions against my own publications.
+This software was built using Claude Code. I wrote no line of code myself. I did however design the software's visual identity and UI, I architected standard workflows from my experience as a print designer and thoroughly tested its functions against my own publications.
 
 ## What is Printwarden?
 
@@ -60,6 +60,10 @@ The first start downloads Electron, which is a few hundred MB. If you want to bu
 ## Color profiles
 
 Printwarden doesn't come with a CMYK profile of its own. It uses the ones already on your computer, from the system's color folders and Adobe's. By default it picks the closest match to coated offset printing, which is usually ISO Coated v2 or Coated FOGRA39 (InDesign installs those). If it can't find any, it falls back to the profile built into pdf.js. Your profiles are only read and never changed.
+
+## Scope
+
+I have not been able to conceive a clean method to implement things like gatefold/foldout pages, concertina folds, non-standard formats, special features, or anything related to special-format pages. Feel free to PR.
 
 ## Credits
 
