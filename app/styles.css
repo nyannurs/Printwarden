@@ -186,8 +186,10 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   overflow: hidden;
   background: #4d4e52;
   --over: var(--wire);
-  /* The frame's top line, under the window's title bar, joining the panel's. */
+  /* The frame's top line, under the window's title bar, joining the panel's; and its left
+     line, down the window's edge into the timeline's. */
   border-top: var(--stroke) solid var(--wire);
+  border-left: var(--stroke) solid var(--wire);
 }
 .viewport canvas { display: block; touch-action: none; }
 /* Camera, Left page/Spread/Right page, Open/Close, Screenshot, Video: top right, stacked, a square
@@ -238,7 +240,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .menu { position: relative; }
 .menu-list { position: absolute; top: 0; right: calc(100% - var(--stroke)); display: flex; flex-direction: column; z-index: 5; }
 /* Reading order / Press sheets: bottom left (see filmstrip.js). */
-.view-toggle { position: absolute; left: 0; bottom: calc(-1 * var(--stroke)); }
+.view-toggle { position: absolute; left: calc(-1 * var(--stroke)); bottom: calc(-1 * var(--stroke)); }
 
 /* Zoom: a pill that is the slider, its 10 steps two notches a square (a thumb half a square
    wide puts each step in the middle of its half square); the value beside it, plain type. */
