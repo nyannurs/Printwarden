@@ -8,10 +8,15 @@ export const $ = (id) => document.getElementById(id);
 // The layout is made of whole pixels (theme.css), but what the browser centres (a dialog, the
 // welcome, the progress window, a message) lands on half a pixel when the room round it is odd,
 // and an outline there is drawn a pixel off; what is as wide as its words is a fraction wide.
-// These are put back on whole pixels: moved the fraction back (`translate`), made a whole
-// (even) number of pixels wide, or tall; again whenever their size, the window's or the type
+// These are put back on whole pixels in the layout itself (not by moving the drawing: the type
+// in it would stay where it was laid out, half a pixel off): a window centred by the browser is
+// placed (`centre`), anything else nudged the fraction (`position: relative`), or made a whole
+// (even) number of pixels wide, or tall. Again whenever their size, the window's or the type
 // changes. In the order given: a box before what is inside it.
-/** @type {Map<HTMLElement, {x: boolean, y: boolean, width: boolean, height: boolean, shown?: boolean}>} */
+/**
+ * @typedef {{x: boolean, y: boolean, width: boolean, height: boolean, centre: boolean, shown?: boolean}} Snap
+ * @type {Map<HTMLElement, Snap>}
+ */
 const snapped = new Map();
 function snapAll() {
   for (const [el, o] of snapped) {
@@ -20,7 +25,7 @@ function snapAll() {
       continue;
     }
     o.shown = true;
-    el.style.translate = "";
+    if (!o.centre) Object.assign(el.style, { left: "", top: "" });
     if (o.width) el.style.width = "";
     if (o.height) el.style.height = "";
   }
@@ -33,9 +38,19 @@ function snapAll() {
   for (const [el, o] of snapped) {
     const r = el.getBoundingClientRect();
     if (!r.width && !r.height) continue;
+    if (o.centre) {
+      // In the middle of the window, on whole pixels (it is fixed: the window is its frame).
+      el.style.margin = "0";
+      if (o.x) Object.assign(el.style, { right: "auto", left: `${Math.round((innerWidth - r.width) / 2)}px` });
+      if (o.y) Object.assign(el.style, { bottom: "auto", top: `${Math.round((innerHeight - r.height) / 2)}px` });
+      continue;
+    }
     const dx = o.x ? Math.round(r.x) - r.x : 0;
     const dy = o.y ? Math.round(r.y) - r.y : 0;
-    if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) el.style.translate = `${dx}px ${dy}px`;
+    if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) {
+      if (getComputedStyle(el).position === "static") el.style.position = "relative";
+      Object.assign(el.style, { left: `${dx}px`, top: `${dy}px` });
+    }
   }
 }
 const snapResized = new ResizeObserver(snapAll); // before the frame is drawn
@@ -43,16 +58,17 @@ window.addEventListener("resize", snapAll);
 document.fonts.addEventListener("loadingdone", snapAll);
 
 /**
- * Keep these elements on whole pixels (see above): moved (`y: false` for one that moves up and
- * down), and with `width` or `height`, that size made whole.
+ * Keep these elements on whole pixels (see above): nudged (`y: false` for one that moves up and
+ * down), or with `centre`, a fixed window placed in the middle; with `width` or `height`, that
+ * size made whole.
  * @param {Element[]} elements
  */
-export function snapToPixels(elements, { x = true, y = true, width = false, height = false } = {}) {
+export function snapToPixels(elements, { x = true, y = true, width = false, height = false, centre = false } = {}) {
   for (const el of elements) {
     const was = snapped.get(/** @type {HTMLElement} */ (el)); // given again: both asks
     snapped.set(/** @type {HTMLElement} */ (el), was
-      ? { x: was.x || x, y: was.y || y, width: was.width || width, height: was.height || height }
-      : { x, y, width, height });
+      ? { x: was.x || x, y: was.y || y, width: was.width || width, height: was.height || height, centre: was.centre || centre }
+      : { x, y, width, height, centre });
     snapResized.observe(el);
   }
   snapAll();
@@ -69,7 +85,7 @@ export function toast(message, kind = "error") {
   el.textContent = message;
   el.dataset.kind = kind;
   el.classList.add("show");
-  snapToPixels([el], { y: false }); // centred across; it slides in from above
+  snapToPixels([el], { y: false, width: true, centre: true }); // centred across; it slides in from above
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), 7000);
 }

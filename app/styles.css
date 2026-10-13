@@ -75,9 +75,9 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
   vertical-align: top;
   width: calc(var(--w) * var(--u));
   height: var(--u);
-  padding: calc(2 * var(--optical)) round(calc(var(--u) * 0.1), 1px) 0; /* --optical: theme.css */
+  padding-inline: round(calc(var(--u) * 0.1), 1px); /* the top: the words' baseline, see .pill-label */
   font-size: var(--type-pill);
-  line-height: calc(var(--u) - 2 * var(--stroke) - 2 * var(--optical));
+  line-height: calc(var(--u) - 2 * var(--stroke));
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -87,8 +87,8 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
   display: inline-block;
   width: calc-size(fit-content, round(up, size, 2px)); /* as wide as its words, in whole pixels */
   height: var(--control);
-  padding: calc(2 * var(--optical)) round(calc(var(--control) * 0.55), 1px) 0;
-  line-height: calc(var(--control) - 2 * var(--stroke) - 2 * var(--optical));
+  padding-inline: round(calc(var(--control) * 0.55), 1px); /* the top: the words' baseline, see .pill-label */
+  line-height: calc(var(--control) - 2 * var(--stroke));
   text-align: center;
   cursor: pointer;
 }
@@ -105,6 +105,23 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
    grow or shrink: white on the interface's black; over the 3D view, black or white with the
    backdrop (--over, as the type there). States change fills and type only. */
 .viewport .pill:not(:disabled) { --edge: var(--over); transition: background-color 0.12s, color 0.12s, border-color 0.3s, box-shadow 0.3s; }
+/* Words in pills, buttons and fields: centred on their capitals, the band from the baseline to
+   the capitals' tops (what reads as the middle: the font's own box has more room above them
+   than below), with `text-box` trimming the line to that band. The baseline on a whole pixel:
+   where the room can't be split evenly, the half pixel left goes above (mixed-case words
+   centred on their capitals look a little high, never low). A button or field centres what it
+   holds, from the top padding down; the label pill (no button) is placed from the top. */
+.pill { --h: var(--u); }
+.btn, select, input.unit-number, .select-item { --h: var(--control); }
+.pill:not(.icon, .zoom-track), .btn, select, input.unit-number, .select-item, .pill.icon::after {
+  text-box: trim-both cap alphabetic;
+  --room: calc(var(--h) - 2 * var(--stroke)); /* inside the outline */
+  --baseline: round(up, calc((var(--room) + round(1cap, 1px)) / 2), 1px); /* from the room's top */
+  padding-top: max(0px, calc(2 * var(--baseline) - 1cap - var(--room)));
+  padding-bottom: 0;
+}
+.pill.pill-label, .pill.icon::after { padding-top: calc(var(--baseline) - 1cap); }
+.select-item { --room: var(--h); } /* a dropdown list's line: no outline */
 .pill-label { cursor: default; }
 .pill-label:hover { background-color: var(--ink) !important; }
 .pill-label:empty { display: none; }
@@ -119,7 +136,7 @@ select, input.unit-number {
   width: 100%;
   min-width: 0;
   height: var(--control);
-  padding: calc(2 * var(--optical)) round(calc(var(--control) * 0.45), 1px) 0;
+  padding-inline: round(calc(var(--control) * 0.45), 1px); /* the top: the words' baseline, see .pill-label */
 }
 select {
   -webkit-appearance: none;
@@ -179,12 +196,11 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   z-index: 5;
   width: calc(2 * var(--u));
   height: var(--u);
-  padding: calc(2 * var(--optical)) round(calc(var(--u) * 0.1), 1px) 0;
+  padding-inline: round(calc(var(--u) * 0.1), 1px); /* the top: the words' baseline, see .pill-label */
   border: var(--stroke) solid var(--edge);
   border-radius: 999px;
   background-color: var(--ink);
   box-shadow: inset var(--round-extra) 0 var(--edge), inset calc(-1 * var(--round-extra)) 0 var(--edge); /* see theme.css */
-  line-height: calc(var(--u) - 2 * var(--stroke) - 2 * var(--optical));
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -575,7 +591,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .select-item {
   flex: none;
   height: var(--control);
-  padding: calc(2 * var(--optical)) round(calc(var(--control) * 0.45), 1px) 0;
+  padding-inline: round(calc(var(--control) * 0.45), 1px); /* the top: the words' baseline, see .pill-label */
   border: 0;
   border-radius: 999px;
   background: var(--ink);
@@ -670,9 +686,9 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 /* ---------- messages ---------- */
 .toast {
   position: fixed;
-  left: 50%;
+  left: 0; /* placed in the middle on whole pixels: snapToPixels (dom.js) */
   top: calc(var(--u) + 8px);
-  transform: translate(-50%, -8px);
+  transform: translateY(-8px);
   max-width: min(560px, calc(100vw - 32px));
   background: var(--ink);
   border: var(--stroke) solid var(--error);
@@ -684,4 +700,4 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   z-index: 10;
 }
 .toast[data-kind="ok"], .toast[data-kind="info"] { border-color: var(--wire); }
-.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.show { opacity: 1; transform: none; }

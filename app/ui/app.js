@@ -294,7 +294,7 @@ $("quit-btn").addEventListener("click", quit);
   snapToPixels([...card.children]);
 }
 document.addEventListener("toggle", (e) => {
-  if (e.target instanceof HTMLDialogElement && e.target.open && !e.target.classList.contains("floating")) snapToPixels([e.target]);
+  if (e.target instanceof HTMLDialogElement && e.target.open && !e.target.classList.contains("floating")) snapToPixels([e.target], { centre: true });
 }, true);
 // A newer release on GitHub: "Update available" under the welcome's buttons, opening the
 // releases page (the check: once a start, see platform.js).
