@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import { HOLE_OFFSET_MM, leafShape } from "./model.js";
 import {
+  EDGE_FRAGMENT_HEADER, EDGE_INK,
   FINISH_FRAGMENT, FINISH_HIGHLIGHT, FINISH_REFLECTION, HOLE_DISCARD, LEAF_FILL, LEAF_ROWS, MAX_DETAIL, MID_ROW,
   OTHER_ROWS, PAGE_FRAGMENT_HEADER, PAGE_MAP_FRAGMENT, PAPER_ROLLOFF, patchShader, sheetShader, SHOW_THROUGH,
 } from "./shaders.js";
@@ -68,6 +69,24 @@ export function makeLeaf(scene, i) {
     }
   }
   geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  // The cut edges' place on the page (the front's uv; the back's is mirrored): where the ink
+  // at the page's edge is read from (see edgeMaterial).
+  const edgeUv = new Float32Array(vCount * 2);
+  const uAt = (k) => (size.uStart + size.s[k]) / w;
+  const vAt = (r) => (size.height * (r / (R - 1)) - (size.height - h) / 2) / h;
+  for (let k = 0; k < n; k++) {
+    for (const side of [0, 1]) {
+      edgeUv.set([uAt(k), vAt(0)], (HE + 2 * k + side) * 2);
+      edgeUv.set([uAt(k), vAt(R - 1)], (FE + 2 * k + side) * 2);
+    }
+  }
+  for (let r = 0; r < R; r++) {
+    for (const side of [0, 1]) {
+      edgeUv.set([uAt(n - 1), vAt(r)], (FORE + 2 * r + side) * 2);
+      edgeUv.set([uAt(0), vAt(r)], (ROOT + 2 * r + side) * 2);
+    }
+  }
+  geo.setAttribute("edgeUv", new THREE.BufferAttribute(edgeUv, 2));
 
   const idx = [];
   for (let k = 0; k < n - 1; k++) {
@@ -100,7 +119,9 @@ export function makeLeaf(scene, i) {
   const front = pageMaterial(scene, true);
   const back = pageMaterial(scene, false);
   const board = size.width !== scene.model.width; // a hardcover's board: its edges are covered too
-  const edges = scene.sheetEdges.get(board ? (i === 0 ? scene.frontWrapMat : scene.backWrapMat) : isCover(scene.model, i) ? scene.coverEdgeMat : scene.edgeMat);
+  const edges = board
+    ? scene.sheetEdges.get(i === 0 ? scene.frontWrapMat : scene.backWrapMat) // covered by the case
+    : edgeMaterial(scene, isCover(scene.model, i) ? scene.coverEdgeMat : scene.edgeMat, front, back);
   const materials = [front, back, edges];
   const style = scene.model.style;
   if (style.spine === "coil") {
@@ -122,6 +143,7 @@ export function makeLeaf(scene, i) {
   mesh.onBeforeRender = (renderer, scene, camera, geometry, material) => {
     const base = material.userData.twinOf;
     if (base) twin(material, base);
+    if (material.userData.edgeOf) inkEdges(material);
   };
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -345,6 +367,48 @@ export function pageHit(model, leaf, ray, front, near = 0, far = Infinity) {
     hit = { x: front ? u : 1 - u, y: v };
   }
   return hit;
+}
+
+// How far in from the page's edge its ink is read (mm), and how much of it the cut shows.
+const EDGE_INSET_MM = 0.3;
+const EDGE_INK_SHARE = 0.85;
+
+/**
+ * A sheet's cut edges (head, foot, fore-edge): the paper's edge colour (`base`, the shared
+ * edge material's), with the ink at its pages' edges, front and back, laid on it (see
+ * EDGE_INK): one per sheet, its pages' images being its own.
+ */
+function edgeMaterial(scene, base, front, back) {
+  const m = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide });
+  m.userData.uniforms = {
+    uEdgeFront: { value: scene.white },
+    uEdgeBack: { value: scene.white },
+    uEdgeInset: { value: new THREE.Vector2(EDGE_INSET_MM / scene.model.width, EDGE_INSET_MM / scene.model.height) },
+    uEdgeInk: { value: EDGE_INK_SHARE },
+  };
+  m.userData.edgeOf = { base, front, back, white: scene.white };
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, m.userData.uniforms);
+    sheetShader(shader, scene.shared);
+    shader.vertexShader = patchShader(shader.vertexShader, [
+      ["void main() {", "attribute vec2 edgeUv;\nvarying vec2 vEdgeUv;\nvoid main() {"],
+      ["vec3 transformed = sheetPosition();", (line) => line + "\n  vEdgeUv = edgeUv;"],
+    ]);
+    shader.fragmentShader = patchShader(shader.fragmentShader, [
+      ["void main() {", EDGE_FRAGMENT_HEADER + "void main() {"],
+      ["#include <color_fragment>", (line) => line + "\n" + EDGE_INK],
+    ]);
+  };
+  m.customProgramCacheKey = () => "bookview-sheet-edge";
+  return m;
+}
+
+/** A sheet's edges take the paper's edge colour and the pages' images they show now. */
+function inkEdges(m) {
+  const { base, front, back, white } = m.userData.edgeOf;
+  m.color.copy(base.color);
+  m.userData.uniforms.uEdgeFront.value = front.map ?? white;
+  m.userData.uniforms.uEdgeBack.value = back.map ?? white;
 }
 
 /** A page material's twin (see pageMaterial) takes the settings the page's material has now. */

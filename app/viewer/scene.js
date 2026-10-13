@@ -1106,6 +1106,7 @@ export class BookScene {
         m.dispose();
       }
       for (const m of leaf.mesh.material.slice(3)) m.dispose(); // a coil page's twins (their textures are the page's)
+      if (leaf.mesh.material[2].userData.edgeOf) leaf.mesh.material[2].dispose(); // its edges' (the same)
       leaf.first.material[0].dispose();
       leaf.first.material[1].dispose();
     }

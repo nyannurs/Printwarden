@@ -63,6 +63,28 @@ float pvSoftShadow( sampler2D map, vec2 mapSize, vec4 sc ) {
 }
 `;
 
+// A sheet's cut edges take the ink at its pages' edges (see edgeMaterial in leaf.js): what
+// runs off the page (bleed) shows on the trimmed block, as on a printed book, where
+// designers make patterns of it. Read a hair inside the edge, front and back (the back
+// mirrored), slightly softened (the cut is a fraction of a millimetre, seen edge-on), from
+// the page images as stored (sRGB, see PAGE_COLOR_SPACE in scene.js), and laid on the
+// paper's edge colour as ink is: white leaves it as it is.
+export const EDGE_FRAGMENT_HEADER = /* glsl */ `
+uniform sampler2D uEdgeFront;
+uniform sampler2D uEdgeBack;
+uniform vec2 uEdgeInset;
+uniform float uEdgeInk;
+varying vec2 vEdgeUv;
+`;
+export const EDGE_INK = /* glsl */ `
+  {
+    vec2 at = clamp( vEdgeUv, uEdgeInset, 1.0 - uEdgeInset );
+    vec3 inkFront = sRGBTransferEOTF( texture( uEdgeFront, at, 1.0 ) ).rgb;
+    vec3 inkBack = sRGBTransferEOTF( texture( uEdgeBack, vec2( 1.0 - at.x, at.y ), 1.0 ) ).rgb;
+    diffuseColor.rgb *= mix( vec3( 1.0 ), 0.5 * ( inkFront + inkBack ), uEdgeInk );
+  }
+`;
+
 /**
  * Change three.js's shader source: each [find, replacement] pair's text must be there exactly
  * once (a replacement may be a function of it). A three.js upgrade that changed the text
