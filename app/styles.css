@@ -69,9 +69,9 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
   vertical-align: top;
   width: calc(var(--w) * var(--u));
   height: var(--u);
-  padding: 0 calc(var(--u) * 0.1);
+  padding: calc(2 * var(--optical)) calc(var(--u) * 0.1) 0; /* --optical: theme.css */
   font-size: var(--type-pill);
-  line-height: calc(var(--u) - 2 * var(--stroke));
+  line-height: calc(var(--u) - 2 * var(--stroke) - 2 * var(--optical));
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -80,8 +80,8 @@ h1, h2, h3, strong, b { font-weight: var(--weight); }
 .btn {
   display: inline-block;
   height: var(--control);
-  padding: 0 calc(var(--control) * 0.55);
-  line-height: calc(var(--control) - 2 * var(--stroke));
+  padding: calc(2 * var(--optical)) calc(var(--control) * 0.55) 0;
+  line-height: calc(var(--control) - 2 * var(--stroke) - 2 * var(--optical));
   text-align: center;
   cursor: pointer;
 }
@@ -112,7 +112,7 @@ select, input.unit-number {
   width: 100%;
   min-width: 0;
   height: var(--control);
-  padding: 0 calc(var(--control) * 0.45);
+  padding: calc(2 * var(--optical)) calc(var(--control) * 0.45) 0;
 }
 select {
   -webkit-appearance: none;
@@ -153,8 +153,10 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .viewport-hud { position: absolute; top: calc(-1 * var(--stroke)); right: calc(-1 * var(--stroke)); display: flex; flex-direction: column; align-items: flex-end; }
 /* Icon pills: a square, the icon's square artboard (app/icons/, 1000 × 1000) at 70 % of it,
    centered, as drawn. Its white is the pill's type colour, its black lets the fill through (a
-   luminance mask), so every state (hover, open, disabled) shows as on a pill with type. */
-.pill.icon { --w: 1; position: relative; padding: 0; }
+   luminance mask), so every state (hover, open, disabled) shows as on a pill with type.
+   Hovered (or reached with the keyboard), its name on a pill to its left, sharing its line, as
+   the camera menu's choices; not while that menu is open. */
+.pill.icon { --w: 1; position: relative; padding: 0; overflow: visible; }
 .pill.icon::before {
   content: "";
   position: absolute;
@@ -162,6 +164,28 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   background-color: currentColor;
   mask: none center / 70% 70% no-repeat luminance;
 }
+.pill.icon::after {
+  content: attr(aria-label);
+  position: absolute;
+  top: calc(-1 * var(--stroke));
+  right: 100%;
+  z-index: 5;
+  width: calc(2 * var(--u));
+  height: var(--u);
+  padding: calc(2 * var(--optical)) calc(var(--u) * 0.1) 0;
+  border: var(--stroke) solid var(--edge);
+  border-radius: 999px;
+  background-color: var(--ink);
+  box-shadow: inset var(--round-extra) 0 var(--edge), inset calc(-1 * var(--round-extra)) 0 var(--edge); /* see theme.css */
+  line-height: calc(var(--u) - 2 * var(--stroke) - 2 * var(--optical));
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  visibility: hidden;
+}
+.pill.icon:hover::after, .pill.icon:focus-visible::after { visibility: visible; }
+.pill.icon[aria-expanded="true"]::after { display: none; }
 .pill.icon[data-icon="camera"]::before { mask-image: url("icons/camera.svg"); }
 .pill.icon[data-icon="open"]::before { mask-image: url("icons/open.svg"); }
 .pill.icon[data-icon="close"]::before { mask-image: url("icons/close.svg"); }
@@ -535,7 +559,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .select-item {
   flex: none;
   height: var(--control);
-  padding: 0 calc(var(--control) * 0.45);
+  padding: calc(2 * var(--optical)) calc(var(--control) * 0.45) 0;
   border: 0;
   border-radius: 999px;
   background: var(--ink);

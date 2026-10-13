@@ -47,6 +47,10 @@
   --type-small: max(9.5px, calc(var(--u) * 0.2));
   --type-large: max(15px, calc(var(--u) * 0.38));
   --type-pill: calc(var(--u) * 0.24);
+  /* Type in pills, buttons and fields sits this much below the middle: centred by the numbers,
+     its capitals' and ascenders' tops make it look high (the lowercase carries the weight).
+     Whole pixels: the browser puts type on whole pixels, so a fraction moved it unevenly. */
+  --optical: round(0.08em, 1px);
   --weight: 500;
   --weight-mono: 400;
 
