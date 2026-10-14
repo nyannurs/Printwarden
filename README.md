@@ -59,7 +59,7 @@ The first start downloads Electron, which is a few hundred MB. If you want to bu
 
 ## Color profiles
 
-Printwarden doesn't come with a CMYK profile of its own. It uses the ones already on your computer, from the system's color folders and Adobe's. By default it picks the closest match to coated offset printing, which is usually ISO Coated v2 or Coated FOGRA39 (InDesign installs those). If it can't find any, it falls back to the profile built into pdf.js. Your profiles are only read and never changed.
+Printwarden comes with ISO Coated v2 (ECI) and uses it by default, so colors look the same on every computer. It's included with kind permission of the European Color Initiative (Copyright 2026 by European Color Initiative, [www.eci.org](https://www.eci.org)) and isn't covered by Printwarden's license. If your PDF has an output intent (PDF/X), that one is used instead. You can also pick any CMYK profile installed on your computer, from the system's color folders and Adobe's. Your profiles are only read and never changed.
 
 ## Scope
 
