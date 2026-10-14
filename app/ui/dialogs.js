@@ -529,6 +529,7 @@ const LICENSES = [
   ["Space Grotesk", "SIL Open Font License 1.1", "vendor/fonts/OFL-SpaceGrotesk.txt"],
   ["Space Mono", "SIL Open Font License 1.1", "vendor/fonts/OFL-SpaceMono.txt"],
   ["FFmpeg", "LGPL 2.1 or later", "vendor/licenses/ffmpeg.txt"],
+  ["ISO Coated v2 (ECI)", "European Color Initiative", "vendor/icc/README.txt"],
 ];
 
 /** The licenses of the software from others inside the app (from the About window). */

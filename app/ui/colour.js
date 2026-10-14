@@ -1,6 +1,6 @@
 // Colour management: which CMYK profile the pages are rendered with (see pdf/icc.js). The one
 // last chosen, for every file until another is; until one is, the PDF's output intent if it has
-// one, else the computer's best match.
+// one, else the one included.
 
 import { openForRendering } from "../pdf/load.js";
 import { createRenderer } from "../pdf/render.js";
@@ -11,32 +11,25 @@ import { applySpine, renderSpineArt } from "./spine-panel.js";
 
 const PROFILE_PREF = "cmykProfile"; // remembered choice (localStorage)
 
-// The app ships no profile of its own (none it may pass on): the default is the computer's
-// closest to offset printing on coated paper as Europe's presets have it (FOGRA39, what
-// InDesign's Europe settings use), then its successor, then any coated one, then any.
-const PREFERRED = [/ISO ?Coated v2/i, /FOGRA ?39/i, /PSO Coated v3|FOGRA ?51/i, /(?<!un)coated/i];
-
-/** The installed profile to start with: the first of PREFERRED found, else the first listed. */
-function bestInstalled(installed) {
-  for (const re of PREFERRED) {
-    const hit = installed.find((p) => re.test(p.name));
-    if (hit) return hit;
-  }
-  return installed[0] ?? null;
-}
+// Shipped with the app by the European Color Initiative's permission (see vendor/icc/README.txt):
+// the default everywhere, so colours look the same on every computer, whatever is installed.
+const INCLUDED_PROFILE = { id: "included", name: "ISO Coated v2 (ECI)", url: "vendor/icc/ISOcoated_v2_eci.icc" };
 
 /**
  * The CMYK profiles to choose from, and the one to start with: the profile last chosen,
  * whatever the file (it sticks until another is chosen: the author, 2026-10-12); "From PDF"
  * chosen, or nothing yet, the PDF's output intent (what Acrobat uses) where it has one; else
- * the best installed one (bestInstalled), else pdf.js's own. Every CMYK profile installed on
- * the computer is offered.
+ * ISO Coated v2 (ECI), which ships with the app. Every CMYK profile installed on the computer
+ * is offered too.
  */
 export async function colourOptions(outputIntent) {
   const options = [];
   if (outputIntent) options.push({ id: "intent", name: `From PDF: ${outputIntent.name}`, bytes: outputIntent.profile });
-  const installed = await listCmykProfiles().catch(() => []);
-  for (const p of installed) options.push({ id: `system:${p.path}`, name: p.name, path: p.path });
+  options.push({ id: INCLUDED_PROFILE.id, name: `Included: ${INCLUDED_PROFILE.name}`, url: INCLUDED_PROFILE.url });
+  for (const p of await listCmykProfiles().catch(() => [])) {
+    if (p.name === INCLUDED_PROFILE.name) continue; // the same profile, installed: listed once
+    options.push({ id: `system:${p.path}`, name: p.name, path: p.path });
+  }
   options.push({ id: "builtin", name: "Built-in: US coated (GRACoL)" });
   let pref = null;
   try {
@@ -45,9 +38,7 @@ export async function colourOptions(outputIntent) {
     // no storage: fine
   }
   const has = (id) => options.some((o) => o.id === id);
-  const best = bestInstalled(installed);
-  const fallback = best ? `system:${best.path}` : "builtin";
-  const choice = pref !== "intent" && has(pref) ? pref : outputIntent ? "intent" : fallback;
+  const choice = pref !== "intent" && has(pref) ? pref : outputIntent ? "intent" : INCLUDED_PROFILE.id;
   return { options, choice };
 }
 
@@ -55,6 +46,11 @@ export async function profileBytes(colour, id) {
   const o = colour.options.find((x) => x.id === id);
   if (!o) return null;
   if (o.bytes) return o.bytes;
+  if (o.url) {
+    const response = await fetch(o.url);
+    if (!response.ok) throw new Error(`${o.name} is missing from the app (${response.status})`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
   if (o.path) return readProfile(o.path);
   return null;
 }

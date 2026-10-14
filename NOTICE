@@ -5,3 +5,8 @@ Designed by Ramin Strauss. Built with Claude.
 
 Printwarden includes software from others under their own licenses: see CREDITS.md,
 and in the app, About > Licenses.
+
+Printwarden includes the ISO Coated v2 (ECI) color profile (vendor/icc/):
+Copyright 2026 by European Color Initiative, www.eci.org. Distributed by permission
+of the European Color Initiative; not covered by the Apache License (see
+vendor/icc/README.txt).

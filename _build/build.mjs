@@ -21,6 +21,13 @@ const root = path.resolve(here, "..");
 const product = JSON.parse(await fs.readFile(path.join(root, "product.json"), "utf8"));
 const target = process.argv[2] ?? (process.platform === "darwin" ? "mac" : "win");
 
+// 0. The CMYK profile the app ships with must be there (see ../vendor/icc/README.txt).
+const icc = path.join(root, "vendor", "icc", "ISOcoated_v2_eci.icc");
+if ((await fs.stat(icc).catch(() => null))?.size !== 1829077) {
+  console.error(`Missing or wrong ${icc}: see vendor/icc/README.txt for where it comes from.`);
+  process.exit(1);
+}
+
 // FFmpeg for transparent videos, for each architecture this build ships: built from the
 // official source with only what the app uses, LGPL (../tools/build-ffmpeg.sh), kept in
 // ffmpeg-lgpl/<platform>-<arch>/ with its license and how it was made.
