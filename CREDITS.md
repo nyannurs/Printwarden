@@ -7,7 +7,8 @@ Every outside project Printwarden includes code from, with its license. The lice
 | Project | License | What it's used for | Where |
 | --- | --- | --- | --- |
 | [three.js](https://github.com/mrdoob/three.js) r170 | MIT | 3D rendering, plus addons (RoomEnvironment, EffectComposer, OutputPass) | `vendor/three.module.js`, `vendor/three-addons/` |
-| [pdf.js](https://github.com/mozilla/pdf.js) | Apache-2.0 | Reading and rendering PDFs; its WebAssembly decoders (JBIG2, OpenJPEG) and qcms colour management | `vendor/pdf.mjs`, `vendor/pdf.worker.mjs`, `vendor/pdf-wasm/`, `vendor/pdf-cmaps/`, `vendor/pdf-standard-fonts/`, `vendor/pdf-iccs/` |
+| [pdf.js](https://github.com/mozilla/pdf.js) | Apache-2.0 | Reading and rendering PDFs; its WebAssembly decoders (JBIG2, OpenJPEG) and qcms colour management. `pdf.worker.mjs` has one line added by `tools/patch-pdfjs.py`: its JPEG decoder asks ours first (below) | `vendor/pdf.mjs`, `vendor/pdf.worker.mjs`, `vendor/pdf-wasm/`, `vendor/pdf-cmaps/`, `vendor/pdf-standard-fonts/`, `vendor/pdf-iccs/` |
+| [jpeg-decoder](https://github.com/image-rs/jpeg-decoder) 0.3.2 (image-rs) | MIT (or Apache-2.0) | Decoding the JPEGs pdf.js would decode in JavaScript (CMYK photos), compiled to WebAssembly from `tools/jpegwasm` by `tools/build-jpeg-wasm.sh` | `vendor/jpeg-decoder.wasm`, notice `vendor/licenses/jpeg-decoder.txt` |
 | [qcms](https://github.com/FirefoxGraphics/qcms) (via pdf.js) | MIT | ICC colour conversion (embedded profiles, plain CMYK) | `vendor/pdf-wasm/qcms_bg.wasm` |
 | [pdf-lib](https://github.com/Hopding/pdf-lib), with @pdf-lib/standard-fonts, UPNG.js and pako bundled in | MIT | Writing the imposed PDF | `vendor/pdf-lib.esm.js` (notices in `vendor/licenses/pdf-lib.txt`), `app/impose/writer.js` |
 | [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) | MIT | Writing MP4 video | `vendor/mp4-muxer/` |
@@ -27,4 +28,5 @@ Installed with `npm install` in the project folder, for `npm run check` (2026-10
 | [ESLint](https://eslint.org), [@eslint/js](https://github.com/eslint/eslint), [globals](https://github.com/sindresorhus/globals) | MIT | The linter (`eslint.config.mjs`) |
 | [TypeScript](https://www.typescriptlang.org) 7 | Apache-2.0 | The type check of the JavaScript (`jsconfig.json`, `jsconfig.workers.json`) |
 | [@types/three](https://github.com/DefinitelyTyped/DefinitelyTyped) 0.170.0 | MIT | three.js r170's types |
+| [Rust](https://www.rust-lang.org) with the wasm32-unknown-unknown target | MIT or Apache-2.0 | Builds the JPEG decoder (`tools/build-jpeg-wasm.sh`); the built `.wasm` is committed, so the app needs no Rust |
 | [pdfjs-dist](https://github.com/mozilla/pdf.js) 6.3.289, [pdf-lib](https://github.com/Hopding/pdf-lib) 1.17.1, [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) 5.2.2 | Apache-2.0; MIT; MIT | Their types, for the files in `vendor/` (byte for byte these releases) |

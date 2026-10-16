@@ -553,6 +553,7 @@ const LICENSES = [
   ["Chromium", "BSD 3-Clause and others", null, "Chromium's licenses, and those of the projects it includes, ship with the app: LICENSES.chromium.html (Windows: next to Printwarden.exe; macOS: in Printwarden.app/Contents/Resources/licenses)."],
   ["three.js", "MIT", "vendor/LICENSE.three.txt"],
   ["pdf.js", "Apache License 2.0", "vendor/LICENSE.pdfjs.txt"],
+  ["jpeg-decoder", "MIT", "vendor/licenses/jpeg-decoder.txt"],
   ["qcms", "MIT", "vendor/pdf-wasm/LICENSE_QCMS"],
   ["OpenJPEG", "BSD 2-Clause", "vendor/pdf-wasm/LICENSE_OPENJPEG"],
   ["PDFium JBIG2 decoder", "BSD 3-Clause", "vendor/pdf-wasm/LICENSE_JBIG2"],

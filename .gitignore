@@ -28,3 +28,5 @@ UIsketch.pdf
 referencescreenshot.pdf
 # The author's icon workspace (Illustrator file, exports); the app's copies are in app/icons/
 /icons/
+# The JPEG decoder's build (tools/build-jpeg-wasm.sh); the .wasm it makes is in vendor/
+tools/jpegwasm/target/

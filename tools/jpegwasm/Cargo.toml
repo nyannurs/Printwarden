@@ -1,0 +1,22 @@
+# The JPEG decoder pdf.js's parser thread uses for CMYK JPEGs: see src/lib.rs and
+# tools/build-jpeg-wasm.sh. Not published as a crate.
+[package]
+name = "printwarden-jpeg"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# No threads (rayon) in WebAssembly.
+jpeg-decoder = { version = "0.3.2", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
