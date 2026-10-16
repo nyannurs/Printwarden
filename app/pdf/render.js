@@ -26,15 +26,17 @@ export function baseHeight(pageCount, aspect) {
 
 /**
  * How many threads render pages: half the processor's, two to six; fewer on a computer with
- * little memory (three with 8 GB), and for a large file (each thread holds all of it and what
- * it learns from it: about 100 MB for a 10 MB report).
+ * little memory (three with 8 GB). Each thread holds what it learns from the file (about
+ * 100 MB for a 10 MB report) and, for a small file, a copy of it; a large one is shared.
  */
-const poolSize = (fileBytes = 0) => Math.max(1, Math.min(
+const poolSize = () => Math.max(1, Math.min(
   Math.max(2, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))),
   Math.floor(SYSTEM_MEMORY / (2.5 * 2 ** 30)),
-  Math.floor(FILE_COPIES_BYTES / Math.max(1, fileBytes)),
 ));
-const FILE_COPIES_BYTES = 600 * 2 ** 20;
+// A file this large is not copied for each thread: one Blob of it is shared, and the threads
+// read the parts their pages need (see render-worker.js). Smaller files are handed over
+// whole, which pdf.js reads fastest.
+const SHARED_FILE_BYTES = 24 * 2 ** 20;
 // Threads idle this long let go of the pages and caches they built (see render-worker.js).
 const REST_MS = 20000;
 
@@ -62,7 +64,7 @@ export function routedRenderer(main, cover) {
  */
 export async function createRenderer(bytes, fallbackPdf, cmykProfile = null) {
   try {
-    const slots = takeSpareWorkers(poolSize(bytes.byteLength));
+    const slots = takeSpareWorkers(poolSize());
     return await WorkerPool.start(bytes, slots, cmykProfile);
   } catch (err) {
     console.warn("Background rendering unavailable, using the main thread:", err);
@@ -233,6 +235,7 @@ class WorkerPool extends Scheduler {
 
   static async start(bytes, slots, cmykProfile) {
     const pool = new WorkerPool();
+    const shared = bytes.byteLength >= SHARED_FILE_BYTES ? new Blob([bytes]) : null;
     pool.workers = await Promise.all(slots.map((slot) => new Promise((resolve, reject) => {
       const { worker } = slot;
       worker.onerror = (e) => reject(new Error(e.message || "worker failed to start"));
@@ -252,8 +255,12 @@ class WorkerPool extends Scheduler {
         }
       };
       slot.loaded.then(() => {
-        const copy = bytes.slice(); // each thread its own copy, handed over (not copied again)
-        worker.postMessage({ type: "open", bytes: copy }, [copy.buffer]);
+        if (shared) {
+          worker.postMessage({ type: "open", blob: shared }); // the one Blob, not a copy
+        } else {
+          const copy = bytes.slice(); // each thread its own copy, handed over (not copied again)
+          worker.postMessage({ type: "open", bytes: copy }, [copy.buffer]);
+        }
       }, reject);
       Promise.resolve(cmykProfile).then((profile) => {
         worker.postMessage({ type: "profile", bytes: profile ?? null });
@@ -261,7 +268,7 @@ class WorkerPool extends Scheduler {
         maybeReady();
       }, reject);
     }))).catch((err) => {
-      // None of them is used then: all stopped (they each hold a copy of the file).
+      // None of them is used then: all stopped (they each hold the file, or part of it).
       for (const slot of slots) slot.worker.terminate();
       throw err;
     });

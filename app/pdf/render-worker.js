@@ -1,6 +1,8 @@
-// Renders PDF pages in a background thread, so the interface never stutters. Each
-// worker owns its own copy of the document; pages are drawn from the PDF's vectors at
-// whatever resolution is asked for and returned as ImageBitmaps (zero-copy transfer).
+// Renders PDF pages in a background thread, so the interface never stutters. A small
+// document is handed to each thread whole; a large one stays in one Blob shared by all of
+// them (no copies), read by the piece (see openDocument). Pages are drawn from the PDF's
+// vectors at whatever resolution is asked for and returned as ImageBitmaps (zero-copy
+// transfer).
 
 import * as pdfjs from "../../vendor/pdf.mjs";
 import { blockTree, skippable } from "./cull.js";
@@ -33,6 +35,45 @@ class FilterFactory {
 }
 
 let doc = null;
+/** @type {{bytes?: Uint8Array, blob?: Blob} | null} the document, as handed to this thread */
+let source = null;
+// Read by the piece, a document is fetched in parts of this size (pdf.js asks for the
+// parts a page needs, neighbouring ones in one go).
+const RANGE_CHUNK = 256 * 1024;
+
+/** Open the document pdf.js-side: whole from bytes, or by range from the shared Blob. */
+async function openDocument(from) {
+  const options = {
+    isOffscreenCanvasSupported: true,
+    disableFontFace: true, // glyphs drawn as paths: no DOM fonts needed, exact outlines
+    fontExtraProperties: true, // and the outlines kept, for vector text (see analyse)
+    useSystemFonts: false,
+    standardFontDataUrl: vendor("pdf-standard-fonts/"),
+    cMapUrl: vendor("pdf-cmaps/"),
+    cMapPacked: true,
+    useWorkerFetch: true, // the parser fetches fonts/cmaps itself (avoids a DOM check)
+    // Colour management: embedded ICC profiles are honoured (qcms, WebAssembly), and
+    // plain CMYK goes through a CMYK printing profile rather than a formula.
+    wasmUrl: vendor("pdf-wasm/"),
+    iccUrl: vendor("pdf-iccs/"),
+    CanvasFactory,
+    FilterFactory,
+  };
+  if (!from.blob) return pdfjs.getDocument({ data: from.bytes, ...options }).promise;
+  // The Blob is the file, shared by every thread: pdf.js gets its first piece now and asks
+  // for the others as pages need them (never the whole file ahead: disableAutoFetch).
+  const { blob } = from;
+  const first = new Uint8Array(await blob.slice(0, Math.min(RANGE_CHUNK, blob.size)).arrayBuffer());
+  const range = new pdfjs.PDFDataRangeTransport(blob.size, first, true);
+  range.requestDataRange = (begin, end) => {
+    blob.slice(begin, end).arrayBuffer().then(
+      (buf) => range.onDataRange(begin, new Uint8Array(buf)),
+      (err) => console.warn("Reading the document failed:", err),
+    );
+  };
+  return pdfjs.getDocument({ range, rangeChunkSize: RANGE_CHUNK, disableAutoFetch: true, disableStream: true, ...options }).promise;
+}
+
 // The pages interpreted last are kept (their operations, decoded images and glyph outlines:
 // tens of MB a page with photos), so another render of one takes milliseconds: the pages in
 // view, rendered again sharper or in other regions, and their neighbours. Older ones are let
@@ -103,23 +144,8 @@ self.onmessage = async ({ data }) => {
   }
   if (data.type === "open") {
     try {
-      doc = await pdfjs.getDocument({
-        data: data.bytes,
-        isOffscreenCanvasSupported: true,
-        disableFontFace: true, // glyphs drawn as paths: no DOM fonts needed, exact outlines
-        fontExtraProperties: true, // and the outlines kept, for vector text (see analyse)
-        useSystemFonts: false,
-        standardFontDataUrl: vendor("pdf-standard-fonts/"),
-        cMapUrl: vendor("pdf-cmaps/"),
-        cMapPacked: true,
-        useWorkerFetch: true, // the parser fetches fonts/cmaps itself (avoids a DOM check)
-        // Colour management: embedded ICC profiles are honoured (qcms, WebAssembly), and
-        // plain CMYK goes through a CMYK printing profile rather than a formula.
-        wasmUrl: vendor("pdf-wasm/"),
-        iccUrl: vendor("pdf-iccs/"),
-        CanvasFactory,
-        FilterFactory,
-      }).promise;
+      source = data.blob ? { blob: data.blob } : { bytes: data.bytes };
+      doc = await openDocument(source);
       self.postMessage({ type: "ready" });
     } catch (err) {
       self.postMessage({ type: "error", message: String(err?.stack ?? err) });
@@ -135,7 +161,18 @@ self.onmessage = async ({ data }) => {
     pages.clear();
     blocks.clear();
     skips.clear();
-    resting = doc.cleanup().catch(() => {}).finally(() => { resting = null; });
+    if (source?.blob) {
+      // Read by the piece, the pieces read so far go with the document: it is opened again
+      // (its structure only) and reads what the next render needs.
+      const old = doc;
+      doc = null;
+      resting = old.loadingTask.destroy().catch(() => {})
+        .then(() => openDocument(source))
+        .then((d) => { doc = d; }, (err) => console.warn("Reopening the document failed:", err))
+        .finally(() => { resting = null; });
+    } else {
+      resting = doc.cleanup().catch(() => {}).finally(() => { resting = null; });
+    }
     return;
   }
   if (data.type === "cancel") {
