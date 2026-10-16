@@ -138,6 +138,7 @@ const SHEET_VERTEX = /* glsl */ `
 #define SHEET_MID ${MID_ROW}
 uniform highp sampler2D uSheets;
 uniform ivec3 uSheetLayout; // a sheet's block width, sheets per column, first row of the other rows
+uniform float uSheetLift; // drawn this far off the sheet's surface, along its normal (a flap on a cover): 0 for the sheets themselves
 ivec2 sheetBlock;
 int sheetJ;
 int sheetN;
@@ -178,7 +179,7 @@ vec3 sheetPoint( int k, int r, float side ) {
   float ext = k == sheetN - 1 ? sheetFore : 0.0;
   float zz = 2.0 * float( r ) / float( SHEET_ROWS - 1 ) - 1.0;
   float d = sheetBow( r ) * t.w * t.w * ( 0.4 + 0.6 * zz * zz );
-  vec2 p = t.xy + vec2( s, c ) * ext + vec2( - c, s ) * ( side * sheetHalf + d );
+  vec2 p = t.xy + vec2( s, c ) * ext + vec2( - c, s ) * ( side * ( sheetHalf + uSheetLift ) + d );
   return vec3( p, sheetZ0 + sheetHeight * float( r ) / float( SHEET_ROWS - 1 ) );
 }
 vec3 sheetPosition() {
@@ -205,6 +206,13 @@ vec3 sheetNormal() {
 `;
 
 export const PAGE_FRAGMENT_HEADER = /* glsl */ `
+// Side glue (perfect, sewn): the first and last page are glued to the cover this far from
+// the spine (mm): nothing printed there can be seen, and the paper creases at its edge.
+uniform float uGlue;
+// The cover's hinge score outside, this far from the spine (mm): a shallow groove's shade.
+// (A flap over a page is a sheet of its own, see makeFlap in leaf.js: the page shader has no
+// texture unit to spare for it, GPUs give sixteen.)
+uniform float uScore;
 uniform sampler2D uBack;
 uniform sampler2D uSmall;
 uniform float uSmallOn;
@@ -258,8 +266,20 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
     sampledDiffuseColor.rgb = pvVectorText( sampledDiffuseColor.rgb, vMapUv, detailDx, detailDy );
   }
   if ( smallShare > 0.0 ) sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, pageSample( uSmall, vMapUv, detailDx, detailDy ).rgb, smallShare );
+  // The strip glued to the cover: paper, whatever was printed there (it faces the cover).
+  float glueFrom = ( uSpineAtU0 > 0.5 ? vMapUv.x : 1.0 - vMapUv.x ) * uPageSize.x;
+  if ( uGlue > 0.0 && glueFrom < uGlue ) sampledDiffuseColor = vec4( 1.0 );
   sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor ); // filtered as stored, see PAGE_COLOR_SPACE
   diffuseColor *= sampledDiffuseColor;
+  // The crease at the glue's edge, the score's groove.
+  if ( uGlue > 0.0 ) {
+    float d = ( glueFrom - uGlue ) / 0.4;
+    diffuseColor.rgb *= 1.0 - 0.22 * exp( -d * d );
+  }
+  if ( uScore > 0.0 ) {
+    float d = ( glueFrom - uScore ) / 0.35;
+    diffuseColor.rgb *= 1.0 - 0.16 * exp( -d * d );
+  }
 #endif
   if ( uOuterCover < 0.5 ) {
     // Gutter shade: less light reaches the paper deep in the fold. Soft falloff, strongest
@@ -355,6 +375,7 @@ export const SHOW_THROUGH = /* glsl */ `
 export function sheetShader(shader, uniforms) {
   shader.uniforms.uSheets = uniforms.uSheets;
   shader.uniforms.uSheetLayout = uniforms.uSheetLayout;
+  shader.uniforms.uSheetLift ??= { value: 0 };
   shader.uniforms.uCasterMap = uniforms.uCasterMap;
   shader.uniforms.uCasterMapOn = uniforms.uCasterMapOn;
   // The same point from every program that draws a sheet, to the last bit: its faces' depth,

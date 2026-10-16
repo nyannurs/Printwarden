@@ -4,6 +4,7 @@
 
 import { analyse, defaultSetup } from "../core/analysis.js";
 import { WIRE_COLORS } from "../core/binding.js";
+import { COVER_BASE } from "../core/document.js";
 import { coverOf, PAPER_FINISHES, paperThicknessMm, showThrough } from "../core/paper.js";
 import { openingOf } from "../core/pairing.js";
 import { planSheets } from "../core/sheets.js";
@@ -42,6 +43,7 @@ export const state = {
   textures: new Map(),
   details: new Map(), // folio -> strips on screen: [{region, pxPerMm}]
   colour: { options: [], choice: "builtin" }, // CMYK profile options for this document
+  flapKey: "", // which flap images the 3D covers show (see applyCoverExtras)
   background: "#56575b", // 3D backdrop colour, remembered between launches
   bookKey: "",
   stripKey: "",
@@ -170,6 +172,42 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
 }
 
 /**
+ * What the covers carry besides their pages: side glue and the hinge score (perfect and
+ * sewn: the first and last page glued to the cover for `glueMm` from the spine, C2 and
+ * page 1, the last page and C3; the score outside on C1 and C4), and a cover file's flaps,
+ * folded in over C2 and C3 (their images rendered from the cover file's outside page).
+ */
+function applyCoverExtras(a) {
+  const n = a.book.pages.length;
+  const glued = (a.setup.binding === "perfect" || a.setup.binding === "sewn") && n >= 6 ? a.setup.glueMm ?? 0 : 0;
+  for (const f of [2, 3, n - 2, n - 1]) scene.setPageGlue(f, glued);
+  for (const f of [1, n]) scene.setCoverScore(f, glued);
+  const flap = a.coverFile && a.coverFile.flapMm > 0.5 && a.coverFile.frontFlapRect ? a.coverFile : null;
+  const key = flap ? `${state.name}|${state.cover?.name}|${flap.flapMm.toFixed(2)}|${n}` : "";
+  if (key === state.flapKey) return;
+  state.flapKey = key;
+  if (!flap) {
+    scene.setPageFlap(2, null);
+    scene.setPageFlap(n - 1, null);
+    return;
+  }
+  const reach = flap.flapMm;
+  state.rendererReady.then(async (r) => {
+    const [front, back] = await Promise.all([
+      r.render(COVER_BASE, flap.frontFlapRect, 1600, 50, { cache: false }),
+      r.render(COVER_BASE, flap.backFlapRect, 1600, 50, { cache: false }),
+    ]);
+    if (state.flapKey !== key) { // another book since
+      front?.close?.();
+      back?.close?.();
+      return;
+    }
+    scene.setPageFlap(2, front, reach, false);
+    scene.setPageFlap(n - 1, back, reach, true); // the back flap's fold is at its right end
+  }).catch((err) => console.error(err));
+}
+
+/**
  * A cover file's spine: its width becomes the spine's (so the 3D block is as thick as the
  * cover was made for), its strip the spine's artwork. After the first analysis, which finds
  * them (coverPages in analysis.js).
@@ -242,6 +280,7 @@ function reanalyse(opening = scene.opening) {
   if (bookKey !== state.bookKey) {
     state.bookKey = bookKey;
     state.details.clear(); // detail images are freed with the old book
+    state.flapKey = ""; // new leaves: the flaps are shown again
     scene.setBook({
       pageCount: book.pages.length, pageSize: size, binding: setup.binding,
       signaturePages: analysis.rule.signaturePages, paper,
@@ -249,6 +288,7 @@ function reanalyse(opening = scene.opening) {
   } else {
     scene.setPaper(paper); // colour, finish: instant
   }
+  applyCoverExtras(analysis);
   setWire(setup.wire);
   applySpine();
   updateSpinePanel(setup.binding);

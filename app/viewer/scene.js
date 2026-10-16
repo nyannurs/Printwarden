@@ -17,7 +17,7 @@ import { drawOrder, shadows } from "./draw.js";
 import { layoutGround, makeExtras } from "./extras.js";
 import { bindInput, glideZoom } from "./input.js";
 import { layoutLeaves } from "./layout.js";
-import { firstMaterial, isCover, makeLeaf, makeSheets, pageHit } from "./leaf.js";
+import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, pageHit } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
 import { motionReset, motionState, motionStep } from "./motion.js";
 import { MAX_DETAIL, sheetShader } from "./shaders.js";
@@ -189,6 +189,8 @@ export class BookScene {
     // these placeholders (a sampler needs a texture of its own kind bound).
     this.vector = { pages: new Map(), noF: vectorFloats(new Float32Array(4), 1, 1), noU: vectorInts(new Uint32Array(2), 1, 1) };
     this.small = new Map(); // folio -> small texture of the page with its text (see #setSmall)
+    /** @type {Map<number, THREE.Mesh>} folio -> a flap lying on that page (see setPageFlap) */
+    this.flaps = new Map();
     // folio -> the page's image, on the GPU only (see setPageTexture); kept through rebuilds.
     this.pageTextures = new Map();
     this.overrides = new Map(); // folio -> an image shown instead for now (see showPageImage)
@@ -822,6 +824,49 @@ export class BookScene {
     this.dirty = true;
   }
 
+  /** The page's material (its face of its leaf), or null. */
+  #pageMaterial(folio) {
+    const leaf = this.leaves[Math.ceil(folio / 2) - 1];
+    if (!leaf) return null;
+    return folio % 2 ? leaf.front : leaf.back;
+  }
+
+  /** Side glue on this page: glued to the cover `mm` from the spine (0: none). See the page shader. */
+  setPageGlue(folio, mm) {
+    const m = this.#pageMaterial(folio);
+    if (!m) return;
+    m.userData.uniforms.uGlue.value = mm;
+    this.dirty = true;
+  }
+
+  /** The cover's hinge score on this (outside) page, `mm` from the spine (0: none). */
+  setCoverScore(folio, mm) {
+    const m = this.#pageMaterial(folio);
+    if (!m) return;
+    m.userData.uniforms.uScore.value = mm;
+    this.dirty = true;
+  }
+
+  /**
+   * A flap lying on this page (the inside of a cover) from the fore-edge in: a sheet of its
+   * own (makeFlap) with its image (taken: freed when replaced or the book is rebuilt),
+   * reaching `reachMm` in, `flip` for the back cover's. Null: none.
+   */
+  setPageFlap(folio, image, reachMm = 0, flip = false) {
+    const leaf = this.leaves[Math.ceil(folio / 2) - 1];
+    const old = this.flaps.get(folio);
+    if (old) {
+      freeFlap(this, old);
+      this.flaps.delete(folio);
+    }
+    if (!leaf || !image) {
+      image?.close?.();
+    } else {
+      this.flaps.set(folio, makeFlap(this, leaf, folio % 2 ? 0 : 1, Math.min(reachMm, leaf.s[leaf.s.length - 1]), image, flip));
+    }
+    this.dirty = true;
+  }
+
   /**
    * Show `image` on a page for now instead of its own (a video's sharper pages), or its own
    * again (null). Not taken: the caller frees it, after.
@@ -1111,6 +1156,8 @@ export class BookScene {
       leaf.first.material[1].dispose();
     }
     this.leaves = [];
+    for (const flap of this.flaps.values()) freeFlap(this, flap); // the flaps lay on them
+    this.flaps.clear();
     // Sharp strips still on their way to the GPU were for the old book's leaves.
     for (const job of this.detailQueue.values()) {
       for (const tex of job.textures) disposeTexture(tex, this.white);

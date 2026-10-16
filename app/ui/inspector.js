@@ -156,6 +156,9 @@ export class Inspector {
         (v) => this.deps.onSetup({ signaturePages: Number(v) }),
       )));
     }
+    if (setup.binding === "perfect" || setup.binding === "sewn") {
+      rows.push(field("Side glue", unitNumber(setup.glueMm ?? 6, "mm", (v) => this.deps.onSetup({ glueMm: Math.min(20, v) }), { min: 0, step: 1, key: "glue" })));
+    }
     if (hasWire(setup.binding)) {
       rows.push(field("Wire", colourSwatches(WIRE_COLORS, setup.wire, "wire", {
         pick: (hex) => this.deps.onSetup({ wire: hex }),

@@ -198,7 +198,7 @@ function* checkCoverFile({ coverFile: c, setup }) {
   if (setup.binding !== Binding.HARDCOVER && Math.abs(c.heightMm - c.pageHeightMm) > 0.5) {
     yield finding("warning", "cover-height", `The cover is ${formatMm(c.heightMm)} mm tall, the pages ${formatMm(c.pageHeightMm)} mm.`);
   }
-  if (c.flapMm > 0.5) yield finding("info", "cover-flaps", `Flaps of ${formatMm(c.flapMm)} mm. They aren't shown in 3D yet.`);
+  if (c.flapMm > 0.5) yield finding("info", "cover-flaps", `Flaps of ${formatMm(c.flapMm)} mm, folded in over the inside of the cover.`);
   if (!c.inside) yield finding("info", "cover-inside", "The cover file has one page: the inside of the cover is shown unprinted.");
   if (c.spineMm > 0.05) yield finding("info", "cover-spine-art", `The spine is shown from the cover file (${formatMm(c.spineMm)} mm).`);
 }
@@ -221,6 +221,12 @@ function* checkBindingHints({ book, rule, setup }) {
   }
   if (rule.innerEdgeLossMm) {
     yield finding("info", "punch", `The punch for ${name} takes ~${rule.innerEdgeLossMm} mm of the inner edge.`);
+  }
+  if ((rule.binding === Binding.PERFECT || rule.binding === Binding.SEWN) && setup.glueMm > 0 && n >= 6) {
+    // Side glue: the cover is glued to the first and last page along the spine, so they can't
+    // open there, and what is printed in that strip faces the cover.
+    yield finding("info", "side-glue",
+      `Side glue: the first and last page are glued to the cover for ${formatMm(setup.glueMm)} mm from the spine. Nothing printed there can be seen.`);
   }
   if (rule.binding === Binding.SADDLE && n >= 8) {
     // The fold takes paper from the outer sheets (a quarter turn round the block), and the trim

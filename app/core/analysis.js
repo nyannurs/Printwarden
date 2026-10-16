@@ -21,6 +21,7 @@ import { validate } from "./validate.js";
  *   wire: string,                  // wire colour (spiral, wire-o), hex
  *   spine: import("./spine.js").Spine,
  *   page: import("./setup.js").PageSetup | null,   // null = derive from the PDF
+ *   glueMm: number,                // side glue (perfect, sewn): the first and last page glued to the cover this far from the spine; 0 none
  *   coverSheet?: boolean,          // imposed files: false for those made before covers had a sheet of their own
  * }} Setup
  */
@@ -36,6 +37,7 @@ export const defaultSetup = () => ({
   wire: WIRE_COLORS[0].hex,
   spine: defaultSpine(),
   page: null,
+  glueMm: 6,
 });
 
 const MAX_SPINE_MM = 80; // wider than two pages by more: flaps
@@ -77,6 +79,9 @@ function coverPages(cover, page, setup, bookPages) {
   const back = region(x0, W);
   const spineRect = spineMm > 0.05 ? region(x0 + W, spineMm) : null;
   const front = region(x0 + W + spineMm, W);
+  // The flaps, on the outside page beyond each cover: shown folded in over the inside covers.
+  const frontFlapRect = flapMm > 0.5 ? region(x0 + 2 * W + spineMm, flapMm) : null;
+  const backFlapRect = flapMm > 0.5 ? region(trim.x0, flapMm) : null;
   const cut = (source, index, rect, label) => (source
     ? { ...source, index: COVER_BASE + index, trimBox: rect, bleedBox: source.bleedBox, file: "cover", label }
     : null);
@@ -89,7 +94,7 @@ function coverPages(cover, page, setup, bookPages) {
   return {
     pages,
     info: { name: cover.name ?? "cover", pageCount: cover.pages.length, inside: !!inside, widthMm, heightMm, pageHeightMm: H,
-      spineMm, calculatedSpineMm, flapMm, spineRect, error },
+      spineMm, calculatedSpineMm, flapMm, spineRect, frontFlapRect, backFlapRect, error },
   };
 }
 const formatWidth = (v) => (Math.round(v * 10) / 10).toString();

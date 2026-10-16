@@ -291,6 +291,8 @@ function pageMaterial(scene, isFront, holesOf = null) {
     uVecOn: { value: 0 },
     uSmall: { value: scene.white }, // the page with its text, small (see #setSmall)
     uSmallOn: { value: 0 },
+    uGlue: { value: 0 }, // side glue and the score: see setPageGlue, setCoverScore
+    uScore: { value: 0 },
   };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, m.userData.uniforms, scene.shared);
@@ -307,6 +309,88 @@ function pageMaterial(scene, isFront, holesOf = null) {
   m.customProgramCacheKey = () => (holesOf ? "bookview-page-holes" : "bookview-page");
   if (holesOf) m.userData.twinOf = holesOf;
   return m;
+}
+
+/**
+ * A cover's flap, folded in over the inside of the cover: a sheet of its own lying on the
+ * leaf's face (`side`: 0 its front, 1 its back) from the fore-edge `reach` mm in, a paper's
+ * thickness off it, following the leaf's shape as the leaf does (the sheet shader, lifted by
+ * `uSheetLift`). Its image is the cover's outside beyond the cover, the fold at the fore-edge;
+ * `flip` for the back flap, whose fold is at its image's right end. Freed by freeFlap.
+ */
+export function makeFlap(scene, leaf, side, reach, image, flip) {
+  const n = leaf.s.length;
+  const R = LEAF_ROWS;
+  const W = leaf.s[n - 1];
+  let k0 = n - 1;
+  while (k0 > 0 && leaf.s[k0 - 1] >= W - reach) k0--;
+  const cols = n - k0;
+  const geo = new THREE.BufferGeometry();
+  const place = new Float32Array(cols * R * 3);
+  const uv = new Float32Array(cols * R * 2);
+  for (let c = 0; c < cols; c++) {
+    const k = k0 + c;
+    const u = Math.min(1, Math.max(0, (W - leaf.s[k]) / reach)); // 0 at the fold (the fore-edge)
+    for (let r = 0; r < R; r++) {
+      const v = c * R + r;
+      place.set([k, r, side + 16 * leaf.i], 3 * v);
+      uv.set([flip ? 1 - u : u, r / (R - 1)], 2 * v);
+    }
+  }
+  const idx = [];
+  for (let c = 0; c < cols - 1; c++) {
+    for (let r = 0; r < R - 1; r++) {
+      const p = c * R + r;
+      idx.push(p, p + 1, p + R, p + R, p + 1, p + R + 1);
+    }
+  }
+  geo.setAttribute("position", new THREE.BufferAttribute(place, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
+  const tex = new THREE.Texture(image);
+  tex.flipY = false;
+  tex.colorSpace = THREE.NoColorSpace; // as the pages' images: decoded in the shader
+  tex.anisotropy = scene.renderer.capabilities.getMaxAnisotropy();
+  tex.needsUpdate = true;
+  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.9, side: THREE.DoubleSide, map: tex });
+  m.userData.lift = { value: scene.model.thickness[leaf.i] }; // off the face it lies on, outward (the sheet shader takes the face's side)
+  m.onBeforeCompile = (shader) => {
+    sheetShader(shader, scene.shared);
+    shader.uniforms.uSheetLift = m.userData.lift;
+    shader.fragmentShader = patchShader(shader.fragmentShader, [
+      ["#include <map_fragment>", `{
+  vec4 ink = texture2D( map, vMapUv );
+  diffuseColor *= sRGBTransferEOTF( ink );
+}`],
+    ]);
+  };
+  m.customProgramCacheKey = () => "bookview-flap";
+  const mesh = new THREE.Mesh(geo, m);
+  mesh.frustumCulled = false;
+  mesh.receiveShadow = true;
+  mesh.renderOrder = 1; // over the cover it lies on
+  // The cover stock's look, as the page's material has it now.
+  const face = side ? leaf.back : leaf.front;
+  mesh.onBeforeRender = () => {
+    m.color.copy(face.color);
+    m.roughness = face.roughness;
+    m.specularIntensity = face.specularIntensity;
+    m.clearcoat = face.clearcoat;
+    m.clearcoatRoughness = face.clearcoatRoughness;
+  };
+  scene.block.add(mesh);
+  return mesh;
+}
+
+/** Take a flap (makeFlap) down: its geometry, texture and image freed. */
+export function freeFlap(scene, mesh) {
+  scene.block.remove(mesh);
+  mesh.geometry.dispose();
+  const tex = /** @type {THREE.MeshPhysicalMaterial} */ (mesh.material).map;
+  tex?.image?.close?.();
+  tex?.dispose();
+  mesh.material.dispose();
 }
 
 /** A sheet face's depth alone (see makeLeaf); `holes`: a coil's, punched as on the page. */

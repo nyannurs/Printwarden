@@ -350,6 +350,13 @@ test("cover file: more than a spine's width beyond two pages is flaps", () => {
   const b = coverCase(464, 2, { binding: "perfect", signaturePages: 4, spine: { color: "front", widthMm: 10, rotation: 0 } });
   eq(b.coverFile.spineMm, 10);
   near(b.coverFile.flapMm, (464 - 296 - 10) / 2, 1e-9);
+  // The flaps' regions on the outside page: beyond each cover, as wide as a flap.
+  const f = b.coverFile;
+  eq([f.backFlapRect.x0, f.backFlapRect.x1], [0, f.flapMm]);
+  near(f.frontFlapRect.x0, f.flapMm + 2 * 148 + 10, 1e-9);
+  near(f.frontFlapRect.x1, 464, 1e-9);
+  eq(coverCase(304, 2).coverFile.frontFlapRect, null, "no flaps: none");
+  eq(analyse({ pages: [], cover: null }, {}).setup.glueMm, 6, "side glue, 6 mm by default");
 });
 
 test("cover file: one page means an unprinted inside; too narrow is an error; a stitched cover keeps its sheet", () => {
