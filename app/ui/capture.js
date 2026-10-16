@@ -203,8 +203,11 @@ async function sharpenForVideo(sharp, folios, height) {
 /** An MP4 (H.264) encoder: the computer's own, through WebCodecs. Frames: RGBA. */
 async function mp4Writer({ width, height, fps }) {
   const { Muxer, ArrayBufferTarget } = await import("../../vendor/mp4-muxer/mp4-muxer.mjs");
-  // Generous: Instagram and editors re-encode anyway; this keeps type and edges clean.
-  const bitrate = Math.round(Math.min(80e6, Math.max(8e6, width * height * fps * 0.12)));
+  // A master, not a delivery copy: 0.4 bits a pixel a frame (1080p at 30 fps about 25 Mbit/s,
+  // 4K about 100), 16 to 120 Mbit/s. Dithered and halftoned images, fine type and pixel art
+  // are the hardest content there is for H.264; at 0.12 (8 Mbit/s for 1080p) still frames
+  // came out soft, the first after a keyframe most. Editors and platforms re-encode anyway.
+  const bitrate = Math.round(Math.min(120e6, Math.max(16e6, width * height * fps * 0.4)));
   let config = null;
   // The graphics card's own encoder if it has one, else the processor.
   search: for (const hardwareAcceleration of /** @type {HardwareAcceleration[]} */ (["prefer-hardware", "no-preference"])) {

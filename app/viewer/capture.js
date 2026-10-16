@@ -98,17 +98,34 @@ export async function captureImage(scene, own, { width, height, transparent = fa
  * fov)), and the same for y.
  */
 function distanceToFit(scene, own, margin) {
+  const { tanH, tanV } = halfFov(scene.camera, margin);
+  let need = 0;
+  bookPoints(scene, own, (x, y, d) => {
+    need = Math.max(need, d + Math.abs(x) / tanH, d + Math.abs(y) / tanV);
+  });
+  return need;
+}
+
+/** The tangents of the camera's half field of view, across and up, times `margin`. */
+function halfFov(cam, margin) {
+  const tanV = Math.tan((cam.fov * Math.PI) / 360) * margin;
+  return { tanV, tanH: tanV * cam.aspect };
+}
+
+/**
+ * Every point of the book that bounds it in the picture, in the camera's frame about its aim:
+ * x across, y up, d toward the camera (`visit(x, y, d)`). Points along each leaf from root to
+ * fore-edge, at head and foot (and the middle, turning).
+ */
+function bookPoints(scene, own, visit) {
   const cam = scene.camera;
   cam.updateMatrixWorld();
   const e = cam.matrixWorld.elements;
   const t = own.currentTarget();
-  const tanV = Math.tan((cam.fov * Math.PI) / 360) * margin;
-  const tanH = Math.tan((cam.fov * Math.PI) / 360) * cam.aspect * margin;
   scene.block.updateWorldMatrix(true, false);
   const m = scene.block.matrixWorld;
   const v = new THREE.Vector3();
   const h2 = scene.model.height / 2;
-  let need = 0;
   const R = LEAF_ROWS - 1;
   for (const leaf of scene.leaves) {
     // A page turning corner first: its head and foot rows each on their own (see rowTurn in
@@ -118,26 +135,25 @@ function distanceToFit(scene, own, margin) {
       const last = p.x.length - 1;
       for (const k of [0, last >> 2, last >> 1, (3 * last) >> 2, last]) {
         v.set(p.x[k], p.y[k], z).applyMatrix4(m).sub(t);
-        const x = v.x * e[0] + v.y * e[1] + v.z * e[2];
-        const y = v.x * e[4] + v.y * e[5] + v.z * e[6];
-        const d = v.x * e[8] + v.y * e[9] + v.z * e[10];
-        need = Math.max(need, d + Math.abs(x) / tanH, d + Math.abs(y) / tanV);
+        visit(v.x * e[0] + v.y * e[1] + v.z * e[2], v.x * e[4] + v.y * e[5] + v.z * e[6], v.x * e[8] + v.y * e[9] + v.z * e[10]);
       }
     }
   }
-  return need;
 }
 
 /**
- * Plan a video before rendering it, by running its timeline twice without drawing (cheap:
- * the layout only). First the camera: each frame's distance is the scene's own framing, or
- * farther where a page swinging up would leave the picture (distanceToFit); widened a little
- * ahead of and after each such moment and averaged over it, so the camera eases out and back
- * instead of following every frame (a window's maximum, then its mean: never closer than a
- * frame needs). Then the pages' density: how many pixels a millimetre each page has where it
- * lies at rest (where the camera is closest between turns, and at the end), so its image can be
- * rendered at the size that draws sharpest (see renderVideo in ui/capture.js).
- * @returns {{distances: Float64Array, density: Map<number, number>}}
+ * Plan a video before rendering it, by running its timeline without drawing (cheap: the
+ * layout only). The camera is fixed for the whole video, an artboard the book moves in: the
+ * direction, aim and zoom it has on the first open spread at rest, and the distance at which
+ * every page stays in the picture in every frame (distanceToFit: the farthest any frame
+ * needs; never closer than the scene frames that spread). Before (0.17.72) the distance
+ * followed the pages, easing out for each turn: the picture pulsed; and the camera turned
+ * and moved as the book opened and closed, as on screen. Then the pages' density: how many
+ * pixels a millimetre each page has where it lies at rest (before each turn, and at the
+ * end), so its image can be rendered at the size that draws sharpest (see renderVideo in
+ * ui/capture.js).
+ * @returns {{fix: () => void, density: Map<number, number>}} `fix`: after the scene frames
+ *   its camera, put the video's in place (then placeCamera)
  */
 function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin, start }) {
   const run = (each) => {
@@ -152,37 +168,75 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
       each(i, ms);
     }
   };
-  const need = new Float64Array(frames);
+  const frameOf = (ms) => Math.min(frames - 1, Math.max(0, Math.ceil((ms * fps) / 1000) - 1));
+  // The first open spread at rest: just before the second turn (or, with one turn, the end).
+  const reference = cues.length > 1 ? frameOf(cues[1].at) : frames - 1;
+  let view = null;
   run((i) => {
-    need[i] = Math.max(scene.fitDistance * scene.rig.zoom, distanceToFit(scene, own, margin));
+    if (i !== reference) return;
+    view = {
+      target: scene.target.clone(), pan: { ...scene.rig.pan },
+      azimuth: scene.rig.azimuth, elevation: scene.rig.elevation, zoom: scene.rig.zoom,
+      distance: scene.fitDistance * scene.rig.zoom,
+    };
   });
-  const k = Math.max(1, Math.round(fps * 0.5));
-  const envelope = need.map((_, i) => Math.max(...need.subarray(Math.max(0, i - k), Math.min(frames, i + k + 1))));
-  const distances = envelope.map((_, i) => {
-    const part = envelope.subarray(Math.max(0, i - k), Math.min(frames, i + k + 1));
-    return part.reduce((s, x) => s + x, 0) / part.length;
-  });
-  // At rest: between turns, the frame where the camera is closest (pages largest), and the
-  // last frame.
-  const bounds = [0, ...cues.map((c) => Math.min(frames, Math.ceil((c.at * fps) / 1000))), frames];
-  const rest = new Set([frames - 1]);
-  for (let b = 0; b + 1 < bounds.length; b++) {
-    let best = -1;
-    for (let i = bounds[b]; i < bounds[b + 1]; i++) if (best < 0 || distances[i] < distances[best]) best = i;
-    if (best >= 0) rest.add(best);
+  const aim = () => {
+    scene.target.copy(view.target);
+    scene.rig.pan = { ...view.pan };
+    scene.rig.azimuth = view.azimuth;
+    scene.rig.elevation = view.elevation;
+    scene.rig.zoom = view.zoom;
+  };
+  // The distance at which every frame fits; then the aim moved to the middle of all the book
+  // does in the picture (a page swinging up reaches far above the spread), and fitted again:
+  // the book as large as it can be with nothing leaving the picture.
+  const fit = () => {
+    let need = 0;
+    run(() => {
+      aim();
+      own.placeCamera();
+      need = Math.max(need, distanceToFit(scene, own, margin));
+    });
+    return need;
+  };
+  let distance = Math.max(view.distance, fit());
+  for (let round = 0; round < 2; round++) {
+    const { tanH, tanV } = halfFov(scene.camera, 1);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    run(() => {
+      aim();
+      own.placeCamera();
+      bookPoints(scene, own, (x, y, d) => {
+        const depth = Math.max(1e-3, distance - d);
+        x0 = Math.min(x0, x / (depth * tanH)); x1 = Math.max(x1, x / (depth * tanH));
+        y0 = Math.min(y0, y / (depth * tanV)); y1 = Math.max(y1, y / (depth * tanV));
+      });
+    });
+    // Across and up in the camera's frame, at the aim's distance (near enough: the shift is small).
+    scene.camera.updateMatrixWorld();
+    const e = scene.camera.matrixWorld.elements;
+    const sx = ((x0 + x1) / 2) * distance * tanH;
+    const sy = ((y0 + y1) / 2) * distance * tanV;
+    view.target.add(new THREE.Vector3(e[0] * sx + e[4] * sy, e[1] * sx + e[5] * sy, e[2] * sx + e[6] * sy));
+    distance = fit();
   }
+  const fix = () => {
+    aim();
+    scene.fitDistance = distance / view.zoom;
+  };
+  const rest = new Set([frames - 1, ...cues.map((c) => frameOf(c.at))]);
   const density = new Map();
   run((i) => {
     if (!rest.has(i)) return;
-    scene.fitDistance = distances[i] / scene.rig.zoom;
+    fix();
     own.placeCamera();
     scene.camera.updateMatrixWorld();
-    for (const view of scene.visiblePages({ width, height })) {
-      const most = Math.max(0, ...view.samples.map((s) => s.pxPerMm));
-      density.set(view.folio, Math.max(density.get(view.folio) ?? 0, most));
+    for (const seen of scene.visiblePages({ width, height })) {
+      const most = Math.max(0, ...seen.samples.map((q) => q.pxPerMm));
+      density.set(seen.folio, Math.max(density.get(seen.folio) ?? 0, most));
     }
   });
-  return { distances, density };
+  return { fix, density };
 }
 
 /**
@@ -192,8 +246,8 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
  * page images for what comes into view); each frame goes to `onFrame(rgba, index)`, rows
  * top down, straight (not premultiplied) alpha, in order. Framed for the output's shape.
  * With `reset` (puts the book where the video starts), the video is planned first (see
- * planVideo): the camera stands back where a page would leave the picture, and `prepare`
- * gets the pages' density at rest (px per mm, by folio).
+ * planVideo): one camera for all of it, every page in the picture, and `prepare` gets the
+ * pages' density at rest (px per mm, by folio).
  *
  * Pipelined: the GPU turns each frame top down and straight-alpha itself, frames are read
  * back without stalling it, and while `onFrame` hands one frame on (to the encoder), the
@@ -260,7 +314,7 @@ export async function recordVideo(scene, own, { width, height, fps, durationMs, 
       own.update(scene.clock);
       while (scene.uploads.size) own.flushUploads(); // every page image for this frame
       own.frameCamera();
-      if (plan) scene.fitDistance = plan.distances[i] / scene.rig.zoom; // pages swinging up stay in the picture
+      plan?.fix(); // the video's fixed camera: every page in the picture, no moving or pulsing
       own.placeCamera();
       renderView(scene, target, null);
       scene.renderer.setRenderTarget(out);
