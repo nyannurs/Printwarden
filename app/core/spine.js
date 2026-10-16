@@ -7,9 +7,8 @@
 import { Binding } from "./binding.js";
 import { coverOf, paperThicknessMm } from "./paper.js";
 
-/** Bindings with a spine you can colour: glued, sewn, cased, and a stitched booklet's fold. */
-export const hasSpine = (binding) => binding === Binding.PERFECT || binding === Binding.SEWN
-  || binding === Binding.HARDCOVER || binding === Binding.SADDLE;
+/** Bindings with a spine you can colour: glued, sewn, cased. (A stitched booklet's fold shows its cover wrapping round.) */
+export const hasSpine = (binding) => binding === Binding.PERFECT || binding === Binding.SEWN || binding === Binding.HARDCOVER;
 
 /** Bindings whose spine can carry printed artwork (a stitched fold only a colour). */
 export const spineTakesArtwork = (binding) => binding === Binding.PERFECT || binding === Binding.SEWN || binding === Binding.HARDCOVER;

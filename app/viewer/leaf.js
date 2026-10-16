@@ -118,7 +118,7 @@ export function makeLeaf(scene, i) {
   const faceCount = 6 * (n - 1) * (R - 1);
   const front = pageMaterial(scene, true);
   const back = pageMaterial(scene, false);
-  const board = size.width !== scene.model.width; // a hardcover's board: its edges are covered too
+  const board = size.board; // a hardcover's board: its edges are covered too
   const edges = board
     ? scene.sheetEdges.get(i === 0 ? scene.frontWrapMat : scene.backWrapMat) // covered by the case
     : edgeMaterial(scene, isCover(scene.model, i) ? scene.coverEdgeMat : scene.edgeMat, front, back);

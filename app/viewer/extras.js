@@ -5,7 +5,7 @@
 
 import * as THREE from "three";
 import { coilCentre, leafShape } from "./model.js";
-import { LEAF_FILL } from "./shaders.js";
+import { LEAF_FILL, patchShader } from "./shaders.js";
 
 // Booklet stitching wire (mm): crown width, clinched leg length, flattened cross-section.
 const STAPLE = { crown: 12.7, leg: 5.2, width: 0.62, thickness: 0.42 };
@@ -29,23 +29,35 @@ export function makeExtras(scene) {
     group.add(extras.slab);
     if (scene.model.binding === "sewn") extras.threads = makeThreads(scene, group);
   } else if (style.spine === "fold") {
-    // Each sheet folds round the ones inside it: nested U's at the spine, the cover's
-    // outermost (in the spine colour), cut paper at head and foot.
-    extras.fold = new THREE.Mesh(new THREE.BufferGeometry(), [scene.spineMat, scene.coverEdgeMat, scene.edgeMat]);
+    // Each sheet folds round the ones inside it: nested U's at the spine, cut paper at head
+    // and foot. The cover's outside shows the cover wrapping round the fold: drawn from the
+    // front and back cover's own page images, the strips of them the fold takes (leafShape).
+    extras.foldCover = foldCoverMaterial(scene);
+    extras.fold = new THREE.Mesh(new THREE.BufferGeometry(), [extras.foldCover, scene.coverEdgeMat, scene.edgeMat]);
+    // Before each draw, not only when the fold is laid out again: the cover's images arrive later.
+    extras.fold.onBeforeRender = () => syncFoldCover(extras.foldCover, scene, scene.model);
     extras.fold.castShadow = extras.fold.receiveShadow = true;
     extras.fold.frustumCulled = false;
     group.add(extras.fold);
     // Two staples, as a stitching head forms them from flattened wire: outside, the crown
     // pressed onto the fold, turning square into the paper at both ends; inside the
     // centre spread, the legs coming out and clinched flat toward each other.
-    const crown = stapleGeometry([[-STAPLE.crown / 2, -1.2], [-STAPLE.crown / 2, 0], [STAPLE.crown / 2, 0], [STAPLE.crown / 2, -1.2]]);
-    const legs = stapleGeometry([[-STAPLE.crown / 2, -1.2], [-STAPLE.crown / 2, 0], [-STAPLE.crown / 2 + STAPLE.leg, 0]]);
-    const legs2 = stapleGeometry([[STAPLE.crown / 2, -1.2], [STAPLE.crown / 2, 0], [STAPLE.crown / 2 - STAPLE.leg, 0]]);
+    // The crown's ends and the legs' turn each reach half way through the block, where they
+    // meet; a block thinner than the wire gets a flatter staple (squashed in its thickness),
+    // so nothing sticks out through the covers. (Built for a thick block, the wire poked
+    // through an 8-page 60 gsm booklet, 0.3 mm thick, as a ghost of a staple on its cover.)
+    const into = Math.max(0.2, Math.min(1.2, scene.model.total / 2));
+    const bend = Math.min(0.45, 0.9 * into);
+    extras.stapleSquash = Math.min(1, scene.model.total / (1.5 * STAPLE.thickness));
+    const crown = stapleGeometry([[-STAPLE.crown / 2, -into], [-STAPLE.crown / 2, 0], [STAPLE.crown / 2, 0], [STAPLE.crown / 2, -into]], bend);
+    const legs = stapleGeometry([[-STAPLE.crown / 2, -into], [-STAPLE.crown / 2, 0], [-STAPLE.crown / 2 + STAPLE.leg, 0]], bend);
+    const legs2 = stapleGeometry([[STAPLE.crown / 2, -into], [STAPLE.crown / 2, 0], [STAPLE.crown / 2 - STAPLE.leg, 0]], bend);
     extras.staples = [-1, 1].map((sgn) => {
       const z = sgn * h * 0.27;
       const outer = new THREE.Mesh(crown, scene.stapleMat);
       const inner = new THREE.Group();
       inner.add(new THREE.Mesh(legs, scene.stapleMat), new THREE.Mesh(legs2, scene.stapleMat));
+      outer.scale.y = inner.scale.y = extras.stapleSquash;
       outer.position.z = inner.position.z = z;
       outer.castShadow = true;
       inner.children.forEach((m) => { m.castShadow = true; });
@@ -213,7 +225,7 @@ export function layoutExtras(scene) {
     for (const st of ex.staples) {
       // Each staple's local y points out of the paper it lies on, and rests on it: the
       // crown on the spine, the legs on the centre spread.
-      const up = STAPLE.thickness * 0.5;
+      const up = STAPLE.thickness * 0.5 * ex.stapleSquash;
       const legUp = STAPLE.width * 0.5; // clear of the centre fold's walls
       st.outer.position.set(outerApex.x + outerApex.nx * up, outerApex.y + outerApex.ny * up, st.outer.position.z);
       st.outer.rotation.z = Math.atan2(outerApex.ny, outerApex.nx) - Math.PI / 2;
@@ -352,8 +364,7 @@ export function layoutGround(scene) {
 
 /** A staple's wire along a path in its own plane (z along the spine, y out of the paper),
  * corners rounded as wire bends; flattened cross-section, closed ends. */
-function stapleGeometry(points) {
-  const BEND = 0.45;
+function stapleGeometry(points, BEND = 0.45) {
   const path = [];
   for (let i = 0; i < points.length; i++) {
     const [pz, py] = points[i];
@@ -432,6 +443,49 @@ function stapleGeometry(points) {
  * fold, 2 the pages'. Returns the outside of the cover's fold and the inside of the centre
  * sheet's, at their middle (for the staples' crowns and legs).
  */
+/**
+ * The outside of the cover's fold: the front cover's page image from its root back to the
+ * fold's apex, then the back cover's from the apex to its root (the strips of them the fold
+ * takes: `uFoldStart` of each, as leafShape sets their uStart). The mesh's uv is the way
+ * along the fold (0 at the front cover's root, 1 at the back's) and down it (head 0). Page
+ * images are stored as sRGB (see PAGE_COLOR_SPACE in scene.js): decoded here as the pages do.
+ */
+function foldCoverMaterial(scene) {
+  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
+  m.defines = { USE_UV: "" };
+  m.userData.uniforms = { uFoldFront: { value: scene.white }, uFoldBack: { value: scene.white }, uFoldStart: { value: 0 } };
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, m.userData.uniforms);
+    shader.fragmentShader = patchShader(shader.fragmentShader, [
+      ["void main() {", "uniform sampler2D uFoldFront;\nuniform sampler2D uFoldBack;\nuniform float uFoldStart;\nvoid main() {"],
+      ["#include <map_fragment>", `{
+  float t = vUv.x;
+  vec4 ink = t < 0.5 ? texture2D( uFoldFront, vec2( uFoldStart * ( 1.0 - 2.0 * t ), vUv.y ) )
+                     : texture2D( uFoldBack, vec2( 1.0 - uFoldStart * ( 2.0 * t - 1.0 ), vUv.y ) );
+  diffuseColor *= sRGBTransferEOTF( ink );
+}`],
+    ]);
+  };
+  m.customProgramCacheKey = () => "bookview-fold-cover";
+  return m;
+}
+
+/** The fold's cover material takes the cover pages' images and the cover stock's look, as drawn now. */
+function syncFoldCover(m, scene, book) {
+  const front = scene.leaves[0]?.front;
+  const back = scene.leaves[scene.leaves.length - 1]?.back;
+  if (!front || !back) return;
+  const u = m.userData.uniforms;
+  u.uFoldFront.value = front.map ?? scene.white;
+  u.uFoldBack.value = back.map ?? scene.white;
+  u.uFoldStart.value = leafShape(book, 0).uStart / book.width;
+  m.color.copy(front.color);
+  m.roughness = front.roughness;
+  m.specularIntensity = front.specularIntensity;
+  m.clearcoat = front.clearcoat;
+  m.clearcoatRoughness = front.clearcoatRoughness;
+}
+
 function writeFoldGeometry(geo, leaves, book) {
   const SEGS = 32;
   const ROW = SEGS + 1;
@@ -458,6 +512,7 @@ function writeFoldGeometry(geo, leaves, book) {
     }
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 3), 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 3), 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 2), 2)); // the cover's outside (see foldCoverMaterial)
     geo.setIndex(groups.flat());
     geo.clearGroups();
     let at = 0;
@@ -545,6 +600,16 @@ function writeFoldGeometry(geo, leaves, book) {
     fold.box.set([x0, y0, x1, y1], 4 * k);
     const base = k * SHEET;
     strip(base, half, -h2, half, h2, 0, 1); // outside
+    if (k === 0) {
+      // Along the fold (0 at the front cover's root, 1 at the back's) and down it (0 at the head).
+      const uv = geo.attributes.uv;
+      for (let j = 0; j <= SEGS; j++) {
+        const v = base + 2 * j;
+        uv.setXY(v, j / SEGS, (pos.getZ(v) + h2) / (2 * h2));
+        uv.setXY(v + 1, j / SEGS, (pos.getZ(v + 1) + h2) / (2 * h2));
+      }
+      uv.needsUpdate = true;
+    }
     strip(base + 2 * ROW, -half, h2, -half, -h2, 0, -1); // inside
     strip(base + 4 * ROW, -half, -h2, half, -h2, -1, 1); // head
     strip(base + 6 * ROW, half, h2, -half, h2, 1, 1); // foot

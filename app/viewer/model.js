@@ -971,19 +971,39 @@ export function coilCentre(book, closed, side = 1) {
  * turns).
  * @returns {{s: Float32Array, width: number, height: number, uStart: number}}
  */
+/**
+ * A leaf's shape: arc-length samples along it, its flat width and height (mm), where on the
+ * page its content starts (uStart, mm: what a fold or a joint takes), and whether it is a board.
+ * @typedef {{s: Float32Array, width: number, height: number, uStart: number, board: boolean}} LeafShape
+ */
+
+/** @returns {LeafShape} */
 export function leafShape(book, i) {
   const st = book.style;
-  const board = st.spine === "case" && (i === 0 || i === book.leafCount - 1);
-  book.leafShapes ??= new Map();
-  const kind = board ? "board" : "page";
+  const n = book.leafCount;
+  const board = st.spine === "case" && (i === 0 || i === n - 1);
+  book.leafShapes ??= /** @type {Map<string, LeafShape>} */ (new Map());
+  // One shape for pages and one for boards; a stitched book's sheets one per depth (below).
+  const depth = st.spine === "fold" ? Math.min(i, n - 1 - i) : null;
+  const kind = board ? "board" : depth === null ? "page" : `fold:${depth}`;
   if (!book.leafShapes.has(kind)) {
     if (board) {
       const r = st.board / 2;
       const width = book.width + st.square - st.joint - r;
-      book.leafShapes.set(kind, { s: samples(width), width, height: book.height + 2 * st.square - 2 * r, uStart: st.joint });
+      book.leafShapes.set(kind, { s: samples(width), width, height: book.height + 2 * st.square - 2 * r, uStart: st.joint, board: true });
+    } else if (depth !== null) {
+      // A stitched sheet folds round the sheets inside it, and the fold takes paper from each
+      // half: a quarter turn of radius half the gap between its two halves, closed. The page's
+      // content starts that far along (uStart: hidden in the fold, the cover's most), and the
+      // trim leaves every half the flat width the cover's has, so the inner pages lose the
+      // difference at their fore-edge: the creep a trimmed booklet shows. (Every half was the
+      // page's whole width from its root: no creep, and nothing in the fold.)
+      const folded = (d) => (n - 1 - d > d ? (Math.PI / 4) * (book.cum[n - 1 - d] - book.cum[d]) : 0);
+      const width = book.width - folded(0);
+      book.leafShapes.set(kind, { s: samples(width), width, height: book.height, uStart: folded(depth), board: false });
     } else {
       const s = st.spine === "coil" ? evenly(book.width, 2) : samples(book.width);
-      book.leafShapes.set(kind, { s, width: book.width, height: book.height, uStart: 0 });
+      book.leafShapes.set(kind, { s, width: book.width, height: book.height, uStart: 0, board: false });
     }
   }
   return book.leafShapes.get(kind);

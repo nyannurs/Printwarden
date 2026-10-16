@@ -281,7 +281,7 @@ test("detail plan: limits are respected, flat view needs one strip", async () =>
 // --- book spine --------------------------------------------------------------------------
 
 test("spine: which bindings have one, and which take artwork", () => {
-  eq(["saddle", "perfect", "sewn", "spiral", "wire-o"].map(hasSpine), [true, true, true, false, false]);
+  eq(["saddle", "perfect", "sewn", "hardcover", "spiral", "wire-o"].map(hasSpine), [false, true, true, true, false, false]); // a stitched fold shows its cover
   eq(["saddle", "perfect", "sewn"].map(spineTakesArtwork), [false, true, true]);
 });
 

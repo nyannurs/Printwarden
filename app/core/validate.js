@@ -200,6 +200,13 @@ function* checkBindingHints({ book, rule, setup }) {
   if (rule.innerEdgeLossMm) {
     yield finding("info", "punch", `The punch for ${name} takes ~${rule.innerEdgeLossMm} mm of the inner edge.`);
   }
+  if (rule.binding === Binding.SADDLE && n >= 8) {
+    // The fold takes paper from the outer sheets (a quarter turn round the block), and the trim
+    // takes the same off the inner pages' fore-edge: creep (see leafShape, and the export's compensation).
+    const fold = (Math.PI / 4) * thicknessMm;
+    yield finding("info", "fold",
+      `The fold takes about ${formatMm(fold)} mm of the cover's inner margin, and trimming up to that much off the innermost pages' outer edge (creep).`);
+  }
 }
 
 function* checkFolioStart({ book }) {
