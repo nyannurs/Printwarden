@@ -70,7 +70,7 @@ export function analyse(doc, partial = {}) {
     paper,
     page,
     blanks: imposed ? [] : input.blanks,
-    paperThicknessMm: paperThicknessMm(paper.gsm, paper.finish),
+    paperThicknessMm: paperThicknessMm(paper.gsm, paper.finish, paper.volume ?? null),
   };
   if (!imposed) {
     book = buildBook(doc.pages, detection.isSpread, setup.blanks);

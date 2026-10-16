@@ -4,7 +4,7 @@
 import { BINDING_LABELS, hasWire, WIRE_COLORS } from "../core/binding.js";
 import { label } from "../core/book.js";
 import { SpreadMode } from "../core/detect.js";
-import { coverOf, PAPER_COLORS, PAPER_FINISHES } from "../core/paper.js";
+import { caliperUm, coverOf, PAPER_COLORS, PAPER_FINISHES } from "../core/paper.js";
 import { bookThicknessMm, hasSpine } from "../core/spine.js";
 import { formatMm, formatSize, paperName } from "../core/units.js";
 import { snapToPixels } from "./dom.js";
@@ -170,6 +170,7 @@ export class Inspector {
     const set = (patch) => this.deps.onSetup({ paper: { ...paper, ...patch } });
     const finishes = Object.entries(PAPER_FINISHES).map(([k, v]) => [k, v.label]);
     const gsm = (v, max) => Math.max(40, Math.min(max, v));
+    const volume = (um, weight) => Math.max(0.5, Math.min(3, um / weight));
 
     const rows = [
       field("Paper color", colourSwatches(PAPER_COLORS, paper.color, "paper", {
@@ -180,10 +181,15 @@ export class Inspector {
         pick: (hex) => set({ coverColor: hex }),
         preview: (hex) => this.deps.onPaperPreview({ coverColor: hex }),
       })),
-      field("Paper finish", select(finishes, paper.finish, (v) => set({ finish: v }))),
-      field("Cover finish", select(finishes, cover.finish, (v) => set({ coverFinish: v }))),
+      // Another finish is another paper: its thickness goes back to the finish's typical.
+      field("Paper finish", select(finishes, paper.finish, (v) => set({ finish: v, volume: null }))),
+      field("Cover finish", select(finishes, cover.finish, (v) => set({ coverFinish: v, coverVolume: null }))),
       field("Paper weight", unitNumber(paper.gsm, "gsm", (v) => set({ gsm: gsm(v, 400) }), { min: 40, step: 5 })),
       field("Cover weight", unitNumber(cover.gsm, "gsm", (v) => set({ coverGsm: gsm(v, 450) }), { min: 40, step: 5 })),
+      // The caliper, as a printer quotes it: kept as the paper's volume (see paper.js), so it
+      // follows the weight. Half to three times the weight in µm: the papers there are.
+      field("Paper thickness", unitNumber(caliperUm(paper), "µm", (v) => set({ volume: volume(v, paper.gsm) }), { min: 20, step: 5, key: "paper-caliper" })),
+      field("Cover thickness", unitNumber(caliperUm(cover), "µm", (v) => set({ coverVolume: volume(v, cover.gsm) }), { min: 20, step: 5, key: "cover-caliper" })),
       field("Spot finish", button("Select", () => this.deps.onFinish(), "btn")),
     ];
     return section("Paper", null, ...rows);

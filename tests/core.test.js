@@ -5,7 +5,7 @@ import { detectSpreads, SpreadMode, SpreadPattern } from "../app/core/detect.js"
 import { creepMm, layoutFor, saddleStitchLayout, signatureLayout } from "../app/core/imposition.js";
 import { centreSpread, facingPairs, pairNumbers, partnerMap } from "../app/core/pairing.js";
 import { expectedMediaSize, manualSetup, setupFromPdf, sides, trimRectFor } from "../app/core/setup.js";
-import { coverOf, defaultPaper } from "../app/core/paper.js";
+import { caliperUm, coverOf, defaultPaper, paperThicknessMm } from "../app/core/paper.js";
 import { bookThicknessMm, calculatedSpine, defaultSpine } from "../app/core/spine.js";
 import { rect, rectSize } from "../app/core/units.js";
 import { eq, near, ok, test, throws } from "./harness.js";
@@ -372,4 +372,16 @@ test("paper: the cover weight starts as its own; a null one (older setups) is th
   const paper = { ...defaultPaper(), gsm: 150 };
   eq(coverOf(paper).gsm, 120, "its own");
   eq(coverOf({ ...paper, coverGsm: null }).gsm, 150, "null: the pages'");
+});
+
+test("paper: a set volume (a printer's caliper) sets the thickness, and the spine with it", () => {
+  near(paperThicknessMm(120, "uncoated"), 0.15, 1e-9, "120 gsm uncoated: the finish's bulk, 1.25");
+  near(paperThicknessMm(120, "uncoated", 1.0), 0.12, 1e-9, "a volume of 1.0: 120 µm");
+  eq(caliperUm({ gsm: 120, finish: "gloss", volume: null }), 108, "gloss: 0.9");
+  eq(caliperUm({ gsm: 120, finish: "gloss", volume: 1.5 }), 180, "its own volume wins");
+  eq(coverOf({ ...defaultPaper(), coverVolume: 2 }).volume, 2, "the cover's own");
+  eq(coverOf(defaultPaper()).volume, null, "none set: the finish's");
+  const thin = calculatedSpine(44, { ...defaultPaper(), volume: 1.0, coverVolume: 1.0 });
+  const bulky = calculatedSpine(44, { ...defaultPaper(), volume: 2.0, coverVolume: 2.0 });
+  near(bulky.widthMm / thin.widthMm, 2, 1e-9, "twice the volume: twice the spine");
 });

@@ -20,7 +20,7 @@ export const BOARD_MM = 2.5;
 export function coverMmFor(binding, paper) {
   if (binding === Binding.HARDCOVER) return BOARD_MM;
   const cover = coverOf(paper);
-  return paperThicknessMm(cover.gsm, cover.finish);
+  return paperThicknessMm(cover.gsm, cover.finish, cover.volume);
 }
 
 /**
@@ -40,7 +40,7 @@ export const defaultSpine = () => ({ color: "front", widthMm: null, rotation: 0 
  */
 export function calculatedSpine(pageCount, paper, binding = null) {
   const leaves = Math.max(1, Math.ceil(pageCount / 2));
-  const paperMm = paperThicknessMm(paper.gsm, paper.finish);
+  const paperMm = paperThicknessMm(paper.gsm, paper.finish, paper.volume ?? null);
   const coverMm = coverMmFor(binding, paper);
   const covers = Math.min(2, leaves);
   const inner = leaves - covers;

@@ -241,7 +241,7 @@ function scenePaper(paper, setup, pageCount) {
   return {
     ...look(paper.color, paper.gsm, paper.finish),
     cover: look(cover.color, cover.gsm, cover.finish),
-    thickness: fromSpine ?? paperThicknessMm(paper.gsm, paper.finish),
+    thickness: fromSpine ?? paperThicknessMm(paper.gsm, paper.finish, paper.volume ?? null),
     coverThickness,
     gsm: paper.gsm, // with the finish, how stiff the pages are: the shape of an open book
     finish: paper.finish,

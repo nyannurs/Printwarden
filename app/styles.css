@@ -369,6 +369,8 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .empty-actions + .empty-actions { margin-top: 8px; }
 .empty-actions .btn { min-width: calc(var(--u) * 3); }
 .empty-actions .btn, .field .btn { width: auto; } /* as wide as their column */
+/* A panel too narrow for a button's words: its column opens to them, in whole pixels. */
+.field .btn { min-width: calc-size(min-content, round(up, size, 2px)); }
 .empty-actions:has(.btn[hidden]) { grid-template-columns: 1fr; } /* a browser: no Quit */
 .app:is([data-state="empty"], [data-state="loading"]) .toolbar { visibility: hidden; }
 /* Centered in the whole window, not the view's part of it: nothing else shows yet. */
@@ -466,9 +468,9 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   justify-content: space-between;
 }
 .section h2 .badge { text-transform: none; }
-/* The labels' column: whole pixels, wide enough for the longest ("Paper weight"); the values
-   start where the panel's pills do. */
-.facts { display: grid; grid-template-columns: round(up, 6.5em, 1px) 1fr; gap: 3px 10px; margin: 0; }
+/* The labels' column: whole pixels, wide enough for the longest ("Paper thickness", 7.8 em);
+   the values start where the panel's pills do. */
+.facts { display: grid; grid-template-columns: round(up, 8em, 1px) 1fr; gap: 3px 10px; margin: 0; }
 .facts dt { color: var(--wire-muted); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 /* The interface's own words (labels, headings, captions) can't be selected: only what is about
@@ -476,7 +478,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .app { user-select: none; }
 .facts dd, .finding p { user-select: text; }
 
-.field { display: grid; grid-template-columns: minmax(round(up, 6.5em, 1px), auto) 1fr; align-items: center; gap: 10px; margin-bottom: 7px; }
+.field { display: grid; grid-template-columns: minmax(round(up, 8em, 1px), auto) 1fr; align-items: center; gap: 10px; margin-bottom: 7px; }
 .field > label { color: var(--wire-muted); }
 .field.wide { grid-template-columns: 1fr; gap: 5px; }
 .dims { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-bottom: 10px; }
