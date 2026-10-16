@@ -8,6 +8,7 @@
 // timeline's thumbnail, and the page where it is small on screen), and on-demand sharp
 // strips for the pages in view, at the resolution they're shown at.
 
+import { COVER_BASE } from "../core/document.js";
 import { mmToPt } from "../core/units.js";
 import { SYSTEM_MEMORY } from "../platform.js";
 
@@ -36,6 +37,22 @@ const poolSize = (fileBytes = 0) => Math.max(1, Math.min(
 const FILE_COPIES_BYTES = 600 * 2 ** 20;
 // Threads idle this long let go of the pages and caches they built (see render-worker.js).
 const REST_MS = 20000;
+
+/**
+ * One renderer for a book from two files: the pages' and the cover file's (its pages at
+ * COVER_BASE and up). Cancelled, warmed and destroyed together.
+ */
+export function routedRenderer(main, cover) {
+  if (!cover) return main;
+  const of = (index) => (index >= COVER_BASE ? [cover, index - COVER_BASE] : [main, index]);
+  return {
+    render(index, ...rest) { const [r, i] = of(index); return r.render(i, ...rest); },
+    warm(index) { const [r, i] = of(index); r.warm(i); },
+    vectorText(index) { const [r, i] = of(index); return r.vectorText(i); },
+    cancel(predicate) { main.cancel(predicate); cover.cancel(predicate); },
+    destroy() { main.destroy(); cover.destroy(); },
+  };
+}
 
 /**
  * Start a renderer for `bytes`: worker pool if possible, main thread otherwise.

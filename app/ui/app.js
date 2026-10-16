@@ -9,7 +9,7 @@ import { openingOf } from "../core/pairing.js";
 import { planSheets } from "../core/sheets.js";
 import { coverMmFor, hasSpine, paperForSpine } from "../core/spine.js";
 import { openForRendering, openPdf, writeImposed } from "../pdf/load.js";
-import { createRenderer, prepareSpareWorkers } from "../pdf/render.js";
+import { createRenderer, prepareSpareWorkers, routedRenderer } from "../pdf/render.js";
 import { makeSamplePdf } from "../pdf/sample.js";
 import { APP_NAME, APP_VERSION, canQuit, latestRelease, onMenuCommand, openReleases, quit, savePdf } from "../platform.js";
 import { BookScene } from "../viewer/scene.js";
@@ -22,7 +22,7 @@ import { Filmstrip } from "./filmstrip.js";
 import { importFinish, openFinishDialog } from "./finish.js";
 import { Inspector } from "./inspector.js";
 import { forgetThumbnails, isSharp, loadAllTextures, sharpen, thumbnail, warmVisiblePages } from "./pages.js";
-import { applySpine, importSpineArt, openSpinePanel, updateSpinePanel } from "./spine-panel.js";
+import { applySpine, importSpineArt, openSpinePanel, renderSpineArt, updateSpinePanel } from "./spine-panel.js";
 import { initView, setBackground, showZoom } from "./view.js";
 
 const app = $("app");
@@ -89,8 +89,24 @@ export async function startImport(file = null) {
   if (choice) openDocument(choice);
 }
 
-/** @param {{file: {name: string, bytes: Uint8Array}, source: "pages" | "imposed", binding?: string|null, signaturePages?: number|null, coverSheet?: boolean}} choice */
-async function openDocument({ file, source, binding = null, signaturePages = null, coverSheet = true }) {
+/**
+ * The render threads for the open document: the pages' file and, if there is one, the cover
+ * file's, as one renderer (routedRenderer). `profile`: the CMYK profile's bytes, or a promise
+ * of them. Used on import, and again when the profile changes (colour.js).
+ * @param {{bytes: Uint8Array, cover?: {bytes: Uint8Array} | null}} files
+ */
+export function startRenderers(files, profile) {
+  const main = createRenderer(files.bytes, () => openForRendering(files.bytes), profile);
+  const cover = files.cover ? createRenderer(files.cover.bytes, () => openForRendering(files.cover.bytes), profile) : null;
+  return Promise.all([main, cover]).then(([m, c]) => routedRenderer(m, c));
+}
+
+/**
+ * @param {{file: {name: string, bytes: Uint8Array}, source: "pages" | "imposed", binding?: string|null, signaturePages?: number|null,
+ *          coverSheet?: boolean, cover?: {name: string, bytes: Uint8Array} | null}} choice
+ *   cover: a separate cover file (the outside as one spread with its spine, the inside on a second page): see coverPages in analysis.js
+ */
+async function openDocument({ file, source, binding = null, signaturePages = null, coverSheet = true, cover = null }) {
   app.dataset.state = state.pages ? "reloading" : "loading";
   showLoad(0);
   let rendererReady = null;
@@ -99,13 +115,15 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     // its shape is known, and pages fill in as the workers come online. The workers wait
     // only for the CMYK profile, which depends on the PDF's output intent.
     const structure = openPdf(file.bytes);
+    const coverStructure = cover && source === "pages" ? openPdf(cover.bytes) : null;
     const colour = structure.then((s) => colourOptions(s.outputIntent));
     colour.catch(() => {}); // a file that can't be read: reported below, from `structure`
-    rendererReady = createRenderer(file.bytes, () => openForRendering(file.bytes),
-      colour.then((c) => profileBytes(c, c.choice)));
+    rendererReady = startRenderers({ bytes: file.bytes, cover: coverStructure ? cover : null }, colour.then((c) => profileBytes(c, c.choice)));
     const { pages } = await structure;
+    const coverPages = coverStructure ? (await coverStructure).pages : null;
     const colourOptionsOfFile = await colour;
     if (!pages.length) throw new Error("This PDF has no pages.");
+    if (coverPages && !coverPages.length) throw new Error(`The cover file ${cover.name} has no pages.`);
     state.colour = colourOptionsOfFile;
     state.renderer?.destroy();
     state.renderer = null;
@@ -118,6 +136,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     state.bytes = file.bytes;
     state.pages = pages;
     state.name = file.name;
+    state.cover = coverPages ? { name: cover.name, bytes: cover.bytes, pages: coverPages } : null;
     // Paper and wire are choices about the print job, not the file: they carry over.
     state.setup = { ...defaultSetup(), paper: state.setup.paper, wire: state.setup.wire, source };
     state.spineArt?.image?.close(); // spine artwork belongs to a document
@@ -139,6 +158,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     document.title = `${file.name} – ${APP_NAME}`;
     app.dataset.state = "ready";
     reanalyse(0); // at the front cover: closed, front up (open it with the button)
+    if (state.cover) await adoptCover();
   } catch (err) {
     console.error(err);
     // Its render threads, already starting, aren't wanted.
@@ -147,6 +167,33 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     showLoad(null);
     toast(`Couldn't open ${file.name}: ${err.message}`, "error");
   }
+}
+
+/**
+ * A cover file's spine: its width becomes the spine's (so the 3D block is as thick as the
+ * cover was made for), its strip the spine's artwork. After the first analysis, which finds
+ * them (coverPages in analysis.js).
+ */
+async function adoptCover() {
+  const cover = state.cover;
+  const cf = state.analysis?.coverFile;
+  if (!cover || !cf || cf.error) return;
+  if (cf.spineMm > 0.05 && cf.flapMm === 0) {
+    state.setup = { ...state.setup, spine: { ...state.setup.spine, widthMm: Math.round(cf.spineMm * 100) / 100 } };
+    reanalyse(0);
+  }
+  const rect = state.analysis.coverFile?.spineRect;
+  if (!rect) return;
+  const art = { name: cover.name, bytes: cover.bytes, box: rect, sizeMm: { width: rect.x1 - rect.x0, height: rect.y1 - rect.y0 } };
+  art.image = await renderSpineArt(art);
+  if (state.cover !== cover) { // another file since
+    art.image.close();
+    return;
+  }
+  state.spineArt?.image?.close();
+  state.spineArt = art;
+  state.setup.spine.rotation = 0;
+  applySpine();
 }
 
 // --- export ------------------------------------------------------------------------
@@ -160,7 +207,7 @@ async function startExport() {
   try {
     const plan = planSheets(a, opts);
     const base = state.name.replace(/\.pdf$/i, "");
-    const bytes = await writeImposed(state.bytes, a, plan, { fileName: state.name, appName: APP_NAME });
+    const bytes = await writeImposed(state.bytes, a, plan, { fileName: state.name, appName: APP_NAME }, state.cover?.bytes ?? null);
     const saved = await savePdf(`${base}_imposed.pdf`, bytes);
     if (saved) toast(`Exported ${saved}. Import it as Imposed sheets to check it in 3D.`, "ok");
   } catch (err) {
@@ -179,7 +226,7 @@ export function updateSetup(patch) {
 function reanalyse(opening = scene.opening) {
   let analysis;
   try {
-    analysis = analyse({ pages: state.pages }, state.setup);
+    analysis = analyse({ pages: state.pages, cover: state.cover ? { name: state.cover.name, pages: state.cover.pages } : null }, state.setup);
   } catch (err) {
     toast(err.message, "error");
     return;

@@ -172,6 +172,7 @@ export function sheetAreaFor(source, setup) {
  * @param {boolean} imposed
  */
 export function trimRectFor(source, half, isRecto, setup, imposed = false) {
+  if (source.file === "cover") return source.trimBox; // its region of the cover file's page (coverPages, analysis.js)
   let whole;
   if (imposed) {
     whole = sheetAreaFor(source, setup);

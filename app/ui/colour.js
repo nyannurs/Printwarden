@@ -2,10 +2,8 @@
 // last chosen, for every file until another is; until one is, the PDF's output intent if it has
 // one, else the one included.
 
-import { openForRendering } from "../pdf/load.js";
-import { createRenderer } from "../pdf/render.js";
 import { listCmykProfiles, readProfile } from "../platform.js";
-import { filmstrip, inspector, scene, state } from "./app.js";
+import { filmstrip, inspector, scene, startRenderers, state } from "./app.js";
 import { forgetThumbnails, loadAllTextures } from "./pages.js";
 import { applySpine, renderSpineArt } from "./spine-panel.js";
 
@@ -65,8 +63,7 @@ export async function setColourProfile(id) {
     // no storage: fine
   }
   const old = state.renderer;
-  const bytes = state.bytes;
-  const rendererReady = createRenderer(bytes, () => openForRendering(bytes), profileBytes(state.colour, id));
+  const rendererReady = startRenderers({ bytes: state.bytes, cover: state.cover }, profileBytes(state.colour, id));
   state.rendererReady = rendererReady;
   state.renderer = null;
   rendererReady.then((r) => {

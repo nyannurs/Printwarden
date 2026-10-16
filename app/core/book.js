@@ -11,6 +11,7 @@
  *   number: number,
  *   source: import("./document.js").SourcePage | null,   // null = inserted blank
  *   half: "full" | "left" | "right",
+ *   label?: string | null,         // a name of its own (a cover file's C1–C4, printed or not)
  * }} BookPage
  * @typedef {{after: number, count: number}} BlankInsertion
  *   Insert `count` blanks after the first `after` pages of the book *before* any
@@ -32,7 +33,7 @@ export const contentKey = (page) => (page.source ? `${page.source.index}${page.h
  */
 export function label(book, folio) {
   const page = book.pages[folio - 1];
-  const own = book.labelled ? page?.source?.label : null;
+  const own = page?.label ?? (book.labelled ? page?.source?.label : null);
   if (own) {
     if (page.half !== "right") return own;
     if (/^\d+$/.test(own)) return String(Number(own) + 1);

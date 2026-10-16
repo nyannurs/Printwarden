@@ -9,13 +9,15 @@ import { pickPdf } from "../platform.js";
 import { addScrollbar } from "./dom.js";
 
 /**
- * Ask what to import. Resolves to {file, source, binding, signaturePages, coverSheet} or null.
+ * Ask what to import. Resolves to {file, source, binding, signaturePages, coverSheet, cover} or null.
  * coverSheet: false for an imposed file exported before covers had a sheet of their own.
+ * cover: a separate cover file, or null (see coverPages in analysis.js).
  * @param {{name: string, bytes: Uint8Array} | null} initialFile  e.g. from drag and drop
  */
 export function importDialog(initialFile = null) {
   return new Promise((resolve) => {
     let file = initialFile;
+    let cover = null;
     const d = dialog("Import PDF");
     const fileName = el("span", "file-name");
     const choose = button("Choose PDF", async () => {
@@ -23,6 +25,22 @@ export function importDialog(initialFile = null) {
       if (picked) setFile(picked);
     });
     const fileRow = row("File", el("div", "file-row", [fileName, choose]));
+    // The cover as a file of its own: one spread with the spine, the inside on page 2.
+    const coverName = el("span", "file-name");
+    const chooseCover = button("Choose PDF", async () => {
+      const picked = await pickPdf();
+      if (picked) {
+        cover = picked;
+        sync();
+      }
+    });
+    const removeCover = button("Remove", () => {
+      cover = null;
+      sync();
+    });
+    const coverRow = row("Cover", el("div", "file-row", [coverName, chooseCover, removeCover]));
+    const coverNote = el("p", "dialog-note");
+    coverNote.textContent = "A separate cover file: the outside as one spread with the spine, the inside on a second page.";
 
     const pages = radio("source", "pages", "Pages", "Single pages or spreads, in reading order");
     const imposed = radio("source", "imposed", "Imposed sheets", "Printer spreads, e.g. from InDesign's Print Booklet");
@@ -38,7 +56,7 @@ export function importDialog(initialFile = null) {
 
     const importBtn = button("Import", () => finish(true), "btn primary");
     const actions = el("div", "dialog-actions", [button("Cancel", () => finish(false)), importBtn]);
-    d.body.append(fileRow, kind, imposedOptions, note, actions);
+    d.body.append(fileRow, kind, imposedOptions, coverRow, coverNote, note, actions);
 
     const sync = () => {
       const isImposed = imposed.input.checked;
@@ -46,6 +64,9 @@ export function importDialog(initialFile = null) {
       signature.closest(".row").hidden = !signed();
       importBtn.disabled = !file;
       fileName.textContent = file ? file.name : "No file chosen";
+      coverRow.hidden = coverNote.hidden = isImposed; // an imposed file has its cover on its sheets
+      coverName.textContent = cover ? cover.name : "None";
+      removeCover.hidden = !cover;
     };
     for (const c of [pages.input, imposed.input, binding]) c.addEventListener("change", sync);
     binding.addEventListener("change", () => {
@@ -79,6 +100,7 @@ export function importDialog(initialFile = null) {
         binding: isImposed ? binding.value : null,
         signaturePages: isImposed && signed() ? Number(signature.value) : null,
         coverSheet: isImposed ? coverSheet : true,
+        cover: isImposed ? null : cover,
       });
     }
 

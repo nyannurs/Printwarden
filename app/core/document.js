@@ -11,8 +11,12 @@ import { rectSize, rotated } from "./units.js";
  *   bleedBox: import("./units.js").Rect | null,
  *   rotation: number,              // /Rotate: 0, 90, 180, 270
  *   label?: string | null,         // the PDF's page label (InDesign: section numbering)
+ *   file?: "cover" | null,         // from the cover file (its index COVER_BASE and up): see coverPages in analysis.js
  * }} SourcePage
  */
+
+/** A cover file's pages are numbered from here (see coverPages in analysis.js), so one index names a page of either file. */
+export const COVER_BASE = 100000;
 
 /** Displayed size of the media box, after /Rotate. */
 export function mediaSize(page) {

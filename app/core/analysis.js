@@ -1,12 +1,13 @@
 // One call from a loaded document plus settings to everything the UI displays.
 
-import { Binding, ruleFor, WIRE_COLORS } from "./binding.js";
+import { Binding, hasWire, ruleFor, WIRE_COLORS } from "./binding.js";
 import { buildBook, buildImposedBook, isRecto } from "./book.js";
 import { detectSpreads, SpreadMode, SpreadPattern } from "./detect.js";
+import { COVER_BASE } from "./document.js";
 import { layoutFor } from "./imposition.js";
 import { facingPairs } from "./pairing.js";
 import { defaultPaper, paperThicknessMm } from "./paper.js";
-import { defaultSpine } from "./spine.js";
+import { calculatedSpine, defaultSpine } from "./spine.js";
 import { bleedRectFor, setupFromPdf, trimRectFor } from "./setup.js";
 import { rectSize, rotated } from "./units.js";
 import { validate } from "./validate.js";
@@ -37,8 +38,65 @@ export const defaultSetup = () => ({
   page: null,
 });
 
+const MAX_SPINE_MM = 80; // wider than two pages by more: flaps
+
 /**
- * @param {{pages: import("./document.js").SourcePage[], name?: string}} doc
+ * A separate cover file: page 1 the outside as one spread (back cover, spine, front cover,
+ * flaps beyond if any), page 2 the inside the same way, or none (the inside unprinted). What
+ * the book gets: four pages cut from it (C1 the front, C2 and C3 the inside, C4 the back),
+ * each a source page of its own with the cover page's boxes and its region as the trim.
+ * The spine is what is left of the cover's width beyond two pages, up to MAX_SPINE_MM; more
+ * than that is flaps, each half of what is left beyond the spine set (the printer's), or
+ * calculated. The spine's strip is the spine's artwork (spineRect), see app.js.
+ *
+ * @param {{name?: string, pages: import("./document.js").SourcePage[]}} cover
+ * @param {import("./setup.js").PageSetup} page
+ */
+function coverPages(cover, page, setup, bookPages) {
+  const c = cover.pages[0];
+  const inside = cover.pages[1] ?? null;
+  const trim = c.trimBox ?? c.mediaBox;
+  const W = page.width;
+  const H = page.height;
+  const widthMm = trim.x1 - trim.x0;
+  const heightMm = trim.y1 - trim.y0;
+  const extra = widthMm - 2 * W;
+  const calculatedSpineMm = calculatedSpine(bookPages, setup.paper, setup.binding).widthMm;
+  let error = null;
+  let spineMm = 0;
+  let flapMm = 0;
+  if (c.rotation % 360) error = "The cover page is rotated. Export the cover unrotated.";
+  else if (extra < -0.5) error = `The cover is ${formatWidth(widthMm)} mm wide, narrower than two ${formatWidth(W)} mm pages.`;
+  else if (extra <= MAX_SPINE_MM) spineMm = Math.max(0, extra);
+  else {
+    spineMm = setup.spine.widthMm ?? calculatedSpineMm;
+    flapMm = Math.max(0, (extra - spineMm) / 2);
+  }
+  const x0 = trim.x0 + flapMm;
+  const region = (x, w) => ({ x0: x, y0: trim.y0, x1: x + w, y1: trim.y1 });
+  const back = region(x0, W);
+  const spineRect = spineMm > 0.05 ? region(x0 + W, spineMm) : null;
+  const front = region(x0 + W + spineMm, W);
+  const cut = (source, index, rect, label) => (source
+    ? { ...source, index: COVER_BASE + index, trimBox: rect, bleedBox: source.bleedBox, file: "cover", label }
+    : null);
+  const pages = [
+    cut(c, 0, front, "C1"),
+    cut(inside, 1, back, "C2"), // the inside spread is the sheet turned over: the front's inside on the left
+    cut(inside, 1, front, "C3"),
+    cut(c, 0, back, "C4"),
+  ];
+  return {
+    pages,
+    info: { name: cover.name ?? "cover", pageCount: cover.pages.length, inside: !!inside, widthMm, heightMm, pageHeightMm: H,
+      spineMm, calculatedSpineMm, flapMm, spineRect, error },
+  };
+}
+const formatWidth = (v) => (Math.round(v * 10) / 10).toString();
+
+/**
+ * @param {{pages: import("./document.js").SourcePage[], name?: string,
+ *          cover?: {name?: string, pages: import("./document.js").SourcePage[]} | null}} doc
  * @param {Partial<Setup>} partial
  */
 export function analyse(doc, partial = {}) {
@@ -72,12 +130,29 @@ export function analyse(doc, partial = {}) {
     blanks: imposed ? [] : input.blanks,
     paperThicknessMm: paperThicknessMm(paper.gsm, paper.finish, paper.volume ?? null),
   };
+  let coverFile = null;
   if (!imposed) {
     book = buildBook(doc.pages, detection.isSpread, setup.blanks);
+    if (doc.cover?.pages.length && !hasWire(input.binding)) {
+      // The cover file's four pages round the block: C1, C2 … 1, 2, … C3, C4. The block's
+      // own numbering stays (its first page is 1 whether labelled or not).
+      const inner = book;
+      const cut = coverPages(doc.cover, page, setup, inner.pages.length + 4);
+      const [c1, c2, c3, c4] = cut.pages;
+      /** @type {import("./book.js").BookPage[]} */
+      const pages = [c1, c2, ...inner.pages.map((p) => p.source), c3, c4].map((source, i) => ({ number: i + 1, source, half: "full", label: null }));
+      inner.pages.forEach((p, i) => { pages[i + 2].half = p.half; });
+      ["C1", "C2", "C3", "C4"].forEach((name, k) => { pages[k < 2 ? k : pages.length - 4 + k].label = name; });
+      book = { pages, folioStart: inner.folioStart - 2, labelled: true };
+      coverFile = cut.info;
+    }
     layout = layoutFor(rule, book.pages.length);
+    // The cover file isn't imposed here (it goes to the printer as it is): its sheet is left
+    // out where the cover is made apart; a stitched booklet's cover folds round the block.
+    if (coverFile && layout?.coverSheet) layout = { ...layout, sides: layout.sides.filter((s) => !s.cover), sheetCount: layout.sheetCount - 1, coverSheet: false };
   }
   const geometry = book.pages.map((p) => pageGeometry(p, page, imposed));
-  const result = { document: doc, setup, rule, detection, book, geometry, pairs: facingPairs(book), layout, imposed };
+  const result = { document: doc, setup, rule, detection, book, geometry, pairs: facingPairs(book), layout, imposed, coverFile };
   const findings = validate(result);
   return { ...result, findings, hasErrors: findings.some((f) => f.severity === "error") };
 }

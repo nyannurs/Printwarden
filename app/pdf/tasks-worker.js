@@ -7,7 +7,7 @@ import { readImposition, readStructure } from "./structure.js";
 const tasks = {
   structure: ({ bytes }) => readStructure(bytes),
   imposition: ({ bytes }) => readImposition(bytes),
-  export: ({ bytes, analysis, plan, info }) => writeImposedPdf(bytes, analysis, plan, info),
+  export: ({ bytes, analysis, plan, info, coverBytes }) => writeImposedPdf(bytes, analysis, plan, info, coverBytes ?? null),
 };
 
 self.onmessage = async ({ data }) => {

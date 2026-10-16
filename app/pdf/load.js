@@ -63,9 +63,9 @@ export function readImposition(bytes) {
   return run("imposition", payload, async () => (await import("./structure.js")).readImposition(bytes.slice()), transfer);
 }
 
-export function writeImposed(bytes, analysis, plan, info) {
-  return run("export", { bytes, analysis, plan, info },
-    async () => (await import("../impose/writer.js")).writeImposedPdf(bytes, analysis, plan, info));
+export function writeImposed(bytes, analysis, plan, info, coverBytes = null) {
+  return run("export", { bytes, analysis, plan, info, coverBytes },
+    async () => (await import("../impose/writer.js")).writeImposedPdf(bytes, analysis, plan, info, coverBytes));
 }
 
 const vendor = (p) => new URL(`../../vendor/${p}`, import.meta.url).href;

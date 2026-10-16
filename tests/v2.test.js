@@ -2,7 +2,7 @@
 
 import { analyse } from "../app/core/analysis.js";
 import { ruleFor } from "../app/core/binding.js";
-import { buildImposedBook } from "../app/core/book.js";
+import { buildImposedBook, label } from "../app/core/book.js";
 import { saddleStitchLayout } from "../app/core/imposition.js";
 import { defaultExportOptions, planSheets } from "../app/core/sheets.js";
 import { setupFromPdf, sheetAreaFor, snap } from "../app/core/setup.js";
@@ -307,4 +307,59 @@ test("hardcover: boards overhang, square back, sewn rule", () => {
   // Closed: the board's spine edge a joint in from the spine; the block's spine square.
   near(closed(0).x[0], book.style.joint, 1e-6);
   near(closed(Math.floor(book.leafCount / 2)).x[0], closed(1).x[0], 1e-6, "square back:");
+});
+
+// --- a separate cover file ---------------------------------------------------------------
+
+const coverCase = (coverWidth, coverPageCount, setup = { binding: "perfect", signaturePages: 4 }) => {
+  const r = (x0, y0, x1, y1) => ({ x0, y0, x1, y1 });
+  const page = (index, w, h, l = null) => ({ index, mediaBox: r(0, 0, w, h), trimBox: r(0, 0, w, h), bleedBox: null, rotation: 0, label: l });
+  const inner = Array.from({ length: 16 }, (_, i) => page(i, 148, 210, String(i + 1)));
+  const cover = { name: "cover.pdf", pages: Array.from({ length: coverPageCount }, (_, i) => page(i, coverWidth, 210)) };
+  return analyse({ pages: inner, cover }, setup);
+};
+
+test("cover file: four pages cut from it round the block, named C1 to C4, the spine from its width", () => {
+  const a = coverCase(304, 2); // two pages and an 8 mm spine
+  eq(a.book.pages.length, 20);
+  eq([1, 2, 3, 18, 19, 20].map((f) => label(a.book, f)), ["C1", "C2", "1", "16", "C3", "C4"]);
+  eq(a.coverFile.spineMm, 8);
+  eq(a.coverFile.flapMm, 0);
+  eq(a.coverFile.error, null);
+  // C1 is the front cover: the right part of the outside page; C4 the back: its left part.
+  eq([a.geometry[0].trim.x0, a.geometry[0].trim.x1], [156, 304]);
+  eq([a.geometry[19].trim.x0, a.geometry[19].trim.x1], [0, 148]);
+  // The inside page, turned over: C2 (inside front) on its left, C3 on its right.
+  eq([a.geometry[1].trim.x0, a.geometry[18].trim.x0], [0, 156]);
+  eq(a.book.pages[0].source.index, 100000, "the cover file's pages are numbered from COVER_BASE");
+  eq(a.book.pages[1].source.index, 100001);
+  eq(a.book.pages[2].source.index, 0, "the block's first page");
+  ok(a.coverFile.spineRect && a.coverFile.spineRect.x0 === 148 && a.coverFile.spineRect.x1 === 156, "the spine's strip, for its artwork");
+  ok(!a.layout.sides.some((s) => s.cover), "the cover file isn't imposed: no cover sheet");
+  eq(a.layout.sheetCount, 4);
+  ok(a.findings.some((f) => f.code === "cover-spine"), "an 8 mm spine for a 1.5 mm block: said");
+  ok(!a.findings.some((f) => f.code === "mixed-sizes"), "the cover's pages are left out of the size check");
+});
+
+test("cover file: more than a spine's width beyond two pages is flaps", () => {
+  const a = coverCase(464, 2); // 2 x 148 + a spine + 2 flaps
+  ok(a.coverFile.flapMm > 80 && a.coverFile.flapMm < 84, `flaps ${a.coverFile.flapMm}`);
+  near(a.coverFile.spineMm, a.coverFile.calculatedSpineMm, 1e-9, "the spine calculated, no width set");
+  ok(a.findings.some((f) => f.code === "cover-flaps"));
+  // With the printer's spine width set, the flaps are what is left.
+  const b = coverCase(464, 2, { binding: "perfect", signaturePages: 4, spine: { color: "front", widthMm: 10, rotation: 0 } });
+  eq(b.coverFile.spineMm, 10);
+  near(b.coverFile.flapMm, (464 - 296 - 10) / 2, 1e-9);
+});
+
+test("cover file: one page means an unprinted inside; too narrow is an error; a stitched cover keeps its sheet", () => {
+  const one = coverCase(304, 1);
+  eq([one.book.pages[1].source, one.book.pages[18].source], [null, null], "C2 and C3 blank");
+  eq([label(one.book, 2), label(one.book, 19)], ["C2", "C3"], "still named");
+  ok(one.findings.some((f) => f.code === "cover-inside"));
+  const narrow = coverCase(200, 2);
+  ok(narrow.hasErrors && narrow.findings.some((f) => f.code === "cover-file"));
+  const stitched = coverCase(296, 2, { binding: "saddle" });
+  eq(stitched.layout.sheetCount, 5, "the cover folds round the block: its sheet stays");
+  eq([stitched.layout.sides[0].left, stitched.layout.sides[0].right], [20, 1]);
 });

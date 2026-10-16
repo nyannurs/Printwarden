@@ -28,6 +28,7 @@ export function validate(a) {
     ...checkSetup(a),
     ...(a.imposed ? [] : checkSpreadParity(a)),
     ...checkSizes(a),
+    ...checkCoverFile(a),
     ...checkPageCount(a),
     ...checkBindingHints(a),
     ...checkFolioStart(a),
@@ -138,7 +139,7 @@ function* checkSizes({ book, geometry }) {
   const groups = [];
   for (const page of book.pages) {
     const g = geometry[page.number - 1];
-    if (!g) continue;
+    if (!g || page.source?.file === "cover") continue; // a cover file's pages may be taller (a case's)
     const group = groups.find((x) => approxEqual(x.size, g.size, TOLERANCE_MM));
     if (group) group.pages.push(page.number);
     else groups.push({ size: g.size, pages: [page.number] });
@@ -179,6 +180,27 @@ function* checkPageCount({ book, rule, imposed }) {
       `${n} pages doesn't work for ${name}: it needs a multiple of ${rule.pageMultiple}. ` +
       `Add ${needed} page${needed > 1 ? "s" : ""} in InDesign, to reach ${n + needed}.`);
   }
+}
+
+/** The cover file against the block: its spine, its height, what it lacks. */
+function* checkCoverFile({ coverFile: c, setup }) {
+  if (!c) return;
+  if (c.error) {
+    yield finding("error", "cover-file", c.error);
+    return;
+  }
+  const off = c.spineMm - c.calculatedSpineMm;
+  if (c.spineMm > 0.05 && Math.abs(off) > 0.5) {
+    yield finding("warning", "cover-spine",
+      `The cover file's spine is ${formatMm(c.spineMm)} mm; the pages and paper add up to ${formatMm(c.calculatedSpineMm)} mm. ` +
+      "Set the paper thickness to the printer's, or build the cover for the printer's spine width.");
+  }
+  if (setup.binding !== Binding.HARDCOVER && Math.abs(c.heightMm - c.pageHeightMm) > 0.5) {
+    yield finding("warning", "cover-height", `The cover is ${formatMm(c.heightMm)} mm tall, the pages ${formatMm(c.pageHeightMm)} mm.`);
+  }
+  if (c.flapMm > 0.5) yield finding("info", "cover-flaps", `Flaps of ${formatMm(c.flapMm)} mm. They aren't shown in 3D yet.`);
+  if (!c.inside) yield finding("info", "cover-inside", "The cover file has one page: the inside of the cover is shown unprinted.");
+  if (c.spineMm > 0.05) yield finding("info", "cover-spine-art", `The spine is shown from the cover file (${formatMm(c.spineMm)} mm).`);
 }
 
 function* checkBindingHints({ book, rule, setup }) {

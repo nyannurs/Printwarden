@@ -82,8 +82,10 @@ export class Inspector {
       mixed: "Mixed – check export",
       imposed: "Imposed sheets",
     };
+    const c = a.coverFile;
     return section("Document", null, facts([
       ["File", docName],
+      ...(c ? [["Cover", `${c.name}${c.spineMm > 0.05 ? ` • spine ${formatMm(c.spineMm)} mm` : ""}${c.flapMm > 0.5 ? ` • flaps ${formatMm(c.flapMm)} mm` : ""}`]] : []),
       [a.imposed ? "Sheet sides" : "PDF pages", a.document.pages.length],
       ["Book pages", a.book.pages.length],
       ["Page size", size ? formatSize(size) + (name ? ` • ${name}` : "") : "–"],

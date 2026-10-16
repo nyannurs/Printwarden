@@ -7,7 +7,7 @@ import {
   pushGraphicsState, rectangle, StandardFonts,
 } from "../../vendor/pdf-lib.esm.js";
 import { mmToPt } from "../core/units.js";
-
+import { COVER_BASE } from "../core/document.js";
 import { METADATA_KEY } from "../pdf/structure.js";
 const REGISTRATION = cmyk(1, 1, 1, 1);
 const HAIRLINE_PT = 0.25;
@@ -19,7 +19,7 @@ const HAIRLINE_PT = 0.25;
  * @param {{fileName: string, appName: string}} info
  * @returns {Promise<Uint8Array>}
  */
-export async function writeImposedPdf(sourceBytes, analysis, plan, info) {
+export async function writeImposedPdf(sourceBytes, analysis, plan, info, coverBytes = null) {
   if (plan.errors.length) throw new Error(plan.errors[0]);
   // Full speed: pdf-lib otherwise pauses every 100 objects for a UI, and this runs in a background thread.
   const src = await PDFDocument.load(sourceBytes, { ignoreEncryption: true, updateMetadata: false, parseSpeed: ParseSpeeds.Fastest });
@@ -29,11 +29,21 @@ export async function writeImposedPdf(sourceBytes, analysis, plan, info) {
   out.setProducer(info.appName);
   copyOutputIntents(src, out);
 
-  // Embed every source page that is used, once.
-  const used = [...new Set(analysis.book.pages.filter((p) => p.source).map((p) => p.source.index))];
+  // Embed every source page that is placed, once: the pages' file's, and a cover file's
+  // (a stitched booklet's cover sheet; see COVER_BASE).
+  const placed = new Set(plan.sides.flatMap((side) => side.placements.map((p) => p.folio)));
+  const used = [...new Set(analysis.book.pages.filter((p) => p.source && placed.has(p.number)).map((p) => p.source.index))];
   const embedded = new Map();
-  const forms = await out.embedPdf(src, used);
-  used.forEach((index, i) => embedded.set(index, forms[i]));
+  const ownPages = used.filter((i) => i < COVER_BASE);
+  const forms = await out.embedPdf(src, ownPages);
+  ownPages.forEach((index, i) => embedded.set(index, forms[i]));
+  const coverPages = used.filter((i) => i >= COVER_BASE);
+  if (coverPages.length) {
+    if (!coverBytes) throw new Error("The cover file is missing.");
+    const coverDoc = await PDFDocument.load(coverBytes, { ignoreEncryption: true, updateMetadata: false, parseSpeed: ParseSpeeds.Fastest });
+    const coverForms = await out.embedPdf(coverDoc, coverPages.map((i) => i - COVER_BASE));
+    coverPages.forEach((index, i) => embedded.set(index, coverForms[i]));
+  }
 
   const font = await out.embedFont(StandardFonts.Helvetica);
   const W = mmToPt(plan.sheetSize.width);
