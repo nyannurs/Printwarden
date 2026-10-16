@@ -37,16 +37,18 @@ The first start downloads Electron, which is a few hundred MB. If you want to bu
 
 ## Features
 
-- **Import**: Printwarden automatically detects whether your imported PDF is set up as spreads or single sheets. Imposed sheets work too. Page size, bleed and slug are read from the PDF, but you can also type them in. If you change the page size, the page dimensions are automatically adjusted without touching the content, letting you get a feel for different publication dimensions.
-- **Bindings**: staple, perfect, sewn, hardcover, spiral and wire-o. The spine width is calculated from the PDF. You can also manually enter a spine width, as well as assign it a color or design.
-- **Paper**: color, finish and weight, set separately for the pages and the cover. The 3D simulation accounts for cover and paper weight: the pages respond correctly by arching more if the paper weighs more and vice versa.
+- **Import**: Printwarden automatically detects whether your imported PDF is set up as spreads or single sheets. Imposed sheets work too. Page size, bleed and slug are read from the PDF, but you can also type them in. If you change the page size, the page dimensions are automatically adjusted without touching the content, letting you get a feel for different publication dimensions. Large PDFs with lots of photos open fine: the file is shared between the render threads instead of copied, and CMYK JPEGs are decoded in WebAssembly.
+- **Cover file**: for perfect, sewn and hardcover books you can import the cover as a separate PDF, the way it goes to the printer: one spread with the spine (and flaps, if it has them) and an optional inside spread. Printwarden takes the spine width from it and shows the flaps folded in.
+- **Bindings**: staple, perfect, sewn, hardcover, spiral and wire-o. The spine width is calculated from the PDF. You can also manually enter a spine width, as well as assign it a color or design. Sewn and hardcover books show their folded signatures at the spine; perfect and sewn books have their side glue, which hides a strip of the first and last page and scores the cover; hardcovers get a board thickness, endpapers with flyleaves, a headband color and a square or rounded spine.
+- **Paper**: color, finish and weight, set separately for the pages and the cover. The 3D simulation accounts for cover and paper weight: the pages respond correctly by arching more if the paper weighs more and vice versa. You can type in the paper thickness your printer quotes, so the spine comes out right for bulky or thin stock.
 - **Spot finish**: gold, silver or copper foil and spot UV, taken from a separate PDF of the finish.
 - **3D view**: click and drag to turn the view. It will snap back to the default view. If you hold space and pan around, the view will be "unlocked". You can double tap your space bar to reset the view. There are a variety of different camera presets to test out, you can also center the view on either side of the spread.
 - **Timeline**: your imported PDF in chronological order or in imposed order.
 - **Preflight**: any uncertainties automatically caught by the software will be displayed here.
-- **Imposed PDF export**: you can export an imposed PDF with creep compensation.
+- **Imposed PDF export**: you can export an imposed PDF with creep compensation, as 2-up spreads or as folding schemes of 8 or 16 pages per sheet, folded the way a folding machine folds them.
+- **Client viewer**: export the book as a single HTML file that you can send to a client. It opens in any browser, from a folder or hosted on a website, with nothing else attached, and the client can flip through the book in 3D.
 - **Screenshots and videos**: you can render screenshots or a flipbook animation.
-- **Color**: CMYK is rendered with the PDF's output intent if it has one, otherwise with a CMYK profile from your computer.
+- **Color**: CMYK is rendered with the PDF's output intent if it has one, otherwise with a CMYK profile from your computer. Overprint is shown the way it prints, like Acrobat's overprint preview, and can be turned off.
 - **Your files are safe**: Printwarden only reads the PDF you open and only writes the files you save yourself. It won't overwrite the PDF you imported. It only goes online once at startup to check for a new update.
 
 ## Controls
