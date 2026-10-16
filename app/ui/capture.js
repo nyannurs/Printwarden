@@ -67,7 +67,7 @@ export async function prepareCaptureTile(visible) {
     if (!g) return;
     const pageMm = { width: g.trim.x1 - g.trim.x0, height: g.trim.y1 - g.trim.y0 };
     const plan = planDetail(view, pageMm, {
-      supersample: 1.5, // plus the render's own 8× multisampling
+      supersample: 1.25, // image pixels per output pixel (see SUPERSAMPLE in pages.js; plus the render's own 8× multisampling)
       maxTiles: MAX_DETAIL,
       maxSide: Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize),
       maxPixels: 40e6,
@@ -125,19 +125,17 @@ export async function renderVideo(preset = null) {
     const cues = Array.from({ length: turns }, (_, k) => ({ at: 1000 + k * step, run: () => scene.goTo(k + 1) }));
     const durationMs = videoLength(turns, choice.turnSeconds, choice.pauseSeconds);
     // Each page's image at the size that draws it sharpest where it lies at rest in the video:
-    // 1.5 image pixels to a video pixel where the page is nearest the camera. (The page shader
-    // samples four times a pixel; more pixels than that, and the GPU blends in the next smaller
-    // mipmap level, which blurs: images at 1.4 times the video's size were soft at rest, sharp
-    // only once a turn swapped them for the screen's.) Measured by planning the video first.
+    // 1.25 image pixels to a video pixel where the page is densest (see SUPERSAMPLE in
+    // pages.js; the density measured by planning the video first).
     const maxHeight = Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize);
-    const fallback = Math.min(maxHeight, Math.round(Math.max(choice.width, choice.height) * 1.4));
+    const fallback = Math.min(maxHeight, Math.round(Math.max(choice.width, choice.height) * 1.25));
     const heightFor = (folio, density) => {
       const g = a.geometry[folio - 1];
       // A page never at rest in the picture (a tall video shows one page of a spread): as
       // large as the largest that is.
       const px = density.get(folio) ?? (density.size ? Math.max(...density.values()) : 0);
       if (!g || !px) return fallback;
-      return Math.max(256, Math.min(maxHeight, Math.round(1.5 * px * (g.trim.y1 - g.trim.y0))));
+      return Math.max(256, Math.min(maxHeight, Math.round(1.25 * px * (g.trim.y1 - g.trim.y0))));
     };
     const openingAt = (ms) => cues.filter((c) => c.at <= ms).length;
     await scene.recordVideo({

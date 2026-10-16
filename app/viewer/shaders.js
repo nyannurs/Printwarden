@@ -228,14 +228,18 @@ uniform float uOuterCover;
 uniform sampler2D uFinish;  // spot finish mask, see FINISH_FRAGMENT
 uniform float uFinishKind;  // 0 none, 1 gloss varnish, 2 gold, 3 silver, 4 copper foil
 ${VECTOR_TEXT_GLSL}
-// A page image sampled four times across the pixel's footprint (rotated grid), each from a
-// mipmap level twice as fine: supersampling the texture. Sharper than the GPU's trilinear
-// filter, and type keeps a steady baseline on a tilted page.
+// A page image sampled once, by the GPU's own trilinear, anisotropic filter, with the
+// gradients shortened a little (0.7: half a mipmap level finer than the footprint asks), so
+// an image at about one pixel per screen pixel is read from its full level, not blended with
+// the next smaller one. Until 0.17.75 this was four taps spread over the pixel, each from a
+// level twice as fine: meant as supersampling, it blurred an image drawn at its own size
+// (the taps straddle texels) and aliased one drawn smaller (the levels too fine for the
+// footprint): pixel art and dithered photos came out soft or moiré. Measured on a page of
+// 1 mm blocks at 3.4 px/mm against pdf.js's own rendering (edge energy): four taps 0.77,
+// one tap 0.83, one tap with 0.7 gradients at 1.25 image pixels a screen pixel 0.87; a
+// frame rendered at twice the size and boxed down 0.89, the ceiling.
 vec4 pageSample( sampler2D t, vec2 uv, vec2 dx, vec2 dy ) {
-  vec2 hx = dx * 0.25, hy = dy * 0.25;
-  vec2 gx = dx * 0.5, gy = dy * 0.5;
-  return 0.25 * ( textureGrad( t, uv - hx * 0.5 - hy * 1.5, gx, gy ) + textureGrad( t, uv + hx * 1.5 - hy * 0.5, gx, gy )
-                + textureGrad( t, uv + hx * 0.5 + hy * 1.5, gx, gy ) + textureGrad( t, uv - hx * 1.5 + hy * 0.5, gx, gy ) );
+  return textureGrad( t, uv, dx * 0.7, dy * 0.7 );
 }
 `;
 
@@ -250,11 +254,12 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
   vec2 detailDy = dFdy( vMapUv );
   // Small on screen (a page under about 400 px tall, all of it under 200), the page comes
   // from its small image, which has the text and is mipmapped like any image: drawn from
-  // outlines, strokes thinner than a pixel flicker as the view moves.
+  // outlines, strokes thinner than a pixel flicker as the view moves. Small both ways: a page
+  // seen edge-on while it turns is narrow, not small (taken for small, it went soft every turn).
   float smallShare = 0.0;
   if ( uSmallOn > 0.5 ) {
     vec2 texels = vec2( textureSize( uSmall, 0 ) );
-    smallShare = smoothstep( 1.0, 2.0, max( length( detailDx * texels ), length( detailDy * texels ) ) );
+    smallShare = smoothstep( 1.0, 2.0, min( length( detailDx * texels ), length( detailDy * texels ) ) );
   }
   vec4 sampledDiffuseColor = vec4( 1.0 );
   if ( smallShare < 1.0 ) {

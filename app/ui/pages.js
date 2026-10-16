@@ -11,14 +11,19 @@ import { scene, state } from "./app.js";
 import { showLoad } from "./dom.js";
 import { applySpine, averageEdge } from "./spine-panel.js";
 
-// Sharp renders jump the queue: quick ones first, then fine ones, then everything else.
-const SHARP_QUICK = -2;
+// Sharp renders jump the queue, ahead of everything else.
 const SHARP_FINE = -1;
 export const CAPTURE_PRIORITY = -3; // screenshot tiles: never cancelled by the view
 // Detail images: rendered at three times the screen's resolution and filtered down by the
 // page shader's four-sample filter (the way print previews antialias type), with a margin
 // so small pans stay sharp. Bounded so a render stays well under a second.
-const SUPERSAMPLE = 3;
+// Image pixels per device pixel in a sharp strip, at the strip's densest point. With the
+// page shader's one tap and its 0.7 gradients (see pageSample), 1.25 read crispest against
+// pdf.js's own rendering (1.0 and 1.1 a little softer, more a little aliased); it also keeps
+// no part of the strip magnified (the density is sampled on a grid, the true peak lies
+// between samples). Three, until 0.17.75: nine times the pixels, read through a filter that
+// blurred them.
+const SUPERSAMPLE = 1.25;
 export const DETAIL_MAX_SIDE = 8192;
 const DETAIL_MAX_PIXELS = 36e6;
 const STRIP_MAX_PIXELS = 7e6; // larger strips take more than a frame to upload
@@ -141,19 +146,19 @@ export function loadAllTextures() {
  * from the PDF's vectors as strips, each at the resolution its own part of the screen needs
  * (a tilted page needs far more near the camera than far away), and laid over the page.
  *
- * Two passes once the view stops (none while it moves: type is drawn from its outlines and
- * stays exact anyway, and strips arriving mid-motion stalled frames as they went to the GPU,
- * four times the pixels on a Retina screen):
- *  - quick: screen resolution, as soon as it stops
- *  - fine: supersampled and mipmapped, right after the quick one
- * A new pass cancels the renders of an outdated one, even mid-drawing; so does moving again.
+ * One pass once the view stops (none while it moves: type is drawn from its outlines and
+ * stays exact anyway, and strips arriving mid-motion stalled frames as they went to the GPU):
+ * the strips at the screen's own density (SUPERSAMPLE), mipmapped for when the view moves
+ * on. (Until 0.17.75 two passes, a quick one at screen density and a fine one at three times
+ * it: the page changed look twice after every move, and the fine one's pixels were read
+ * through a filter that blurred them.) A new pass cancels the renders of an outdated one,
+ * even mid-drawing; so does moving again.
  * The strips render in parallel on every thread that knows the page (warmVisiblePages).
  */
 const PASSES = {
-  quick: { priority: SHARP_QUICK, supersample: 1, maxTiles: 3, step: 1.8, mipmaps: false, enough: 0.9 },
-  fine: { priority: SHARP_FINE, supersample: SUPERSAMPLE, maxTiles: MAX_DETAIL, step: 1.3, mipmaps: true, enough: 0.85 },
+  sharp: { priority: SHARP_FINE, supersample: SUPERSAMPLE, maxTiles: MAX_DETAIL, step: 1.3, mipmaps: true, enough: 0.9 },
 };
-export const isSharp = (job) => job.priority === SHARP_QUICK || job.priority === SHARP_FINE;
+export const isSharp = (job) => job.priority === SHARP_FINE;
 let sharpenRun = 0;
 export function sharpen() {
   const a = state.analysis;
@@ -180,12 +185,12 @@ export function sharpen() {
     const t = state.textures.get(folio);
     if (!g || !t || t.blank) continue;
     const pageMm = { width: g.trim.x1 - g.trim.x0, height: g.trim.y1 - g.trim.y0 };
-    for (const kind of ["quick", "fine"]) {
+    for (const kind of ["sharp"]) {
       const pass = PASSES[kind];
       const plan = planDetail(view, pageMm, {
         // Per point of the screen: a Retina screen's pixels are already twice as fine, and the
         // same supersampling of them took four times the pixels (36 megapixels a turn).
-        supersample: Math.max(1, pass.supersample / scene.renderer.getPixelRatio()),
+        supersample: pass.supersample,
         maxTiles: pass.maxTiles,
         maxSide: Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize),
         // Screen-resolution passes: about one screen of pixels, cheap to render and swap in.
@@ -195,8 +200,6 @@ export function sharpen() {
       });
       // The base image is enough where the page is small on screen.
       if (plan.every((tile) => tile.heightPx / ((tile.region.v1 - tile.region.v0) || 1) <= t.height)) {
-        // The quick pass may not be needed where the fine one still is.
-        if (kind === "quick") continue;
         if (state.details.delete(folio)) scene.setPageDetails(folio, []);
         break;
       }
