@@ -1,11 +1,17 @@
-"""Patches vendor/pdf.worker.mjs, two lines (app/pdf/parser-profile.js installs what they call):
+"""Patches pdf.js (vendor/), three lines; app/pdf/parser-profile.js installs what the first two call:
 
-1. JpegStream.decodeImage asks our WebAssembly JPEG decoder first (self.bookviewJpeg, built
-   from tools/jpegwasm).
-2. The graphics state's overprint keys (OP for strokes, op for fills), which pdf.js ignores,
-   set the blend mode: multiply while on, as Acrobat's Overprint Preview shows it (ink laid
-   over ink, white set to overprint vanishing), normal while off. Only when
+1. pdf.worker.mjs: JpegStream.decodeImage asks our WebAssembly JPEG decoder first
+   (self.bookviewJpeg, built from tools/jpegwasm).
+2. pdf.worker.mjs: the graphics state's overprint keys (OP for strokes, op for fills), which
+   pdf.js ignores, set the blend mode: multiply while on, as Acrobat's Overprint Preview shows
+   it (ink laid over ink, white set to overprint vanishing), normal while off. Only when
    self.bookviewOverprint is set (the Overprint choice under Color).
+3. pdf.mjs: an image is smoothed only where it is drawn smaller than its own pixels (or the
+   PDF asks for it: /Interpolate), never where it is enlarged, as a print RIP draws it.
+   pdf.js smooths anything enlarged up to the screen's pixel ratio times 4/3 (1.33 in our
+   render threads), so one image drew soft in a page rendered small and crisp in the same
+   page rendered large: pixel art and dithered photos changed between blurry and sharp as
+   the view zoomed, and a page could be half of each while sharp strips covered part of it.
 
 Run after replacing pdf.js; a patch already applied is left alone.
 
@@ -14,26 +20,36 @@ Run after replacing pdf.js; a patch already applied is left alone.
 import pathlib
 import sys
 
-WORKER = pathlib.Path(__file__).resolve().parent.parent / "vendor" / "pdf.worker.mjs"
+VENDOR = pathlib.Path(__file__).resolve().parent.parent / "vendor"
+# (file, text to find, what it becomes)
 PATCHES = [
-    ("decodeImage(e){if(this.eof)return this.buffer;e=this.#L(e||this.bytes);",
+    ("pdf.worker.mjs",
+     "decodeImage(e){if(this.eof)return this.buffer;e=this.#L(e||this.bytes);",
+     "decodeImage(e){if(this.eof)return this.buffer;e=this.#L(e||this.bytes);"
      "const bv=self.bookviewJpeg?.(e,this.jpegOptions,this.drawWidth,this.drawHeight,this.forceRGBA,this.forceRGB);if(bv){this.buffer=bv;this.bufferLength=bv.length;this.eof=!0;return bv}"),
     # In PartialEvaluator.setGState's switch over the keys (`a`, the value `i`, the state `h`).
-    ('case"OP":case"op":case"OPM":case"BG":',
+    ("pdf.worker.mjs",
+     'case"OP":case"op":case"OPM":case"BG":',
      'case"OP":case"op":self.bookviewOverprint&&h.push(["BM",!0===i?"multiply":"source-over"]);break;case"OPM":case"BG":'),
+    # getImageSmoothingEnabled: the enlargement up to which images are smoothed, 1 instead of
+    # the screen's pixel ratio times 4/3.
+    ("pdf.mjs",
+     "Util.singularValueDecompose2dScale(t,Pt);const i=Math.fround(OutputScale.pixelRatio*PixelsPerInch.PDF_TO_CSS_UNITS);return Pt[0]<=i&&Pt[1]<=i}",
+     "Util.singularValueDecompose2dScale(t,Pt);const i=1;return Pt[0]<=i&&Pt[1]<=i}"),
 ]
 
-source = WORKER.read_text(encoding="utf-8")
+texts = {}
 applied = 0
-for before, hook in PATCHES:
-    if hook in source:
+for name, before, after in PATCHES:
+    source = texts.setdefault(name, (VENDOR / name).read_text(encoding="utf-8"))
+    if after in source:
         continue
     if source.count(before) != 1:
-        sys.exit(f"{WORKER.name}: {before[:40]!r} not found as expected ({source.count(before)} matches); "
+        sys.exit(f"{name}: {before[:40]!r} not found as expected ({source.count(before)} matches); "
                  "pdf.js changed, see tools/patch-pdfjs.py")
-    # The JPEG hook goes after its line; the overprint one replaces its keys.
-    source = source.replace(before, before + hook if hook.startswith("const bv") else hook)
+    texts[name] = source.replace(before, after)
     applied += 1
-if applied:
-    WORKER.write_text(source, encoding="utf-8", newline="\n")
-print(f"patched {WORKER} ({applied} applied, {len(PATCHES) - applied} already there)")
+for name, source in texts.items():
+    if (VENDOR / name).read_text(encoding="utf-8") != source:
+        (VENDOR / name).write_text(source, encoding="utf-8", newline="\n")
+print(f"patched pdf.js ({applied} applied, {len(PATCHES) - applied} already there)")
