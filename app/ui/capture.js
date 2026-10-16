@@ -11,6 +11,16 @@ import { showBusy, toast } from "./dom.js";
 import { CAPTURE_PRIORITY, DETAIL_MAX_SIDE, isSharp, pageImage, sharpen, VECTOR_TEXT } from "./pages.js";
 
 /**
+ * When a picture or video was made, for its file name, so each render has a name of its
+ * own: "2026-10-16 at 17.25.03", as macOS names screenshots (no colons: Windows doesn't
+ * allow them in file names, and the Finder shows them as slashes).
+ */
+function stamp(date = new Date()) {
+  const two = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} at ${two(date.getHours())}.${two(date.getMinutes())}.${two(date.getSeconds())}`;
+}
+
+/**
  * A still of the current view at many times screen resolution: rendered in tiles, and
  * for every tile the pages in it are redrawn from the PDF's vectors at exactly that
  * tile's resolution. As sharp as the output size allows.
@@ -20,7 +30,7 @@ export async function renderScreenshot() {
   const choice = await screenshotDialog();
   if (!choice) return;
   const base = state.name.replace(/\.pdf$/i, "");
-  const target = await chooseSaveLocation(`${base} render ${choice.width}x${choice.height}.png`,
+  const target = await chooseSaveLocation(`${base} render ${choice.width}x${choice.height} ${stamp()}.png`,
     { name: "PNG image", extensions: ["png"], mime: "image/png" });
   if (!target) return;
   const busy = showBusy("Rendering screenshot…");
@@ -88,7 +98,7 @@ export async function renderVideo(preset = null) {
   if (!choice) return;
   const base = state.name.replace(/\.pdf$/i, "");
   const kind = choice.transparent ? { ext: "mov", name: "ProRes video", mime: "video/quicktime" } : { ext: "mp4", name: "MP4 video", mime: "video/mp4" };
-  const target = await chooseSaveLocation(`${base} ${choice.width}x${choice.height}.${kind.ext}`,
+  const target = await chooseSaveLocation(`${base} video ${choice.width}x${choice.height} ${stamp()}.${kind.ext}`,
     { name: kind.name, extensions: [kind.ext], mime: kind.mime });
   if (!target) return;
 
