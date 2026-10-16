@@ -1,4 +1,4 @@
-"""Patches pdf.js (vendor/), three lines; app/pdf/parser-profile.js installs what the first two call:
+"""Patches pdf.js (vendor/), five lines; app/pdf/parser-profile.js installs what the first two call:
 
 1. pdf.worker.mjs: JpegStream.decodeImage asks our WebAssembly JPEG decoder first
    (self.bookviewJpeg, built from tools/jpegwasm).
@@ -10,8 +10,15 @@
    PDF asks for it: /Interpolate), never where it is enlarged, as a print RIP draws it.
    pdf.js smooths anything enlarged up to the screen's pixel ratio times 4/3 (1.33 in our
    render threads), so one image drew soft in a page rendered small and crisp in the same
-   page rendered large: pixel art and dithered photos changed between blurry and sharp as
-   the view zoomed, and a page could be half of each while sharp strips covered part of it.
+   page rendered large.
+4. pdf.mjs and pdf.worker.mjs: Util.singularValueDecompose2dScale (a transform's two scale
+   factors) takes the square root of a difference that is exactly zero for a transform scaled
+   alike both ways, and rounding makes it a hair negative for some scales (-1.8e-12 at one):
+   NaN, which its `|| 1` turns into a scale of 1. An image enlarged 11 times then counted as
+   drawn at its own size and was smoothed: one page of the author's pixel-art book came out
+   blurry at some render sizes (1800, 2603, 2900, 3600 px tall) and sharp at the others, so
+   it changed between the two as the view zoomed and the video's images were soft. The
+   difference clamped at zero.
 
 Run after replacing pdf.js; a patch already applied is left alone.
 
@@ -36,6 +43,13 @@ PATCHES = [
     ("pdf.mjs",
      "Util.singularValueDecompose2dScale(t,Pt);const i=Math.fround(OutputScale.pixelRatio*PixelsPerInch.PDF_TO_CSS_UNITS);return Pt[0]<=i&&Pt[1]<=i}",
      "Util.singularValueDecompose2dScale(t,Pt);const i=1;return Pt[0]<=i&&Pt[1]<=i}"),
+    # Util.singularValueDecompose2dScale: the square root of a difference that can round below zero.
+    ("pdf.mjs",
+     "c=Math.sqrt(h**2-(a*l-o**2));",
+     "c=Math.sqrt(Math.max(0,h**2-(a*l-o**2)));"),
+    ("pdf.worker.mjs",
+     "c=Math.sqrt(f**2-(i*l-o**2));",
+     "c=Math.sqrt(Math.max(0,f**2-(i*l-o**2)));"),
 ]
 
 texts = {}
