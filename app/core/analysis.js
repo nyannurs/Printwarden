@@ -25,6 +25,7 @@ import { validate } from "./validate.js";
  *   boardMm: number | null,        // a hardcover's boards (mm); null = the usual 2.5 (BOARD_MM)
  *   headband: string,              // a hardcover's headbands, hex
  *   spineShape: "square" | "round", // a hardcover's back
+ *   sheetPages: number,            // the press sheets: 2 (one spread a side), or a folding scheme of 8 or 16 pages a sheet
  *   coverSheet?: boolean,          // imposed files: false for those made before covers had a sheet of their own
  * }} Setup
  */
@@ -44,6 +45,7 @@ export const defaultSetup = () => ({
   boardMm: null,
   headband: HEADBAND_COLORS[0].hex,
   spineShape: "square",
+  sheetPages: 2,
 });
 
 const MAX_SPINE_MM = 80; // wider than two pages by more: flaps
@@ -171,12 +173,15 @@ export function analyse(doc, partial = {}) {
       book = { ...book, pages, folioStart: book.folioStart - 2, labelled: true };
     }
     const imposable = book.pages.length - book.pages.filter((p) => p.endpaper).length;
-    layout = layoutFor(rule, imposable);
+    layout = layoutFor(rule, imposable, input.sheetPages ?? 2);
     if (layout && imposable < book.pages.length) {
       // The sheets name the book's pages: past the pastedowns, the block's are two further
       // on, the back pastedown and cover four.
       const to = (k) => (k <= 2 ? k : k >= imposable - 1 ? k + 4 : k + 2);
-      layout = { ...layout, sides: layout.sides.map((s) => ({ ...s, left: to(s.left), right: to(s.right) })) };
+      layout = { ...layout, sides: layout.sides.map((s) => ({
+        ...s, left: to(s.left), right: to(s.right),
+        ...(s.cells ? { cells: s.cells.map((row) => row.map((c) => ({ ...c, page: to(c.page) }))) } : {}),
+      })) };
     }
     // The cover file isn't imposed here (it goes to the printer as it is): its sheet is left
     // out where the cover is made apart; a stitched booklet's cover folds round the block.

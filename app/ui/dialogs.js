@@ -116,29 +116,51 @@ export function importDialog(initialFile = null) {
 }
 
 /**
- * What the press sheets are, plainly: every sheet holds one spread a side (2-up), and a
- * signature is sheets inserted into one another, not one sheet folded; signatures are gathered
- * (stacked) in order. Imposition software folds whole signatures from one sheet; this doesn't.
+ * What the press sheets are, plainly. Spreads: every sheet holds one spread a side (2-up),
+ * and a signature is sheets inserted into one another; signatures are gathered (stacked)
+ * in order. A folding scheme: a sheet of 8 or 16 pages is folded into a signature (two or
+ * three right-angle folds, the upper row printed upside down), or into part of one, nested.
  */
 function sheetsNote(rule, layout) {
   const S = layout.signaturePages;
+  const P = layout.sheetPages ?? 2;
+  const an = (n) => (n === 8 || n === 18 ? "an" : "a");
+  const cover = layout.coverSheet ? ", then the cover on its own sheet" : "";
+  if (P > 2) {
+    const folds = P === 16 ? "three" : "two";
+    const per = S / P;
+    const sheets = per === 1 ? `one sheet of ${P} pages, folded ${folds} times` : `${per} sheets of ${P} pages, each folded ${folds} times and inserted into one another`;
+    if (rule.binding === Binding.SADDLE) return `The booklet is ${sheets}; the upper row is printed upside down.`;
+    return `${an(S).replace(/^a/, "A")} ${S}-page signature is ${sheets}; the upper row is printed upside down. The signatures are gathered in order${cover}.`;
+  }
   const sheets = S / 4;
   if (rule.binding === Binding.SADDLE) return `Each sheet holds one spread per side, all ${sheets} inserted into one another.`;
-  const cover = layout.coverSheet ? ", then the cover on its own sheet" : "";
-  return `Each sheet holds one spread per side. ${S === 8 ? "An" : "A"} ${S}-page signature is ${sheets} sheet${sheets === 1 ? "" : "s"}` +
+  return `Each sheet holds one spread per side. ${an(S).replace(/^a/, "A")} ${S}-page signature is ${sheets} sheet${sheets === 1 ? "" : "s"}` +
     `${sheets === 1 ? "" : " inserted into one another"}; the signatures are gathered in order${cover}.`;
 }
 
 /**
- * Imposition settings. Resolves to ExportOptions, or null if cancelled.
+ * Imposition settings. Resolves to ExportOptions, or null if cancelled. `onSheetPages`:
+ * the pages a sheet holds is part of the setup (the timeline's press sheets show it): set
+ * through it, it gives the analysis made with it.
  * @param {ReturnType<typeof import("../core/analysis.js").analyse>} analysis
+ * @param {import("../core/sheets.js").ExportOptions | null} [remembered]
+ * @param {((sheetPages: number) => Promise<ReturnType<typeof import("../core/analysis.js").analyse>>) | null} [onSheetPages]
  */
-export function exportDialog(analysis, remembered = null) {
+export function exportDialog(analysis, remembered = null, onSheetPages = null) {
   return new Promise((resolve) => {
     const opts = structuredClone(remembered ?? defaultExportOptions());
     const d = dialog("Export imposed PDF");
     const summary = el("p", "dialog-summary");
-    const how = el("p", "dialog-note"); // what the sheets are: no folding schemes here (see sheetsNote)
+    const how = el("p", "dialog-note"); // what the sheets are (see sheetsNote)
+    // The sheets: spreads, or a folding scheme (see core/folding.js).
+    const layoutChoices = [["2", "Spreads: 2 pages a side"], ["8", "8 pages a sheet, 2 folds"], ["16", "16 pages a sheet, 3 folds"]];
+    const sheetLayout = select(layoutChoices, String(analysis.setup.sheetPages ?? 2));
+    sheetLayout.addEventListener("change", async () => {
+      if (!onSheetPages) return;
+      analysis = await onSheetPages(Number(sheetLayout.value));
+      sync();
+    });
 
     const sheetChoices = [["auto", "Automatic (fits pages, bleed and marks)"],
       ...SHEET_PRESETS.map((p) => [p.name, `${p.name} (${formatMm(p.size.width)} × ${formatMm(p.size.height)} mm)`]),
@@ -163,7 +185,7 @@ export function exportDialog(analysis, remembered = null) {
 
     const exportBtn = button("Export", () => finish(true), "btn primary");
     const actions = el("div", "dialog-actions", [button("Cancel", () => finish(false)), exportBtn]);
-    d.body.append(summary, how, row("Sheet size", sheet), custom, sheetSize, bleed.wrap, marks, creep.wrap, creepInfo, errors, actions);
+    d.body.append(summary, how, row("Sheet layout", sheetLayout), row("Sheet size", sheet), custom, sheetSize, bleed.wrap, marks, creep.wrap, creepInfo, errors, actions);
 
     const read = () => {
       opts.sheet = sheet.value === "auto" ? "auto"
@@ -184,7 +206,7 @@ export function exportDialog(analysis, remembered = null) {
         : "";
       how.textContent = layout ? sheetsNote(rule, layout) : "";
       sheetSize.textContent = `Sheet: ${formatMm(plan.sheetSize.width)} × ${formatMm(plan.sheetSize.height)} mm, landscape`;
-      creepInfo.textContent = opts.creep ? `Up to ${plan.maxCreepMm.toFixed(2)} mm toward the spine, on the innermost sheet` : "";
+      creepInfo.textContent = opts.creep ? `Up to ${plan.maxCreepMm.toFixed(2)} mm toward the spine, on the innermost leaf` : "";
       errors.replaceChildren(...plan.errors.map((m) => el("li", "", [m])));
       exportBtn.disabled = plan.errors.length > 0;
     };

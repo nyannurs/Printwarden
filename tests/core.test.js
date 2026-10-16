@@ -2,6 +2,7 @@ import { analyse } from "../app/core/analysis.js";
 import { Binding, pagesToAdd, ruleFor } from "../app/core/binding.js";
 import { buildBook, isRecto, label } from "../app/core/book.js";
 import { detectSpreads, SpreadMode, SpreadPattern } from "../app/core/detect.js";
+import { scheme } from "../app/core/folding.js";
 import { creepMm, layoutFor, saddleStitchLayout, signatureLayout } from "../app/core/imposition.js";
 import { centreSpread, facingPairs, pairNumbers, partnerMap } from "../app/core/pairing.js";
 import { expectedMediaSize, manualSetup, setupFromPdf, sides, trimRectFor } from "../app/core/setup.js";
@@ -150,6 +151,54 @@ test("invalid counts", () => {
   throws(() => signatureLayout(16, 6));
   eq(layoutFor(ruleFor(Binding.SADDLE), 42), null);
   eq(layoutFor(ruleFor(Binding.SPIRAL), 42), null);
+});
+
+test("folding schemes: the 16-page sheet folds to the classic table, the 8-page one the same way", () => {
+  const show = (g) => g.map((row) => row.map((c) => c.page + (c.turned ? "t" : "")).join(" ")).join(" / ");
+  const s16 = scheme(16);
+  eq(show(s16.front), "5t 12t 9t 8t / 4 13 16 1");
+  eq(show(s16.back), "7t 10t 11t 6t / 2 15 14 3");
+  const s8 = scheme(8);
+  eq(show(s8.front), "5t 8t / 4 1");
+  eq(show(s8.back), "7t 6t / 2 3");
+  for (const s of [s8, s16]) {
+    // Every page once; a panel's back (the mirrored column, short-edge turn) is its other page.
+    const all = [...s.front.flat(), ...s.back.flat()].map((c) => c.page).sort((a, b) => a - b);
+    eq(all, Array.from({ length: s.pages }, (_, i) => i + 1));
+    for (let r = 0; r < s.rows; r++) {
+      for (let c = 0; c < s.cols; c++) {
+        const front = s.front[r][c];
+        const back = s.back[r][s.cols - 1 - c];
+        eq(Math.min(front.page, back.page) % 2, 1); // a leaf: an odd page and the even one after it
+        eq(Math.abs(front.page - back.page), 1);
+        eq(front.turned, back.turned);
+      }
+    }
+  }
+});
+
+test("folding schemes: a signature's sheets nested, the leaf depth for creep, the cover's sheet, what doesn't fold", () => {
+  const l = signatureLayout(32, 32, 16);
+  eq(l.sheetCount, 2);
+  eq(l.sheetPages, 16);
+  const pagesOf = (...sides) => sides.flatMap((s) => s.cells.flat().map((c) => c.page)).sort((a, b) => a - b);
+  const range = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  eq(pagesOf(l.sides[0], l.sides[1]), [...range(1, 8), ...range(25, 32)]); // the outer sheet
+  eq(pagesOf(l.sides[2], l.sides[3]), range(9, 24)); // the inner
+  const cell = (page) => l.sides.flatMap((s) => s.cells.flat()).find((c) => c.page === page);
+  eq([cell(1).depth, cell(2).depth, cell(9).depth, cell(16).depth, cell(17).depth, cell(32).depth], [0, 0, 4, 7, 7, 0]);
+  eq([l.sides[0].left, l.sides[0].right], [1, 32]);
+  const withCover = layoutFor(ruleFor(Binding.SEWN, 16), 36, 16); // 32 between the covers: two sheets, then the cover
+  eq(withCover.sheetCount, 3);
+  ok(withCover.sides.slice(0, 4).every((s) => s.cells.flat().every((c) => c.page >= 3 && c.page <= 34)));
+  eq([withCover.sides[4].left, withCover.sides[4].right, withCover.sides[4].cover], [36, 1, true]);
+  eq(layoutFor(ruleFor(Binding.SEWN, 12), 28, 16), null); // 12-page signatures don't fold from 16-page sheets
+  eq(layoutFor(ruleFor(Binding.SEWN, 12), 28, 2).sheetCount, 7);
+  eq(layoutFor(ruleFor(Binding.SADDLE), 16, 16).sheetCount, 1);
+  eq(layoutFor(ruleFor(Binding.SADDLE), 12, 8), null);
+  const a = analyse({ pages: singles(28) }, { binding: Binding.SEWN, signaturePages: 12, sheetPages: 16 });
+  ok(a.findings.some((f) => f.code === "sheet-pages"));
+  eq(a.layout, null);
 });
 
 test("pages to add, and the closed book's thickness", () => {

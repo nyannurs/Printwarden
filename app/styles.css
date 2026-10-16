@@ -447,6 +447,10 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .cell .page canvas { width: 100%; height: 100%; display: block; }
 .cell .page.blank { background: repeating-linear-gradient(135deg, #fff 0 5px, #e6e4df 5px 6px); }
 .cell .page.endpaper { background: var(--endpaper, #fff); } /* a hardcover's flyleaves: the endpaper stock (see filmstrip.js) */
+.cell .pages.grid { display: grid; grid-template-columns: repeat(var(--cols), auto); grid-auto-rows: 1fr; } /* a folding scheme's rows */
+.cell .pages.grid .page { height: auto; }
+.cell .pages.grid .page + .page { border-left: none; }
+.cell .page.turned canvas { transform: rotate(180deg); } /* printed upside down */
 .cell.flagged .pages { outline: 2px solid var(--error); outline-offset: 2px; }
 
 /* ---------- info panel ---------- */

@@ -158,10 +158,18 @@ function* checkSizes({ book, geometry }) {
 /** The pages that go to press: a hardcover's endpapers are stock, not pages to print. */
 const imposedCount = (book) => book.pages.length - book.pages.filter((p) => p.endpaper).length;
 
-function* checkPageCount({ book, rule, imposed }) {
+function* checkPageCount({ book, rule, imposed, setup }) {
   if (imposed) return; // checkImposed covers it
   const n = imposedCount(book);
   const name = BINDING_LABELS[rule.binding].toLowerCase();
+  // A folding scheme folds whole signatures: the sheet's pages must divide them.
+  const P = setup.sheetPages ?? 2;
+  const S = rule.binding === Binding.SADDLE ? n : rule.signaturePages;
+  if (P > 2 && S > 0 && S % P) {
+    yield finding("error", "sheet-pages", rule.binding === Binding.SADDLE
+      ? `${P} pages a sheet folds a booklet of a multiple of ${P} pages; this one has ${n}. Choose spreads under Export, or change the page count.`
+      : `${P} pages a sheet folds signatures of ${P === 16 ? "16 or 32" : "8, 16 or 32"} pages; the signature is ${S}. Set Signature to a multiple of ${P}, or choose spreads under Export.`);
+  }
   if (rule.coverPages) {
     // The cover is made apart: only the pages between the covers fold into signatures.
     const inner = foldedPages(rule, n);

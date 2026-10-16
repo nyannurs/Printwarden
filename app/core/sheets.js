@@ -55,13 +55,21 @@ export function planSheets(analysis, opts) {
     ? markEnd + (opts.marks.info ? INFO_SPACE_MM : 1)
     : Math.max(b.top, b.bottom, b.outside);
 
-  const content = { width: 2 * w + 2 * margin, height: h + 2 * margin };
+  // The sheet's cells: one spread (a row of two) or a scheme's rows and columns. Pairs of
+  // columns meet at a spine fold; between pairs the fore-edges face each other with their
+  // bleed between; two rows meet head to head at the top fold, their head bleed between.
+  const rows = layout?.sides[0]?.rows ?? 1;
+  const cols = layout?.sides[0]?.cols ?? 2;
+  const gapX = 2 * b.outside; // between pairs
+  const gapY = 2 * b.top; // between rows
+  const inner = { width: cols * w + (cols / 2 - 1) * gapX, height: rows * h + (rows - 1) * gapY };
+  const content = { width: inner.width + 2 * margin, height: inner.height + 2 * margin };
   let sheet;
   if (opts.sheet === "auto") {
     sheet = content;
   } else {
     sheet = opts.sheet.width >= opts.sheet.height ? opts.sheet : rotated(opts.sheet);
-    const minimum = { width: 2 * w + 2 * b.outside, height: h + b.top + b.bottom };
+    const minimum = { width: inner.width + 2 * b.outside, height: inner.height + b.top + b.bottom };
     if (sheet.width + 0.01 < minimum.width || sheet.height + 0.01 < minimum.height) {
       errors.push(`The sheet is too small: pages and bleed need at least ${formatMm(minimum.width)} × ${formatMm(minimum.height)} mm.`);
     } else if (anyMarks && (sheet.width + 0.01 < content.width || sheet.height + 0.01 < content.height)) {
@@ -70,24 +78,55 @@ export function planSheets(analysis, opts) {
   }
 
   const cx = sheet.width / 2;
-  const area = { x0: cx - w, y0: (sheet.height - h) / 2, x1: cx + w, y1: (sheet.height + h) / 2 };
+  const area = { x0: cx - inner.width / 2, y0: (sheet.height - inner.height) / 2, x1: cx + inner.width / 2, y1: (sheet.height + inner.height) / 2 };
   const t = setup.paperThicknessMm;
   let maxCreep = 0;
+  // Where a cell's trim lies: column c (its pair c >> 1), row r (0 at the top).
+  const cellX0 = (c) => area.x0 + c * w + (c >> 1) * gapX;
+  const cellY0 = (r) => area.y1 - (r + 1) * h - r * gapY;
+  // Fold lines (the spine fold of each pair; between pairs and rows, where the sheet folds
+  // first) and the cut lines inside the area (the fore-edges between pairs, the heads
+  // between rows), for the marks.
+  const folds = { x: [], y: [] };
+  const cuts = { x: [], y: [] };
+  for (let c = 0; c < cols; c += 2) {
+    folds.x.push(cellX0(c) + w); // the pair's spine
+    if (c > 0) {
+      folds.x.push(cellX0(c) - gapX / 2);
+      cuts.x.push(cellX0(c) - gapX, cellX0(c));
+    }
+  }
+  if (rows === 2) {
+    folds.y.push(cellY0(0) - gapY / 2);
+    cuts.y.push(cellY0(0) - gapY, cellY0(0));
+  }
 
   const sides = (layout?.sides ?? []).map((s) => {
-    const c = opts.creep ? creepMm(s.depth, t) : 0; // shift toward the spine
-    maxCreep = Math.max(maxCreep, c);
-    const place = (folio, onLeft) => {
-      const trim = onLeft
-        ? { x0: cx - w + c, x1: cx + c, y0: area.y0, y1: area.y1 }
-        : { x0: cx - c, x1: cx + w - c, y0: area.y0, y1: area.y1 };
+    // A side's cells: the scheme's, or the spread's two (left, right).
+    const cells = s.cells ?? [[{ page: s.left, turned: false, depth: s.depth }, { page: s.right, turned: false, depth: s.depth }]];
+    const placements = cells.flatMap((row, r) => row.map((cell, c) => {
+      const creep = opts.creep ? creepMm(cell.depth, t) : 0; // shift toward the spine
+      maxCreep = Math.max(maxCreep, creep);
+      // Its spine is at the pair's fold: to the right of an even column, the left of an
+      // odd one (turned or not: the fold is the same).
+      const spineRight = c % 2 === 0;
+      const shift = spineRight ? creep : -creep;
+      const x0 = cellX0(c) + shift;
+      const y0 = cellY0(r);
+      const trim = { x0, x1: x0 + w, y0, y1: y0 + h };
+      const foldX = spineRight ? cellX0(c) + w : cellX0(c);
       // Visible region: bleed on the three outer sides, cut at the fold on the spine side.
-      const clip = onLeft
-        ? { x0: trim.x0 - b.outside, x1: cx, y0: trim.y0 - b.bottom, y1: trim.y1 + b.top }
-        : { x0: cx, x1: trim.x1 + b.outside, y0: trim.y0 - b.bottom, y1: trim.y1 + b.top };
-      return { folio, trim, clip, creepMm: c };
-    };
-    return { sheet: s.sheet, side: s.side, signature: s.signature, cover: !!s.cover, placements: [place(s.left, true), place(s.right, false)] };
+      // A turned cell's head is at its bottom.
+      const headUp = !cell.turned;
+      const clip = {
+        x0: spineRight ? trim.x0 - b.outside : foldX,
+        x1: spineRight ? foldX : trim.x1 + b.outside,
+        y0: trim.y0 - (headUp ? b.bottom : b.top),
+        y1: trim.y1 + (headUp ? b.top : b.bottom),
+      };
+      return { folio: cell.page, trim, clip, creepMm: creep, turned: cell.turned };
+    }));
+    return { sheet: s.sheet, side: s.side, signature: s.signature, cover: !!s.cover, rows: cells.length, cols: cells[0].length, placements };
   });
 
   return {
@@ -95,6 +134,8 @@ export function planSheets(analysis, opts) {
     sheetSize: sheet,
     area,
     sides,
+    folds,
+    cuts,
     maxCreepMm: maxCreep,
     marks: { ...opts.marks, start: markStart, end: markEnd, bleed: b },
     sheetCount: layout?.sheetCount ?? 0,

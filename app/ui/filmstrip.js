@@ -89,12 +89,18 @@ export class Filmstrip {
       }));
       this.note.textContent = "";
     } else if (layout && !(imposed && analysis.hasErrors)) {
-      items = layout.sides.map((side) => ({
-        pages: [book.pages[side.left - 1], book.pages[side.right - 1]],
-        caption: `${label(book, side.left)} • ${label(book, side.right)}`,
-        sub: side.cover ? `Cover ${side.side}` : `Sheet ${side.sheet} ${side.side}`,
-        opening: openingOf(Math.min(side.left, side.right)),
-      }));
+      // A scheme sheet's cells in their rows (the upper row upside down), else the spread.
+      items = layout.sides.map((side) => {
+        const cells = side.cells?.flat() ?? [{ page: side.left, turned: false }, { page: side.right, turned: false }];
+        return {
+          pages: cells.map((c) => book.pages[c.page - 1]),
+          turned: cells.map((c) => c.turned),
+          cols: side.cols ?? 2,
+          caption: cells.map((c) => label(book, c.page)).join(" • "),
+          sub: side.cover ? `Cover ${side.side}` : `Sheet ${side.sheet} ${side.side}`,
+          opening: openingOf(Math.min(side.left, side.right)),
+        };
+      });
       this.note.textContent = "";
     } else {
       items = [];
@@ -109,9 +115,13 @@ export class Filmstrip {
       cell.dataset.folios = item.pages.map((p) => p.number).join(",");
       const pages = document.createElement("div");
       pages.className = "pages";
-      for (const page of item.pages) {
+      if (item.cols > 2) {
+        pages.classList.add("grid");
+        pages.style.setProperty("--cols", String(item.cols));
+      }
+      for (const [k, page] of item.pages.entries()) {
         const div = document.createElement("div");
-        div.className = "page" + (page.source ? "" : page.endpaper ? " endpaper" : " blank");
+        div.className = "page" + (page.source ? "" : page.endpaper ? " endpaper" : " blank") + (item.turned?.[k] ? " turned" : "");
         div.style.aspectRatio = `${pageSize.width} / ${pageSize.height}`; // as tall as the timeline lets it
         div.dataset.folio = String(page.number);
         pages.append(div);

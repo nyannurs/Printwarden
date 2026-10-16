@@ -243,7 +243,10 @@ async function adoptCover() {
 async function startExport() {
   const a = state.analysis;
   if (!a) return;
-  const opts = await exportDialog(a, state.exportOptions);
+  const opts = await exportDialog(a, state.exportOptions, async (sheetPages) => {
+    await updateSetup({ sheetPages });
+    return state.analysis;
+  });
   if (!opts) return;
   state.exportOptions = opts;
   try {

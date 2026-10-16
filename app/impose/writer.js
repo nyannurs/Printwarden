@@ -3,7 +3,7 @@
 // embedded once and clipped per placement, so spread halves share their resources.
 
 import {
-  clip, cmyk, endPath, ParseSpeeds, PDFDocument, PDFName, PDFObjectCopier, PDFString, popGraphicsState,
+  clip, cmyk, degrees, endPath, ParseSpeeds, PDFDocument, PDFName, PDFObjectCopier, PDFString, popGraphicsState,
   pushGraphicsState, rectangle, StandardFonts,
 } from "../../vendor/pdf-lib.esm.js";
 import { mmToPt } from "../core/units.js";
@@ -72,10 +72,13 @@ export async function writeImposedPdf(sourceBytes, analysis, plan, info, coverBy
         endPath(),
       );
       // The form's origin is the media box's lower-left corner; move the trim into place.
-      page.drawPage(form, {
-        x: pt(placement.trim.x0 - (g.trim.x0 - media.x0)),
-        y: pt(placement.trim.y0 - (g.trim.y0 - media.y0)),
-      });
+      // A turned cell (a folding scheme's upper row) is drawn upside down: turned about
+      // its origin, so the origin goes to the trim's upper right.
+      const ox = g.trim.x0 - media.x0;
+      const oy = g.trim.y0 - media.y0;
+      page.drawPage(form, placement.turned
+        ? { x: pt(placement.trim.x1 + ox), y: pt(placement.trim.y1 + oy), rotate: degrees(180) }
+        : { x: pt(placement.trim.x0 - ox), y: pt(placement.trim.y0 - oy) });
       page.pushOperators(popGraphicsState());
     }
     const where = side.cover ? `cover ${side.side}` : `sheet ${side.sheet} ${side.side}`;
@@ -84,9 +87,10 @@ export async function writeImposedPdf(sourceBytes, analysis, plan, info, coverBy
 
   // @ts-expect-error -- private in pdf-lib, and the only way to a key of our own in the info
   out.getInfoDict().set(PDFName.of(METADATA_KEY), PDFString.of(JSON.stringify({
-    version: 2, // 2: the cover on a sheet of its own where it is made apart (perfect, sewn, hardcover)
+    version: 3, // 2: the cover on a sheet of its own where it is made apart (perfect, sewn, hardcover); 3: sheetPages (folding schemes)
     binding: analysis.setup.binding,
     signaturePages: analysis.layout.signaturePages,
+    sheetPages: analysis.layout.sheetPages ?? 2,
     pageWidth: analysis.setup.page.width,
     pageHeight: analysis.setup.page.height,
     sheetSides: plan.sides.length,
@@ -116,9 +120,26 @@ function drawMarks(page, plan, side, font, text) {
     }
   }
   if (marks.fold) {
-    const cx = (area.x0 + area.x1) / 2;
-    line(cx, area.y1 + s, cx, area.y1 + e, [2, 2]);
-    line(cx, area.y0 - s, cx, area.y0 - e, [2, 2]);
+    // Dashed at every fold, outside the area; solid at the cuts inside it (a scheme's
+    // fore-edges between pairs and heads between rows).
+    for (const x of plan.folds.x) {
+      line(x, area.y1 + s, x, area.y1 + e, [2, 2]);
+      line(x, area.y0 - s, x, area.y0 - e, [2, 2]);
+    }
+    for (const y of plan.folds.y) {
+      line(area.x0 - s, y, area.x0 - e, y, [2, 2]);
+      line(area.x1 + s, y, area.x1 + e, y, [2, 2]);
+    }
+  }
+  if (marks.crop) {
+    for (const x of plan.cuts.x) {
+      line(x, area.y1 + s, x, area.y1 + e);
+      line(x, area.y0 - s, x, area.y0 - e);
+    }
+    for (const y of plan.cuts.y) {
+      line(area.x0 - s, y, area.x0 - e, y);
+      line(area.x1 + s, y, area.x1 + e, y);
+    }
   }
   if (marks.info) {
     // The standard font writes Western European characters only (WinAnsi): any other in the

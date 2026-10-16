@@ -68,6 +68,48 @@ test("export: a file name the standard font can't write doesn't stop it", async 
   eq((await readStructure(out)).pages.length, 4);
 });
 
+// A folding scheme: every cell of every sheet side holds its page, the upper row upside
+// down, where the plan says. (Such a file is not folded back on import; checked by cells.)
+test("FOLDING SCHEME (sewn, 16 pages a sheet): every cell of the sheets is its page, the upper row upside down", async () => {
+  const bytes = await makeSamplePdf({ pages: 20, bleed: 3, slug: 6 });
+  const src = await readStructure(bytes);
+  const a = analyse({ pages: src.pages }, { binding: "sewn", signaturePages: 16, sheetPages: 16 });
+  ok(!a.hasErrors, JSON.stringify(a.findings));
+  eq(a.layout.sheetCount, 2); // one sheet of 16, then the cover
+  const plan = planSheets(a, defaultExportOptions());
+  ok(!plan.errors.length, plan.errors.join("; "));
+  const out = await writeImposedPdf(bytes, a, plan, { fileName: "sample.pdf", appName: "test" });
+  const back = await readStructure(out);
+  eq(back.pages.length, 4);
+  eq(back.imposition?.sheetPages, 16);
+  const r1 = new MainThreadRenderer(await openForRendering(bytes), { intent: "print" });
+  const r2 = new MainThreadRenderer(await openForRendering(out), { intent: "print" });
+  const turnedOver = (image) => {
+    const c = document.createElement("canvas");
+    c.width = image.width;
+    c.height = image.height;
+    const ctx = c.getContext("2d");
+    ctx.translate(c.width, c.height);
+    ctx.rotate(Math.PI);
+    ctx.drawImage(image, 0, 0);
+    return c;
+  };
+  let checked = 0;
+  for (const [i, side] of plan.sides.entries()) {
+    for (const p of side.placements) {
+      const page = a.book.pages[p.folio - 1];
+      const original = await r1.render(page.source.index, a.geometry[p.folio - 1].trim, 60);
+      const cell = await r2.render(i, p.trim, 60);
+      const seen = p.turned ? turnedOver(cell) : cell;
+      const diff = meanDifference(original, seen);
+      ok(diff < 6, `sheet ${side.sheet} ${side.side}, folio ${p.folio}${p.turned ? " (turned)" : ""}: differs from the original by ${diff.toFixed(1)}`);
+      if (p.turned) ok(meanDifference(original, cell) > diff + 3, `folio ${p.folio}: not turned on the sheet`);
+      checked++;
+    }
+  }
+  eq(checked, 20);
+});
+
 for (const [binding, pages, sides] of [["saddle", 16, 8], ["hardcover", 20, 10]]) {
   test(`ROUND TRIP (${binding}): export imposed, re-import, every folded page matches its original`, async () => {
     const bytes = await makeSamplePdf({ pages, bleed: 3, slug: 6 });
@@ -80,7 +122,7 @@ for (const [binding, pages, sides] of [["saddle", 16, 8], ["hardcover", 20, 10]]
     const back = await readStructure(out);
     eq(back.pages.length, sides); // hardcover: 2 sheets of the block, then the cover's own
     eq(back.imposition?.binding, binding);
-    eq(back.imposition?.version, 2);
+    eq(back.imposition?.version, 3); // 3: sheetPages (folding schemes)
     const b = analyse({ pages: back.pages }, { source: "imposed", binding, signaturePages: back.imposition.signaturePages });
     ok(!b.hasErrors, JSON.stringify(b.findings));
     eq(b.book.pages.length, pages);
