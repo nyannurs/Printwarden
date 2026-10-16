@@ -13,12 +13,12 @@ export const hasSpine = (binding) => binding === Binding.PERFECT || binding === 
 /** Bindings whose spine can carry printed artwork (a stitched fold only a colour). */
 export const spineTakesArtwork = (binding) => binding === Binding.PERFECT || binding === Binding.SEWN || binding === Binding.HARDCOVER;
 
-/** A hardcover's boards (mm): 2 mm greyboard, the usual weight, plus its covering. */
+/** A hardcover's boards (mm) unless set: 2 mm greyboard, the usual weight, plus its covering. */
 export const BOARD_MM = 2.5;
 
-/** How thick each cover is (mm): a hardcover's boards, else the cover stock. */
-export function coverMmFor(binding, paper) {
-  if (binding === Binding.HARDCOVER) return BOARD_MM;
+/** How thick each cover is (mm): a hardcover's boards (`boardMm`, or the usual), else the cover stock. */
+export function coverMmFor(binding, paper, boardMm = null) {
+  if (binding === Binding.HARDCOVER) return boardMm ?? BOARD_MM;
   const cover = coverOf(paper);
   return paperThicknessMm(cover.gsm, cover.finish, cover.volume);
 }
@@ -38,10 +38,10 @@ export const defaultSpine = () => ({ color: "front", widthMm: null, rotation: 0 
  * @param {number} pageCount
  * @param {import("./paper.js").Paper} paper
  */
-export function calculatedSpine(pageCount, paper, binding = null) {
+export function calculatedSpine(pageCount, paper, binding = null, boardMm = null) {
   const leaves = Math.max(1, Math.ceil(pageCount / 2));
   const paperMm = paperThicknessMm(paper.gsm, paper.finish, paper.volume ?? null);
-  const coverMm = coverMmFor(binding, paper);
+  const coverMm = coverMmFor(binding, paper, boardMm);
   const covers = Math.min(2, leaves);
   const inner = leaves - covers;
   return { leaves, inner, covers, paperMm, coverMm, widthMm: inner * paperMm + covers * coverMm };
@@ -50,13 +50,13 @@ export function calculatedSpine(pageCount, paper, binding = null) {
 /**
  * How thick the book is closed (mm): the printer's spine width where one is given and the
  * covers fit in it (it sets the 3D book too), else calculated, covers included.
- * @param {{paper: import("./paper.js").Paper, spine?: Spine, binding: string}} setup
+ * @param {{paper: import("./paper.js").Paper, spine?: Spine, binding: string, boardMm?: number | null}} setup
  */
 export function bookThicknessMm(setup, pageCount) {
-  const { paper, spine, binding } = setup;
-  const coverMm = coverMmFor(binding, paper);
+  const { paper, spine, binding, boardMm = null } = setup;
+  const coverMm = coverMmFor(binding, paper, boardMm);
   if (hasSpine(binding) && spine?.widthMm && paperForSpine(spine.widthMm, pageCount, coverMm)) return spine.widthMm;
-  return calculatedSpine(pageCount, paper, binding).widthMm;
+  return calculatedSpine(pageCount, paper, binding, boardMm).widthMm;
 }
 
 /**

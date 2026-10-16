@@ -73,9 +73,10 @@ addScrollbar($("inspector"));
 export const inspector = new Inspector($("inspector"), {
   onSetup: (patch) => updateSetup(patch),
   onGoToFolio: (folio) => scene.goTo(openingOf(folio)),
-  // Live while picking: the pages' or the cover's colour.
-  onPaperPreview: ({ color, coverColor }) => scene.setPaper(color ? { color } : { cover: { color: coverColor } }),
+  // Live while picking: the pages', the cover's or the endpapers' colour.
+  onPaperPreview: ({ color, coverColor, endpaperColor }) => scene.setPaper(color ? { color } : coverColor ? { cover: { color: coverColor } } : { endpaperColor }),
   onWirePreview: (color) => setWire(color),
+  onHeadbandPreview: (color) => scene.setHeadband(color),
   onSpine: () => openSpinePanel(),
   onFinish: () => openFinishDialog(),
   onColourProfile: (id) => setColourProfile(id),
@@ -286,13 +287,14 @@ function reanalyse(opening = scene.opening) {
     state.flapKey = ""; // new leaves: the flaps are shown again
     scene.setBook({
       pageCount: book.pages.length, pageSize: size, binding: setup.binding,
-      signaturePages: analysis.rule.signaturePages, paper,
+      signaturePages: analysis.rule.signaturePages, paper, boardMm: setup.boardMm,
     }); // (the page images stay: see BookScene.setPageTexture)
   } else {
     scene.setPaper(paper); // colour, finish: instant
   }
   applyCoverExtras(analysis);
   setWire(setup.wire);
+  scene.setHeadband(setup.headband);
   applySpine();
   updateSpinePanel(setup.binding);
 
@@ -325,12 +327,13 @@ function scenePaper(paper, setup, pageCount) {
     return { color, roughness: finish.roughness, specular: finish.specular, clearcoat: finish.clearcoat, show: showThrough(gsm, finishId) };
   };
   const cover = coverOf(paper);
-  const coverThickness = coverMmFor(setup.binding, paper); // a hardcover's boards
+  const coverThickness = coverMmFor(setup.binding, paper, setup.boardMm); // a hardcover's boards
   const fromSpine = hasSpine(setup.binding) && setup.spine.widthMm
     ? paperForSpine(setup.spine.widthMm, pageCount, coverThickness) : null;
   return {
     ...look(paper.color, paper.gsm, paper.finish),
     cover: look(cover.color, cover.gsm, cover.finish),
+    endpaperColor: paper.endpaperColor ?? null,
     thickness: fromSpine ?? paperThicknessMm(paper.gsm, paper.finish, paper.volume ?? null),
     coverThickness,
     gsm: paper.gsm, // with the finish, how stiff the pages are: the shape of an open book

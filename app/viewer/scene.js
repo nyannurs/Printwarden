@@ -274,7 +274,7 @@ export class BookScene {
     this.geometryDirty = false;
     this.lastMotion = 0;
     this.settled = true;
-    this.paper = { color: "#ffffff", roughness: 0.92, specular: 0.2, clearcoat: 0, show: 0.01 };
+    this.paper = { color: "#ffffff", roughness: 0.92, specular: 0.2, clearcoat: 0, show: 0.01, endpaperColor: null };
     this.paper.cover = { ...this.paper };
     this.target = new THREE.Vector3();
     this.fitDistance = 800;
@@ -328,7 +328,7 @@ export class BookScene {
   /**
    * Build the book.
    * @param {{pageCount: number, pageSize: {width: number, height: number}, binding: string,
-   *          signaturePages?: number | null,
+   *          signaturePages?: number | null, boardMm?: number | null,
    *          paper: {color: string, roughness: number, clearcoat: number, show: number,
    *                  thickness: number, coverThickness: number, specular?: number, gsm?: number,
    *                  finish?: string, cover?: object}}} spec
@@ -346,6 +346,7 @@ export class BookScene {
       width,
       height,
       signaturePages: spec.signaturePages,
+      boardMm: spec.boardMm ?? null,
     });
     this.pageCount = spec.pageCount;
     this.signatureLeaves = Math.max(1, (spec.signaturePages ?? 16) / 2);
@@ -378,11 +379,16 @@ export class BookScene {
 
   /**
    * Paper look: instant, no rebuild. (Thickness changes need setBook.) `paper` holds the
-   * pages' stock, `paper.cover` the cover's; either may be given in part.
+   * pages' stock, `paper.cover` the cover's, `paper.endpaperColor` a hardcover's endpapers
+   * (null: the pages' colour); any may be given in part.
    */
   setPaper(paper) {
     const { cover = {}, ...pages } = paper;
     this.paper = { ...this.paper, ...pages, cover: { ...this.paper.cover, ...cover } };
+    // A hardcover's endpapers: the pastedowns inside the boards (the pages' stock in the
+    // endpaper's colour, printed or not) and the lining across the joints.
+    const cased = this.model?.style.spine === "case" && this.leaves.length > 1;
+    const endpaper = { ...this.paper, color: this.paper.endpaperColor ?? this.paper.color };
     const apply = (m, stock) => {
       m.color.set(stock.color);
       m.roughness = stock.roughness;
@@ -392,14 +398,16 @@ export class BookScene {
       m.userData.uniforms.uShow.value = stock.show;
     };
     for (const leaf of this.leaves) {
-      const stock = isCover(this.model, leaf.i) ? this.paper.cover : this.paper;
-      apply(leaf.front, stock);
-      apply(leaf.back, stock);
+      const cover = isCover(this.model, leaf.i);
+      const stock = cover ? this.paper.cover : this.paper;
+      const inside = cased && cover; // a board's inside is its pastedown
+      apply(leaf.front, inside && leaf.i > 0 ? endpaper : stock);
+      apply(leaf.back, inside && leaf.i === 0 ? endpaper : stock);
     }
     this.edgeMat.color.set(this.paper.color).multiplyScalar(0.9);
     this.coverEdgeMat.color.set(this.paper.cover.color).multiplyScalar(0.9);
     this.coverMat.color.set(this.paper.cover.color).multiplyScalar(0.96); // the spine's cut ends
-    this.liningMat.color.set(this.paper.color).multiplyScalar(0.95); // the endpaper across a hardcover's joint, in its shade
+    this.liningMat.color.set(endpaper.color).multiplyScalar(0.95); // the endpaper across a hardcover's joint, in its shade
     this.liningMat.roughness = this.paper.roughness;
     this.#syncSheetEdges();
     this.dirty = true;
@@ -544,6 +552,12 @@ export class BookScene {
     this.wireMat.color.set(hex);
     this.wireMat.metalness = metal ? 1 : 0.25;
     this.wireMat.roughness = metal ? 0.22 : 0.38;
+    this.dirty = true;
+  }
+
+  /** A hardcover's headbands: their colour (hex). */
+  setHeadband(hex) {
+    this.headbandMat.color.set(hex);
     this.dirty = true;
   }
 

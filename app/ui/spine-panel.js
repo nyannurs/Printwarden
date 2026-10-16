@@ -135,8 +135,8 @@ export function openSpinePanel() {
     info: () => {
       const a = state.analysis;
       const s = state.setup;
-      const calc = calculatedSpine(a.book.pages.length, s.paper, s.binding);
-      const coverMm = coverMmFor(s.binding, s.paper);
+      const calc = calculatedSpine(a.book.pages.length, s.paper, s.binding, s.boardMm);
+      const coverMm = coverMmFor(s.binding, s.paper, s.boardMm);
       return {
         binding: s.binding,
         takesArtwork: spineTakesArtwork(s.binding),

@@ -28,7 +28,9 @@ export const PAPER_FINISHES = {
  * changes. Choosing another finish is choosing another paper: the volume goes back to null.
  * @typedef {{color: string, gsm: number, finish: keyof typeof PAPER_FINISHES, volume?: number | null,
  *            coverColor: string | null, coverGsm: number | null, coverFinish: keyof typeof PAPER_FINISHES | null,
- *            coverVolume?: number | null}} Paper
+ *            coverVolume?: number | null, endpaperColor?: string | null}} Paper
+ *   endpaperColor: a hardcover's endpapers (the pastedowns inside the boards and the lining
+ *   across the joints), hex; null = the pages' colour
  */
 
 /** @returns {Paper} */

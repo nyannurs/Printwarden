@@ -1,6 +1,6 @@
 // One call from a loaded document plus settings to everything the UI displays.
 
-import { Binding, hasWire, ruleFor, WIRE_COLORS } from "./binding.js";
+import { Binding, hasWire, HEADBAND_COLORS, ruleFor, WIRE_COLORS } from "./binding.js";
 import { buildBook, buildImposedBook, isRecto } from "./book.js";
 import { detectSpreads, SpreadMode, SpreadPattern } from "./detect.js";
 import { COVER_BASE } from "./document.js";
@@ -22,6 +22,8 @@ import { validate } from "./validate.js";
  *   spine: import("./spine.js").Spine,
  *   page: import("./setup.js").PageSetup | null,   // null = derive from the PDF
  *   glueMm: number,                // side glue (perfect, sewn): the first and last page glued to the cover this far from the spine; 0 none
+ *   boardMm: number | null,        // a hardcover's boards (mm); null = the usual 2.5 (BOARD_MM)
+ *   headband: string,              // a hardcover's headbands, hex
  *   coverSheet?: boolean,          // imposed files: false for those made before covers had a sheet of their own
  * }} Setup
  */
@@ -38,6 +40,8 @@ export const defaultSetup = () => ({
   spine: defaultSpine(),
   page: null,
   glueMm: 6,
+  boardMm: null,
+  headband: HEADBAND_COLORS[0].hex,
 });
 
 const MAX_SPINE_MM = 80; // wider than two pages by more: flaps
@@ -63,7 +67,7 @@ function coverPages(cover, page, setup, bookPages) {
   const widthMm = trim.x1 - trim.x0;
   const heightMm = trim.y1 - trim.y0;
   const extra = widthMm - 2 * W;
-  const calculatedSpineMm = calculatedSpine(bookPages, setup.paper, setup.binding).widthMm;
+  const calculatedSpineMm = calculatedSpine(bookPages, setup.paper, setup.binding, setup.boardMm).widthMm;
   let error = null;
   let spineMm = 0;
   let flapMm = 0;

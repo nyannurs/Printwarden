@@ -79,7 +79,7 @@ export function makeExtras(scene) {
     extras.signatureFolds = makeSignatureFolds(scene, group);
     // Each board's covering rolls round its head, foot and fore-edge: rounded edges and
     // corners, as a cased book's are (capsules along the edges, as thick as the board).
-    const r = style.board / 2;
+    const r = scene.model.thickness[0] / 2; // the boards' thickness
     const faceW = leafShape(scene.model, 0).width;
     const faceH = leafShape(scene.model, 0).height;
     // Rounding the fore-edge corners, stopping short of the joint.
@@ -286,8 +286,8 @@ export function layoutExtras(scene) {
       const turn = Math.atan2(dy, dx) - Math.PI / 2;
       const span = Math.hypot(dx, dy) || 1;
       for (const e of [g.userData.head, g.userData.foot]) {
-        e.position.x = (p.x[0] + p.x[last]) / 2 + (dx / span) * (m.style.board / 4);
-        e.position.y = (p.y[0] + p.y[last]) / 2 + (dy / span) * (m.style.board / 4);
+        e.position.x = (p.x[0] + p.x[last]) / 2 + (dx / span) * (m.thickness[0] / 4);
+        e.position.y = (p.y[0] + p.y[last]) / 2 + (dy / span) * (m.thickness[0] / 4);
         e.rotation.z = turn;
       }
       g.userData.fore.position.set(p.x[last], p.y[last], 0);

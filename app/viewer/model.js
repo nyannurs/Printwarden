@@ -23,9 +23,9 @@ const BINDING_STYLES = {
   perfect: { open: 72, stackLimit: 88, bend: 22, rootFollow: 0.15, spine: "flat", gutter: [22, 0.22], rootAngle: 12, stripBend: 3 },
   sewn: { open: 80, stackLimit: 89, bend: 14, rootFollow: 0.35, spine: "flat", gutter: [18, 0.17], rootAngle: 30, stripBend: 4 },
   // Case-bound, square back: the block (sewn signatures) in a case of two boards and a flat
-  // spine board. board: the boards' thickness (mm, = BOARD_MM in core/spine.js); square:
-  // how far they overhang the pages at head, foot and fore-edge; joint: the hinge between
-  // board and spine. Bookbinding standards.
+  // spine board. board: the boards' thickness unless the spec sets it (mm, = BOARD_MM in
+  // core/spine.js); square: how far they overhang the pages at head, foot and fore-edge;
+  // joint: the hinge between board and spine. Bookbinding standards.
   hardcover: { open: 78, stackLimit: 89, bend: 14, rootFollow: 0.35, spine: "case", gutter: [18, 0.17], board: 2.5, square: 3, joint: 7, rootAngle: 30, stripBend: 4 },
   // Coils: pitch (4:1 and 3:1 per inch), round holes for a spiral, square ones for wire-o
   // (holeRadius: half the hole's width), wire: radius of the wire.
@@ -49,9 +49,10 @@ const lerp = (a, b, t) => a + (b - a) * t;
 /**
  * What a book is made from: page count and size (mm), binding, the paper's thickness and the
  * cover's (mm), the paper's weight and finish (how stiff its pages are), the pages in a
- * sewn signature.
+ * sewn signature, a hardcover's boards (mm; null = the usual).
  * @typedef {{pageCount: number, binding: string, thickness: number, coverThickness: number,
- *            width: number, height: number, gsm?: number, finish?: string, signaturePages?: number}} BookSpec
+ *            width: number, height: number, gsm?: number, finish?: string, signaturePages?: number,
+ *            boardMm?: number | null}} BookSpec
  */
 
 /**
@@ -70,7 +71,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 export function makeBook(spec) {
   const leafCount = Math.max(1, Math.ceil(spec.pageCount / 2));
   const style = BINDING_STYLES[spec.binding] ?? BINDING_STYLES.saddle;
-  const coverMm = style.board ?? spec.coverThickness; // a hardcover's covers are its boards
+  const coverMm = style.board ? spec.boardMm ?? style.board : spec.coverThickness; // a hardcover's covers are its boards
   const thickness = Array.from({ length: leafCount }, (_, i) =>
     i === 0 || i === leafCount - 1 ? coverMm : spec.thickness);
   const cum = []; // centre of each leaf across the block, from the front cover

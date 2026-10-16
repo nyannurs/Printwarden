@@ -1,7 +1,7 @@
 // The side panel: what was detected, the InDesign-style document setup, binding
 // options, and findings with one-click fixes.
 
-import { BINDING_LABELS, hasWire, WIRE_COLORS } from "../core/binding.js";
+import { BINDING_LABELS, hasWire, HEADBAND_COLORS, WIRE_COLORS } from "../core/binding.js";
 import { label } from "../core/book.js";
 import { SpreadMode } from "../core/detect.js";
 import { caliperUm, coverOf, PAPER_COLORS, PAPER_FINISHES } from "../core/paper.js";
@@ -27,8 +27,8 @@ export class Inspector {
   /**
    * @param {HTMLElement} el
    * @param {{onSetup: (patch: object) => void, onGoToFolio: (folio: number) => void,
-   *          onPaperPreview: (colors: {color?: string, coverColor?: string}) => void,
-   *          onWirePreview: (color: string) => void,
+   *          onPaperPreview: (colors: {color?: string, coverColor?: string, endpaperColor?: string}) => void,
+   *          onWirePreview: (color: string) => void, onHeadbandPreview: (color: string) => void,
    *          onColourProfile: (id: string) => void, onOverprint: (on: boolean) => void, onSpine: () => void, onFinish: () => void,
    *          onBackground: (color: string, commit: boolean) => void, background: () => string,
    *          onAbout: () => void}} deps
@@ -159,6 +159,14 @@ export class Inspector {
     if (setup.binding === "perfect" || setup.binding === "sewn") {
       rows.push(field("Side glue", unitNumber(setup.glueMm ?? 6, "mm", (v) => this.deps.onSetup({ glueMm: Math.min(20, v) }), { min: 0, step: 1, key: "glue" })));
     }
+    if (setup.binding === "hardcover") {
+      // The boards: 2 mm greyboard and its covering is the usual; 1 to 5 mm are made.
+      rows.push(field("Board", unitNumber(setup.boardMm ?? 2.5, "mm", (v) => this.deps.onSetup({ boardMm: Math.max(1, Math.min(5, Math.round(v * 2) / 2)) }), { min: 1, step: 0.5, key: "board" })));
+      rows.push(field("Headband", colourSwatches(HEADBAND_COLORS, setup.headband, "headband", {
+        pick: (hex) => this.deps.onSetup({ headband: hex }),
+        preview: (hex) => this.deps.onHeadbandPreview(hex),
+      })));
+    }
     if (hasWire(setup.binding)) {
       rows.push(field("Wire", colourSwatches(WIRE_COLORS, setup.wire, "wire", {
         pick: (hex) => this.deps.onSetup({ wire: hex }),
@@ -186,6 +194,11 @@ export class Inspector {
         pick: (hex) => set({ coverColor: hex }),
         preview: (hex) => this.deps.onPaperPreview({ coverColor: hex }),
       })),
+      // A hardcover's endpapers: the pastedowns inside the boards and the lining of the joints.
+      ...(setup.binding === "hardcover" ? [field("Endpaper color", colourSwatches(PAPER_COLORS, paper.endpaperColor ?? paper.color, "endpaper", {
+        pick: (hex) => set({ endpaperColor: hex }),
+        preview: (hex) => this.deps.onPaperPreview({ endpaperColor: hex }),
+      }))] : []),
       // Another finish is another paper: its thickness goes back to the finish's typical.
       field("Paper finish", select(finishes, paper.finish, (v) => set({ finish: v, volume: null }))),
       field("Cover finish", select(finishes, cover.finish, (v) => set({ coverFinish: v, coverVolume: null }))),
