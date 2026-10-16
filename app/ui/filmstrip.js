@@ -70,6 +70,9 @@ export class Filmstrip {
 
   /** @param {ReturnType<typeof import("../core/analysis.js").analyse>} analysis */
   render(analysis, pageSize) {
+    // A hardcover's flyleaves in the timeline: the endpaper stock's colour.
+    const paper = analysis.setup.paper;
+    this.el.style.setProperty("--endpaper", paper.endpaperColor ?? paper.color);
     this.analysis = analysis;
     this.pageSize = pageSize;
     this.observer.disconnect();
@@ -108,7 +111,7 @@ export class Filmstrip {
       pages.className = "pages";
       for (const page of item.pages) {
         const div = document.createElement("div");
-        div.className = "page" + (page.source ? "" : " blank");
+        div.className = "page" + (page.source ? "" : page.endpaper ? " endpaper" : " blank");
         div.style.aspectRatio = `${pageSize.width} / ${pageSize.height}`; // as tall as the timeline lets it
         div.dataset.folio = String(page.number);
         pages.append(div);

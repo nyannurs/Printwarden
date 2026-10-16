@@ -279,15 +279,17 @@ function reanalyse(opening = scene.opening) {
   const size = analysis.geometry.find(Boolean)?.size ?? { width: 148, height: 210 };
   const paper = scenePaper(setup.paper, setup, book.pages.length);
 
+  const endpapers = book.pages.some((p) => p.endpaper);
+  const roundSpine = setup.spineShape === "round";
   const bookKey = [book.pages.length, size.width.toFixed(1), size.height.toFixed(1), setup.binding,
-    analysis.rule.signaturePages, paper.thickness.toFixed(3), paper.coverThickness.toFixed(3), paper.gsm, paper.finish].join("|");
+    analysis.rule.signaturePages, paper.thickness.toFixed(3), paper.coverThickness.toFixed(3), paper.gsm, paper.finish, endpapers, roundSpine].join("|");
   if (bookKey !== state.bookKey) {
     state.bookKey = bookKey;
     state.details.clear(); // detail images are freed with the old book
     state.flapKey = ""; // new leaves: the flaps are shown again
     scene.setBook({
       pageCount: book.pages.length, pageSize: size, binding: setup.binding,
-      signaturePages: analysis.rule.signaturePages, paper, boardMm: setup.boardMm,
+      signaturePages: analysis.rule.signaturePages, paper, boardMm: setup.boardMm, endpapers, roundSpine,
     }); // (the page images stay: see BookScene.setPageTexture)
   } else {
     scene.setPaper(paper); // colour, finish: instant

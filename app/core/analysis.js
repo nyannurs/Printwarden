@@ -24,6 +24,7 @@ import { validate } from "./validate.js";
  *   glueMm: number,                // side glue (perfect, sewn): the first and last page glued to the cover this far from the spine; 0 none
  *   boardMm: number | null,        // a hardcover's boards (mm); null = the usual 2.5 (BOARD_MM)
  *   headband: string,              // a hardcover's headbands, hex
+ *   spineShape: "square" | "round", // a hardcover's back
  *   coverSheet?: boolean,          // imposed files: false for those made before covers had a sheet of their own
  * }} Setup
  */
@@ -42,6 +43,7 @@ export const defaultSetup = () => ({
   glueMm: 6,
   boardMm: null,
   headband: HEADBAND_COLORS[0].hex,
+  spineShape: "square",
 });
 
 const MAX_SPINE_MM = 80; // wider than two pages by more: flaps
@@ -155,7 +157,27 @@ export function analyse(doc, partial = {}) {
       book = { pages, folioStart: inner.folioStart - 2, labelled: true };
       coverFile = cut.info;
     }
-    layout = layoutFor(rule, book.pages.length);
+    if (input.binding === Binding.HARDCOVER && book.pages.length >= 4) {
+      // A case binding's endpapers: a folded sheet at each end, half pasted down inside the
+      // board (C2, C3: the pastedowns), half a flyleaf, unprinted (E1-E2, E3-E4): in the book,
+      // between the pastedowns and the block, but not in the imposition.
+      const fly = (name) => ({ number: 0, source: null, half: /** @type {const} */ ("full"), label: name, endpaper: true });
+      const p = book.pages;
+      const pages = [p[0], p[1], fly("E1"), fly("E2"), ...p.slice(2, -2), fly("E3"), fly("E4"), p[p.length - 2], p[p.length - 1]]
+        .map((page, i) => ({ ...page, number: i + 1 }));
+      // The case's pages are named as a cover file's (the block's numbering goes on from
+      // its first page; counted past the flyleaves, the back pages would be off by two).
+      ["C1", "C2", "C3", "C4"].forEach((name, k) => { const q = pages[k < 2 ? k : pages.length - 4 + k]; q.label ??= name; });
+      book = { ...book, pages, folioStart: book.folioStart - 2, labelled: true };
+    }
+    const imposable = book.pages.length - book.pages.filter((p) => p.endpaper).length;
+    layout = layoutFor(rule, imposable);
+    if (layout && imposable < book.pages.length) {
+      // The sheets name the book's pages: past the pastedowns, the block's are two further
+      // on, the back pastedown and cover four.
+      const to = (k) => (k <= 2 ? k : k >= imposable - 1 ? k + 4 : k + 2);
+      layout = { ...layout, sides: layout.sides.map((s) => ({ ...s, left: to(s.left), right: to(s.right) })) };
+    }
     // The cover file isn't imposed here (it goes to the printer as it is): its sheet is left
     // out where the cover is made apart; a stitched booklet's cover folds round the block.
     if (coverFile && layout?.coverSheet) layout = { ...layout, sides: layout.sides.filter((s) => !s.cover), sheetCount: layout.sheetCount - 1, coverSheet: false };

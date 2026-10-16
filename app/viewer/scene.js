@@ -328,7 +328,7 @@ export class BookScene {
   /**
    * Build the book.
    * @param {{pageCount: number, pageSize: {width: number, height: number}, binding: string,
-   *          signaturePages?: number | null, boardMm?: number | null,
+   *          signaturePages?: number | null, boardMm?: number | null, endpapers?: boolean, roundSpine?: boolean,
    *          paper: {color: string, roughness: number, clearcoat: number, show: number,
    *                  thickness: number, coverThickness: number, specular?: number, gsm?: number,
    *                  finish?: string, cover?: object}}} spec
@@ -347,6 +347,8 @@ export class BookScene {
       height,
       signaturePages: spec.signaturePages,
       boardMm: spec.boardMm ?? null,
+      endpapers: !!spec.endpapers,
+      roundSpine: !!spec.roundSpine,
     });
     this.pageCount = spec.pageCount;
     this.signatureLeaves = Math.max(1, (spec.signaturePages ?? 16) / 2);
@@ -397,12 +399,14 @@ export class BookScene {
       m.clearcoat = Math.max(0.001, stock.clearcoat);
       m.userData.uniforms.uShow.value = stock.show;
     };
+    const n = this.leaves.length;
     for (const leaf of this.leaves) {
       const cover = isCover(this.model, leaf.i);
       const stock = cover ? this.paper.cover : this.paper;
       const inside = cased && cover; // a board's inside is its pastedown
-      apply(leaf.front, inside && leaf.i > 0 ? endpaper : stock);
-      apply(leaf.back, inside && leaf.i === 0 ? endpaper : stock);
+      const flyleaf = cased && this.model.firstBlockLeaf === 2 && (leaf.i === 1 || leaf.i === n - 2);
+      apply(leaf.front, flyleaf || (inside && leaf.i > 0) ? endpaper : stock);
+      apply(leaf.back, flyleaf || (inside && leaf.i === 0) ? endpaper : stock);
     }
     this.edgeMat.color.set(this.paper.color).multiplyScalar(0.9);
     this.coverEdgeMat.color.set(this.paper.cover.color).multiplyScalar(0.9);

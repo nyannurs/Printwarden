@@ -218,10 +218,12 @@ export function states(book) {
   return out;
 }
 
-for (const binding of BINDINGS) {
+// A hardcover with a rounded back and its endpaper leaves, as the app makes one, as well.
+const VARIANTS = [...BINDINGS.map((binding) => [binding, {}]), ["hardcover, rounded", { binding: "hardcover", roundSpine: true, endpapers: true }]];
+for (const [name, variant] of VARIANTS) {
   for (const pageCount of [16, 44, 120]) {
-    test(`geometry: ${binding}, ${pageCount} pages: no sheet passes through another`, () => {
-      const book = makeBook({ pageCount, binding, thickness: 0.1, coverThickness: 0.3, width: 148, height: 210 });
+    test(`geometry: ${name}, ${pageCount} pages: no sheet passes through another`, () => {
+      const book = makeBook({ pageCount, binding: name, thickness: 0.1, coverThickness: 0.3, width: 148, height: 210, ...variant });
       const bad = [];
       for (const [label, state] of states(book)) {
         const found = crossings(book, state);

@@ -166,6 +166,8 @@ export class Inspector {
         pick: (hex) => this.deps.onSetup({ headband: hex }),
         preview: (hex) => this.deps.onHeadbandPreview(hex),
       })));
+      rows.push(field("Spine shape", select([["square", "Square"], ["round", "Rounded"]], setup.spineShape ?? "square",
+        (v) => this.deps.onSetup({ spineShape: v }))));
     }
     if (hasWire(setup.binding)) {
       rows.push(field("Wire", colourSwatches(WIRE_COLORS, setup.wire, "wire", {

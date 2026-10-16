@@ -9,7 +9,8 @@
 /**
  * @typedef {{
  *   number: number,
- *   source: import("./document.js").SourcePage | null,   // null = inserted blank
+ *   source: import("./document.js").SourcePage | null,   // null = inserted blank, or an endpaper
+ *   endpaper?: boolean,            // a hardcover's flyleaf (unprinted, not imposed): see analysis.js
  *   half: "full" | "left" | "right",
  *   label?: string | null,         // a name of its own (a cover file's C1–C4, printed or not)
  * }} BookPage

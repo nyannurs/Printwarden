@@ -87,14 +87,19 @@ for (const [binding, pages, sides] of [["saddle", 16, 8], ["hardcover", 20, 10]]
 
     const r1 = new MainThreadRenderer(await openForRendering(bytes), { intent: "print" });
     const r2 = new MainThreadRenderer(await openForRendering(out), { intent: "print" });
+    // The printed pages, in order (a hardcover's book has its endpaper leaves too, unprinted
+    // and not on the sheets: the re-import has 20 pages to the original book's 24).
+    const printed = a.book.pages.map((page, i) => ({ page, i })).filter(({ page }) => !page.endpaper);
+    eq(printed.length, pages);
+    const originalOf = ({ page, i }) => r1.render(page.source.index, a.geometry[i].trim, 60);
     for (let folio = 1; folio <= pages; folio++) {
-      const original = await r1.render(a.book.pages[folio - 1].source.index, a.geometry[folio - 1].trim, 60);
+      const original = await originalOf(printed[folio - 1]);
       const folded = await r2.render(b.book.pages[folio - 1].source.index, b.geometry[folio - 1].trim, 60);
       const diff = meanDifference(original, folded);
       ok(diff < 6, `folio ${folio}: differs from the original by ${diff.toFixed(1)}`);
       if (folio > 1) {
         // And it must not match its neighbour: the check can tell pages apart.
-        const other = await r1.render(a.book.pages[folio - 2].source.index, a.geometry[folio - 2].trim, 60);
+        const other = await originalOf(printed[folio - 2]);
         ok(meanDifference(other, folded) > diff + 3, `folio ${folio} is indistinguishable from folio ${folio - 1}`);
       }
     }

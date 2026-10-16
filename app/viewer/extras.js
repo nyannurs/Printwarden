@@ -204,7 +204,12 @@ function makeThreads(scene, group) {
   const threads = [];
   const piece = new THREE.CylinderGeometry(0.22, 0.22, 14, 6).rotateX(Math.PI / 2);
   const h = scene.model.height;
-  for (let centre = sig / 2; centre < scene.model.leafCount; centre += sig) {
+  const { leafCount: n, firstBlockLeaf: first } = scene.model;
+  // At each signature's centre sheet (the block's leaves in signatures from its first; a
+  // short last one at its own middle): between leaves centre - 1 and centre.
+  for (let a = first; a + 1 <= n - 1 - first; a += sig) {
+    const len = Math.min(sig, n - first - a);
+    const centre = a + Math.floor(len / 2);
     const g = new THREE.Group();
     for (let z = -h / 2 + 18; z < h / 2 - 12; z += 26) {
       const m = new THREE.Mesh(piece, scene.threadMat);
@@ -276,7 +281,7 @@ export function layoutExtras(scene) {
     const a = scene.leaves[0];
     const b = scene.leaves[scene.leaves.length - 1];
     writeCaseSpine(ex.caseSpine.geometry, a.profile, b.profile, scene.leaves[1].profile,
-      scene.leaves[scene.leaves.length - 2].profile, m, m.height + 2 * m.style.square);
+      scene.leaves[scene.leaves.length - 2].profile, m, m.height + 2 * m.style.square, scene.closed * scene.closed * (3 - 2 * scene.closed));
     // The boards' rounded edges follow the boards (rigid: from root to fore-edge).
     for (const [g, leaf] of [[ex.boardEdges[0], a], [ex.boardEdges[1], b]]) {
       const p = leaf.profile;
@@ -675,11 +680,12 @@ function writeSignatureFolds(geo, leaves, book, out) {
   const h2 = book.height / 2;
   const n = leaves.length;
   const sig = book.signatureLeaves;
-  // The sheets: within each signature of the block (the covers or boards apart), the k-th
-  // leaf from its front with the k-th from its back.
+  // The sheets: within each signature of the block (the covers or boards, and a hardcover's
+  // flyleaves, apart), the k-th leaf from its front with the k-th from its back.
   const pairs = [];
-  for (let a = 1; a < n - 1; a += sig) {
-    const b = Math.min(n - 2, a + sig - 1);
+  const blockFirst = book.firstBlockLeaf;
+  for (let a = blockFirst; a < n - blockFirst; a += sig) {
+    const b = Math.min(n - 1 - blockFirst, a + sig - 1);
     for (let k = 0; a + k < b - k; k++) pairs.push([a + k, b - k]);
   }
   let folds = geo.userData.folds;
@@ -781,7 +787,7 @@ function writeSignatureFolds(geo, leaves, book, out) {
  * (their roots are the block's spine). Material groups: 0 outside, 1 inside, 2 the cut
  * edges at head and foot.
  */
-function writeCaseSpine(geo, pa, pb, pl, ph, book, height) {
+function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const tb = book.thickness[0];
   const tc = 1.2; // the covering over a thin spine board, flush with the boards' outsides;
   // between it and the block's spine, the hollow.
@@ -858,7 +864,16 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height) {
   for (const q of joint(A, k1.a, false)) push(q, q.groove);
   bend(k1, C1);
   const panelFrom = pts.length;
-  for (let j = 0; j <= 16; j++) push({ x: k1.b.x + (k2.a.x - k1.b.x) * (j / 16), y: k1.b.y + (k2.a.y - k1.b.y) * (j / 16) }, 0);
+  // The spine panel: flat across a square back; round a rounded one (closing: the arc the
+  // block's spine bulges by, `round`, the hollow kept), bulging outward.
+  const bulge = book.round * closedFraction;
+  const chord = Math.hypot(k2.a.x - k1.b.x, k2.a.y - k1.b.y) || 1;
+  const Rb = bulge ? (chord * chord / 4 + bulge * bulge) / (2 * bulge) : 0;
+  for (let j = 0; j <= 16; j++) {
+    const t = j / 16;
+    const sag = bulge ? Math.sqrt(Math.max(0, Rb * Rb - (chord * (t - 0.5)) ** 2)) - (Rb - bulge) : 0;
+    push({ x: k1.b.x + (k2.a.x - k1.b.x) * t + ox * sag, y: k1.b.y + (k2.a.y - k1.b.y) * t + oy * sag }, 0);
+  }
   const panelTo = pts.length - 1;
   bend(k2, C2);
   for (const q of joint(B, k2.b, true)) push(q, q.groove);

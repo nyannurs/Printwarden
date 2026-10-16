@@ -163,7 +163,11 @@ test("pages to add, and the closed book's thickness", () => {
   near(bookThicknessMm({ ...setup, spine: { ...setup.spine, widthMm: 9.4 } }, 36), 9.4);
   near(bookThicknessMm({ ...setup, spine: { ...setup.spine, widthMm: 3 } }, 36), calc.widthMm); // thinner than the boards
   const a = analyse({ pages: singles(36) }, { binding: Binding.HARDCOVER }); // 32 between the covers: two signatures
-  ok(a.findings.some((f) => f.code === "sheets" && f.message.includes(`Spine about ${calc.widthMm.toFixed(1)} mm`)), "preflight states the same figure");
+  // A hardcover's book has its two endpaper leaves as well (40 pages): the figure counts them.
+  eq(a.book.pages.length, 40);
+  const whole = calculatedSpine(40, setup.paper, setup.binding);
+  near(whole.widthMm, 18 * calc.paperMm + 2 * 2.5);
+  ok(a.findings.some((f) => f.code === "sheets" && f.message.includes(`Spine about ${whole.widthMm.toFixed(1)} mm`)), "preflight states the same figure");
 });
 
 // --- detection -----------------------------------------------------------------------

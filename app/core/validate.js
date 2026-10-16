@@ -155,9 +155,12 @@ function* checkSizes({ book, geometry }) {
   }
 }
 
+/** The pages that go to press: a hardcover's endpapers are stock, not pages to print. */
+const imposedCount = (book) => book.pages.length - book.pages.filter((p) => p.endpaper).length;
+
 function* checkPageCount({ book, rule, imposed }) {
   if (imposed) return; // checkImposed covers it
-  const n = book.pages.length;
+  const n = imposedCount(book);
   const name = BINDING_LABELS[rule.binding].toLowerCase();
   if (rule.coverPages) {
     // The cover is made apart: only the pages between the covers fold into signatures.
@@ -253,7 +256,12 @@ function* reportLayout({ book, layout, setup }) {
     yield finding("info", "centre-spread",
       `Center spread is pages ${label(book, centre[0])} • ${label(book, centre[1])}.`, { folios: centre });
   }
-  const folded = layout.coverSheet ? n - 4 : n;
+  const folded = layout.coverSheet ? imposedCount(book) - 4 : n;
+  if (imposedCount(book) < n) {
+    yield finding("info", "endpapers",
+      "Endpapers: an unprinted leaf at each end of the block (E1 to E4), as every case binding has; " +
+      "they are stock, not pages to print, so the sheets leave them out.");
+  }
   const sigs = folded / layout.signaturePages;
   const sheets = layout.coverSheet ? layout.sheetCount - 1 : layout.sheetCount;
   const msg = `${sheets} sheet${sheets > 1 ? "s" : ""}, printed both sides` +

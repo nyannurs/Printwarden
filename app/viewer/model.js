@@ -49,10 +49,11 @@ const lerp = (a, b, t) => a + (b - a) * t;
 /**
  * What a book is made from: page count and size (mm), binding, the paper's thickness and the
  * cover's (mm), the paper's weight and finish (how stiff its pages are), the pages in a
- * sewn signature, a hardcover's boards (mm; null = the usual).
+ * sewn signature, a hardcover's boards (mm; null = the usual), whether its block has
+ * endpaper leaves (a flyleaf at each end) and a rounded back.
  * @typedef {{pageCount: number, binding: string, thickness: number, coverThickness: number,
  *            width: number, height: number, gsm?: number, finish?: string, signaturePages?: number,
- *            boardMm?: number | null}} BookSpec
+ *            boardMm?: number | null, endpapers?: boolean, roundSpine?: boolean}} BookSpec
  */
 
 /**
@@ -60,6 +61,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
  * ring; and what layoutBook keeps on it from frame to frame.
  * @typedef {Omit<BookSpec, "thickness"> & {leafCount: number, style: any, thickness: number[],
  *            cum: number[], total: number, ground: number, signatureLeaves: number, foldDepth: number,
+ *            firstBlockLeaf: number, rootShift: Float64Array, round: number,
  *            baseSamples?: Float64Array, piled?: any, scratch?: any} & Partial<ReturnType<typeof coilGeometry>>} Book
  */
 
@@ -89,7 +91,25 @@ export function makeBook(spec) {
   const signatureLeaves = Math.max(1, Math.round((spec.signaturePages ?? 16) / 2));
   const sewn = spec.binding === "sewn" || spec.binding === "hardcover";
   const foldDepth = sewn ? (Math.min(signatureLeaves, Math.max(1, leafCount - 2)) * spec.thickness) / 2 : 0;
-  const book = { ...spec, leafCount, style, thickness, cum, total, ground, signatureLeaves, foldDepth };
+  // The block's first leaf: after the cover, and a hardcover's flyleaf (endpapers: leaves 1
+  // and leafCount - 2 are the endpaper stock, outside the sewn signatures).
+  const firstBlockLeaf = spec.endpapers && style.spine === "case" && leafCount >= 6 ? 2 : 1;
+  // A rounded back: closed, the block's spine bulges (a 130 degree arc, its sagitta 0.32 of
+  // the thickness: bookbinding's usual): each leaf slides toward the spine by where it is
+  // in the arc (rootShift; nothing at the block's outer leaves or the boards), so the
+  // fore-edge goes concave by as much. Open, the back flattens (see layoutBook).
+  // The arc spans the block (the boards are rigid, flat beside it).
+  const blockMm = leafCount > 2 ? cum[leafCount - 2] - cum[1] + spec.thickness : 0;
+  const round = spec.roundSpine && style.spine === "case" && blockMm > 0 ? 0.318 * blockMm : 0;
+  const rootShift = new Float64Array(leafCount);
+  if (round) {
+    const R = (blockMm * blockMm / 4 + round * round) / (2 * round);
+    const mid = (cum[1] + cum[leafCount - 2]) / 2;
+    const sag = (d) => Math.sqrt(Math.max(0, R * R - d * d)) - (R - round);
+    const base = sag(cum[1] - mid);
+    for (let i = 1; i < leafCount - 1; i++) rootShift[i] = Math.max(0, sag(cum[i] - mid) - base);
+  }
+  const book = { ...spec, leafCount, style, thickness, cum, total, ground, signatureLeaves, foldDepth, firstBlockLeaf, rootShift, round };
   if (style.spine === "coil") Object.assign(book, coilGeometry(total, ground, style.wire));
   return book;
 }
@@ -439,10 +459,24 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
     } else {
       out = { x: new Float64Array(sv.length), y: new Float64Array(sv.length), phi: new Float64Array(sv.length) };
     }
+    // A rounded back, closing: the leaf slides back along its own curve into the spine's
+    // bulge, its root onto the curve's straight continuation behind the strip. Every sheet
+    // stays an offset of the one base curve, each covering its own stretch of it, so none
+    // can cross another (translated instead, sheets bent over the strip had).
+    const slide = book.rootShift[i] * c;
+    const tx = Math.sin(B.phi[0]);
+    const ty = Math.cos(B.phi[0]);
     let j = 0;
     for (let k = 0; k < sv.length; k++) {
-      while (j < M - 1 && len[j + 1] < sv[k]) j++;
-      const t = Math.min(1, Math.max(0, (sv[k] - len[j]) / ((len[j + 1] - len[j]) || 1)));
+      const sk = sv[k] - slide;
+      if (sk <= 0) {
+        out.x[k] = ox[0] + tx * sk;
+        out.y[k] = oy[0] + ty * sk;
+        out.phi[k] = B.phi[0];
+        continue;
+      }
+      while (j < M - 1 && len[j + 1] < sk) j++;
+      const t = Math.min(1, Math.max(0, (sk - len[j]) / ((len[j + 1] - len[j]) || 1)));
       out.x[k] = ox[j] + (ox[j + 1] - ox[j]) * t;
       out.y[k] = oy[j] + (oy[j + 1] - oy[j]) * t;
       // An offset curve runs the way its base does at the same point (no atan2 per point).
