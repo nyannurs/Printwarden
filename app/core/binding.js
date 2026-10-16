@@ -32,15 +32,16 @@ export const WIRE_COLORS = [
   { id: "gold", label: "Gold", hex: "#c8a24e", metal: true },
 ];
 
-/** A hardcover's headbands: the cotton bands at head and foot of the spine, by colour. */
+/**
+ * A hardcover's headbands: the cotton bands at head and foot of the spine, by colour. Four,
+ * as every swatch row has, and the colour picker for any other (seven pushed the picker off
+ * the panel).
+ */
 export const HEADBAND_COLORS = [
   { id: "natural", label: "Natural", hex: "#ece4d2" },
   { id: "white", label: "White", hex: "#f4f2ee" },
   { id: "black", label: "Black", hex: "#2a2a2c" },
   { id: "red", label: "Red", hex: "#b4342f" },
-  { id: "blue", label: "Blue", hex: "#2b3a67" },
-  { id: "green", label: "Green", hex: "#3d6b45" },
-  { id: "yellow", label: "Yellow", hex: "#e3c04b" },
 ];
 
 const DEFAULT_SIGNATURE = { perfect: 4, sewn: 16, hardcover: 16 };
