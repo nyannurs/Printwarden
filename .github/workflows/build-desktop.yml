@@ -1,10 +1,20 @@
 # Builds the desktop app for Windows and macOS on GitHub's machines, so a Mac build
 # doesn't need a Mac. Run it from the repository's Actions tab ("Run workflow"); the
-# portable zips appear as downloadable artifacts on the run's page.
+# portable zips appear as downloadable artifacts on the run's page. Given a release's tag
+# (a draft made beforehand, say), each build also attaches its zip to that release, so
+# nothing has to be downloaded and uploaded again by hand.
 name: Build desktop app
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Attach the zips to this release (its tag, e.g. v1.0.0); empty: artifacts only"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -33,3 +43,9 @@ jobs:
           name: app-${{ matrix.target }}
           path: _build/dist/*.zip
           if-no-files-found: error
+      - name: Attach to the release
+        if: ${{ inputs.release != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.release }}" dist/*.zip --clobber --repo "${{ github.repository }}"

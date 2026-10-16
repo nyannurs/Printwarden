@@ -266,6 +266,7 @@ export class BookScene {
     this.closeAnim = null;
     this.lastRequest = 0;
     this.capturing = false; // a screenshot or video owns the renderer (capture.js)
+    this.pixelBudget = Infinity; // see setPixelBudget
     this.warmer = null; // see #warm
     this.space = false; // space held: a drag pans (input.js)
     this.shadowState = null; // what the shadow map was last drawn for (draw.js)
@@ -1265,10 +1266,20 @@ export class BookScene {
     cam.updateProjectionMatrix();
   }
 
+  /**
+   * Draw at most this many device pixels (the client viewer, which fills the window: the
+   * app's 3D view, beside its panel and timeline, has about 3.5 million on a Retina laptop).
+   * Infinity, as the app has it: the screen's resolution, up to twice the CSS pixels.
+   */
+  setPixelBudget(pixels) {
+    this.pixelBudget = pixels;
+    this.#resize();
+  }
+
   #resize() {
     const { clientWidth: w, clientHeight: h } = this.container;
     if (!w || !h) return;
-    const ratio = Math.min(window.devicePixelRatio, 2);
+    const ratio = Math.min(window.devicePixelRatio, 2, Math.sqrt((this.pixelBudget ?? Infinity) / (w * h)));
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(w, h, false);
     this.renderer.domElement.style.width = `${w}px`;

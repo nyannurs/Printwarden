@@ -9,6 +9,7 @@
 // resolved here from the app's own files.
 
 import { label } from "../core/book.js";
+import { baseHeight } from "../pdf/render.js";
 import { hasWire, WIRE_COLORS } from "../core/binding.js";
 import { APP_VERSION, chooseSaveLocation } from "../platform.js";
 import { scene, state } from "./app.js";
@@ -76,7 +77,7 @@ export async function buildClientHtml(analysis, heightPx, progress = () => {}) {
   const main = document.createElement("script");
   main.type = "module";
   main.textContent = 'import { start } from "${ENTRY}"; start(JSON.parse(document.getElementById("book").textContent), document.getElementById("root"))'
-    + '.catch((e) => { document.getElementById("root").textContent = "The viewer could not start: " + e.message; });';
+    + '.then((scene) => { window.viewer = scene; }, (e) => { document.getElementById("root").textContent = "The viewer could not start: " + e.message; });';
   document.body.append(main);
 })();
 </script>
@@ -142,6 +143,8 @@ async function clientBook(analysis, heightPx, progress) {
     score: { folios: glued ? [1, n] : [], mm: glued },
     labels: book.pages.map((_, i) => label(book, i + 1)),
     pages,
+    // Pages not in view are drawn from images this tall, as the app's are.
+    baseHeight: Math.min(heightPx, baseHeight(n, m.width / m.height)),
   };
 }
 
