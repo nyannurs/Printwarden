@@ -345,6 +345,7 @@ export class BookScene {
       finish: spec.paper.finish,
       width,
       height,
+      signaturePages: spec.signaturePages,
     });
     this.pageCount = spec.pageCount;
     this.signatureLeaves = Math.max(1, (spec.signaturePages ?? 16) / 2);

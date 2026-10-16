@@ -27,7 +27,10 @@ export function makeExtras(scene) {
       [scene.backWrapMat, scene.frontWrapMat, c, scene.spineMat, c, c]);
     extras.slab.castShadow = extras.slab.receiveShadow = true;
     group.add(extras.slab);
-    if (scene.model.binding === "sewn") extras.threads = makeThreads(scene, group);
+    if (scene.model.binding === "sewn") {
+      extras.threads = makeThreads(scene, group);
+      extras.signatureFolds = makeSignatureFolds(scene, group);
+    }
   } else if (style.spine === "fold") {
     // Each sheet folds round the ones inside it: nested U's at the spine, cut paper at head
     // and foot. The cover's outside shows the cover wrapping round the fold: drawn from the
@@ -73,6 +76,7 @@ export function makeExtras(scene) {
     extras.caseSpine.castShadow = extras.caseSpine.receiveShadow = true;
     extras.caseSpine.frustumCulled = false;
     group.add(extras.caseSpine);
+    extras.signatureFolds = makeSignatureFolds(scene, group);
     // Each board's covering rolls round its head, foot and fore-edge: rounded edges and
     // corners, as a cased book's are (capsules along the edges, as thick as the board).
     const r = style.board / 2;
@@ -181,6 +185,20 @@ function makeCoil(scene, style) {
 }
 
 /** Sewing threads through the centre fold of each signature. */
+/**
+ * A sewn block's signatures, folded: each sheet a U round the ones inside it, at the
+ * sheets' roots, reaching foldDepth beyond them toward the cover or case. Seen at head and
+ * foot (a row of nested folds along the spine, where a glued block shows cut edges) and, open,
+ * at the ends of the gutter. Paper throughout: the folds' outsides and their cut ends.
+ */
+function makeSignatureFolds(scene, group) {
+  const m = new THREE.Mesh(new THREE.BufferGeometry(), scene.edgeMat);
+  m.castShadow = m.receiveShadow = true;
+  m.frustumCulled = false;
+  group.add(m);
+  return m;
+}
+
 function makeThreads(scene, group) {
   const sig = scene.signatureLeaves; // leaves per signature (a 16-page one has 8)
   const threads = [];
@@ -212,9 +230,11 @@ export function layoutExtras(scene) {
   const out = new THREE.Vector2(lerp(0, -scene.closedSide, scene.closed), lerp(-1, 0, scene.closed)).normalize();
   const tc = m.coverThickness;
 
+  if (ex.signatureFolds) writeSignatureFolds(ex.signatureFolds.geometry, scene.leaves, m, out);
   if (ex.slab) {
-    // Flush against the leaves' roots: any gap shows the slab's inner face as a light line.
-    const mid = P.clone().add(Q).multiplyScalar(0.5).addScaledVector(out, tc / 2);
+    // Flush against the leaves' roots (any gap shows the slab's inner face as a light
+    // line), or against a sewn block's folds.
+    const mid = P.clone().add(Q).multiplyScalar(0.5).addScaledVector(out, tc / 2 + m.foldDepth);
     const along = Q.clone().sub(P);
     ex.slab.position.set(mid.x, mid.y, 0);
     ex.slab.rotation.z = Math.atan2(along.y, along.x);
@@ -274,7 +294,7 @@ export function layoutExtras(scene) {
     }
     // Headbands: along the block's spine at head and foot, on the spine board.
     const inner = scene.leaves.slice(1, -1);
-    const sink = m.thickness[1] / 2 + 0.76; // into the hollow: from the sheets' roots to the band's centre
+    const sink = m.thickness[1] / 2 + 0.76 + m.foldDepth; // into the hollow: from the sheets' roots, past the folds, to the band's centre
     const stepBy = Math.max(1, Math.ceil(inner.length / 24));
     const path = [];
     for (let k = 0; k < inner.length; k += stepBy) {
@@ -638,6 +658,120 @@ function writeFoldGeometry(geo, leaves, book) {
 }
 
 /**
+ * The folds of a sewn block's signatures (see makeSignatureFolds): for every sheet, a half
+ * circle from its first leaf's root to its last's, bulging `out` (away from the pages) by
+ * half the distance between them, as thick as the sheet; nested within a signature, since
+ * the sheets' roots lie in order along the spine. Written again only for sheets whose roots
+ * moved (a page turn moves none; opening and closing move them all).
+ * @param {THREE.BufferGeometry} geo
+ * @param {{profile: import("./model.js").Profile}[]} leaves
+ * @param {import("./model.js").Book} book
+ * @param {THREE.Vector2} out
+ */
+function writeSignatureFolds(geo, leaves, book, out) {
+  const SEGS = 12;
+  const ROW = SEGS + 1;
+  const SHEET = 8 * ROW; // vertices: four strips (outside, inside, head, foot) of two rows
+  const h2 = book.height / 2;
+  const n = leaves.length;
+  const sig = book.signatureLeaves;
+  // The sheets: within each signature of the block (the covers or boards apart), the k-th
+  // leaf from its front with the k-th from its back.
+  const pairs = [];
+  for (let a = 1; a < n - 1; a += sig) {
+    const b = Math.min(n - 2, a + sig - 1);
+    for (let k = 0; a + k < b - k; k++) pairs.push([a + k, b - k]);
+  }
+  let folds = geo.userData.folds;
+  if (folds?.count !== pairs.length) {
+    geo.dispose();
+    const index = [];
+    for (let s = 0; s < pairs.length; s++) {
+      for (let st = 0; st < 4; st++) {
+        const base = s * SHEET + st * 2 * ROW;
+        for (let j = 0; j < SEGS; j++) {
+          const v = base + 2 * j;
+          index.push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
+        }
+      }
+    }
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pairs.length * SHEET * 3), 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(pairs.length * SHEET * 3), 3));
+    geo.setIndex(index);
+    folds = geo.userData.folds = { count: pairs.length, roots: new Float64Array(6 * pairs.length).fill(NaN) };
+  }
+  const pos = /** @type {THREE.BufferAttribute} */ (geo.attributes.position);
+  const nor = /** @type {THREE.BufferAttribute} */ (geo.attributes.normal);
+  let first = -1;
+  let last = -1;
+  // Two rows of vertices along a half circle (radius r, centre c, from -e to e through
+  // `out`) at offsets sa and sb from it and heights za and zb; quads between them, wound so
+  // their front faces `nz` (head and foot) or the surface's own normal, outward (flip 1) or
+  // inward (-1): double-sided materials light by winding.
+  const strip = (base, c, e, r, sa, za, sb, zb, nz, flip) => {
+    const at = (j, sd) => {
+      const t = (j / SEGS) * Math.PI;
+      const ux = -e.x * Math.cos(t) + out.x * Math.sin(t);
+      const uy = -e.y * Math.cos(t) + out.y * Math.sin(t);
+      return [c.x + ux * (r + sd), c.y + uy * (r + sd), ux, uy];
+    };
+    const [p0x, p0y] = at(0, sa);
+    const [p1x, p1y] = at(0, sb);
+    const [p2x, p2y] = at(1, sa);
+    const e1 = [p1x - p0x, p1y - p0y, zb - za];
+    const e2 = [p2x - p0x, p2y - p0y, 0];
+    const cx = e1[1] * e2[2] - e1[2] * e2[1];
+    const cy = e1[2] * e2[0] - e1[0] * e2[2];
+    const cz = e1[0] * e2[1] - e1[1] * e2[0];
+    const [, , u0x, u0y] = at(0, 0);
+    const n0 = nz ? [0, 0, nz] : [u0x * flip, u0y * flip, 0];
+    const swap = cx * n0[0] + cy * n0[1] + cz * n0[2] < 0;
+    for (let j = 0; j <= SEGS; j++) {
+      const v = base + 2 * j;
+      const [s0, z0, s1, z1] = swap ? [sb, zb, sa, za] : [sa, za, sb, zb];
+      const [ax, ay, ux, uy] = at(j, s0);
+      const [bx, by] = at(j, s1);
+      pos.setXYZ(v, ax, ay, z0);
+      pos.setXYZ(v + 1, bx, by, z1);
+      nor.setXYZ(v, nz ? 0 : ux * flip, nz ? 0 : uy * flip, nz);
+      nor.setXYZ(v + 1, nz ? 0 : ux * flip, nz ? 0 : uy * flip, nz);
+    }
+  };
+  for (let s = 0; s < pairs.length; s++) {
+    const [i, k] = pairs[s];
+    const pa = leaves[i].profile;
+    const pb = leaves[k].profile;
+    const roots = [pa.x[0], pa.y[0], pb.x[0], pb.y[0], out.x, out.y];
+    if (roots.every((v, q) => v === folds.roots[6 * s + q])) continue;
+    folds.roots.set(roots, 6 * s);
+    if (first < 0) first = s;
+    last = s;
+    const c = { x: (pa.x[0] + pb.x[0]) / 2, y: (pa.y[0] + pb.y[0]) / 2 };
+    const dx = pb.x[0] - pa.x[0];
+    const dy = pb.y[0] - pa.y[0];
+    const d = Math.hypot(dx, dy) || 1e-4;
+    const e = { x: dx / d, y: dy / d };
+    const r = d / 2;
+    const half = Math.min(r, book.thickness[i] * LEAF_FILL / 2);
+    const base = s * SHEET;
+    strip(base, c, e, r, half, -h2, half, h2, 0, 1); // outside
+    strip(base + 2 * ROW, c, e, r, -half, h2, -half, -h2, 0, -1); // inside
+    strip(base + 4 * ROW, c, e, r, -half, -h2, half, -h2, -1, 1); // head
+    strip(base + 6 * ROW, c, e, r, half, h2, -half, h2, 1, 1); // foot
+  }
+  if (first >= 0) {
+    const from = first * SHEET * 3;
+    const count = (last - first + 1) * SHEET * 3;
+    pos.clearUpdateRanges();
+    nor.clearUpdateRanges();
+    pos.addUpdateRange(from, count);
+    nor.addUpdateRange(from, count);
+    pos.needsUpdate = true;
+    nor.needsUpdate = true;
+  }
+}
+
+/**
  * A hardcover's spine, square back: the covering from the front board's spine edge across
  * the joint (a groove pressed into its outside), round a square corner, flat across the
  * spine board (as wide as the block and both boards), round the other corner, and across
@@ -670,7 +804,7 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height) {
   // block by the boards' thickness on either side (flush with the boards' outer faces).
   const tl = book.thickness[1] ?? 0;
   const th = book.thickness[n - 2] ?? 0;
-  const deep = tb - tc / 2;
+  const deep = Math.max(tb - tc / 2, book.foldDepth + 0.4 + tc / 2); // past the signatures' folds too
   const C1 = { x: Pl.x - ax * (tl / 2 + deep) + ox * (tl + deep), y: Pl.y - ay * (tl / 2 + deep) + oy * (tl + deep) };
   const C2 = { x: Ph.x + ax * (th / 2 + deep) + ox * (th + deep), y: Ph.y + ay * (th / 2 + deep) + oy * (th + deep) };
   // Each end: just under the board's outer face at its spine edge, a little inside the

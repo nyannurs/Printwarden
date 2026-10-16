@@ -48,17 +48,18 @@ const lerp = (a, b, t) => a + (b - a) * t;
 
 /**
  * What a book is made from: page count and size (mm), binding, the paper's thickness and the
- * cover's (mm), the paper's weight and finish (how stiff its pages are).
+ * cover's (mm), the paper's weight and finish (how stiff its pages are), the pages in a
+ * sewn signature.
  * @typedef {{pageCount: number, binding: string, thickness: number, coverThickness: number,
- *            width: number, height: number, gsm?: number, finish?: string}} BookSpec
+ *            width: number, height: number, gsm?: number, finish?: string, signaturePages?: number}} BookSpec
  */
 
 /**
  * A book (makeBook): its spec, each leaf's thickness and place across the block, a coil's
  * ring; and what layoutBook keeps on it from frame to frame.
  * @typedef {Omit<BookSpec, "thickness"> & {leafCount: number, style: any, thickness: number[],
- *            cum: number[], total: number, ground: number, baseSamples?: Float64Array, piled?: any,
- *            scratch?: any} & Partial<ReturnType<typeof coilGeometry>>} Book
+ *            cum: number[], total: number, ground: number, signatureLeaves: number, foldDepth: number,
+ *            baseSamples?: Float64Array, piled?: any, scratch?: any} & Partial<ReturnType<typeof coilGeometry>>} Book
  */
 
 /**
@@ -80,7 +81,14 @@ export function makeBook(spec) {
   }
   const total = acc;
   const ground = -total / 2 - 0.4;
-  const book = { ...spec, leafCount, style, thickness, cum, total, ground };
+  // A sewn block (sewn, hardcover) is folded signatures, not a flat stack cut at the spine:
+  // each sheet is a U round the ones inside it, so every signature's fold reaches half its
+  // thickness beyond the sheets' roots (foldDepth), where the cover or case meets it (see
+  // writeSignatureFolds in extras.js).
+  const signatureLeaves = Math.max(1, Math.round((spec.signaturePages ?? 16) / 2));
+  const sewn = spec.binding === "sewn" || spec.binding === "hardcover";
+  const foldDepth = sewn ? (Math.min(signatureLeaves, Math.max(1, leafCount - 2)) * spec.thickness) / 2 : 0;
+  const book = { ...spec, leafCount, style, thickness, cum, total, ground, signatureLeaves, foldDepth };
   if (style.spine === "coil") Object.assign(book, coilGeometry(total, ground, style.wire));
   return book;
 }
@@ -298,8 +306,9 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
   const W = book.width;
   const base = ground + (boards ? thickness[0] : 0); // what the piles lie on: table or board
   // The strip across the spine, open: glued books on their spine (a hardcover's on its
-  // spine board), a stitched one above its folds.
-  const stripY = style.spine === "fold" ? ground + total / 2 : base + thickness[lo];
+  // spine board), a sewn block's roots above its signatures' folds, a stitched one above
+  // its folds.
+  const stripY = style.spine === "fold" ? ground + total / 2 : base + thickness[lo] + book.foldDepth;
   const length = W * 1.25; // so every leaf's offset curve reaches its full length
   // The base curve, finer than the leaves through the spine's bend: the sheets offset
   // outside it run longer there, and their pieces must stay as fine as the leaves' own.
