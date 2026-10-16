@@ -230,7 +230,8 @@ export class BookScene {
     this.noDraw = new THREE.MeshBasicMaterial({ visible: false });
     this.depthPass = isAppleMetal(r); // the sheets' depth drawn first (see makeLeaf)
     this.holesFirst = [firstMaterial(this, true, true), firstMaterial(this, false, true)]; // a coil's (see makeLeaf)
-    this.headbandMat = new THREE.MeshStandardMaterial({ color: 0xece4d2, roughness: 0.85 }); // cotton headbands
+    // Cotton headbands: the bead and its cloth tail (a single sheet: seen from either side).
+    this.headbandMat = new THREE.MeshStandardMaterial({ color: 0xece4d2, roughness: 0.85, side: THREE.DoubleSide });
     // A hardcover's case spine inside: what shows of it is the joint, which the endpaper
     // covers (it runs from the board into the first leaf), so it is paper (see setPaper).
     this.liningMat = new THREE.MeshStandardMaterial({ color: 0xf2efe8, roughness: 0.9, side: THREE.DoubleSide });

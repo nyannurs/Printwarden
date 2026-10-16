@@ -100,12 +100,16 @@ export function makeExtras(scene) {
       group.add(g);
       return g;
     });
+    // A headband at head and foot: a cord (the bead) across the block's spine, sitting on
+    // the spine's corner at the cut edge, half above it, and the cloth it is sewn to,
+    // glued down the spine (see HEADBAND). The bead's own mesh and the tail's.
     extras.headbands = [-1, 1].map((sgn) => {
-      const m = new THREE.Mesh(new THREE.BufferGeometry(), scene.headbandMat);
-      m.castShadow = true;
-      m.userData.z = sgn * (h / 2 - 0.75);
-      group.add(m);
-      return m;
+      const bead = new THREE.Mesh(new THREE.BufferGeometry(), scene.headbandMat);
+      const tail = new THREE.Mesh(new THREE.BufferGeometry(), scene.headbandMat);
+      bead.castShadow = tail.castShadow = true;
+      bead.userData = { sgn, z: sgn * (h / 2 - HEADBAND.beadRadius * HEADBAND.beadDrop), tail };
+      group.add(bead, tail);
+      return bead;
     });
   } else if (style.spine === "coil") {
     extras.coil = makeCoil(scene, style);
@@ -297,29 +301,31 @@ export function layoutExtras(scene) {
       }
       g.userData.fore.position.set(p.x[last], p.y[last], 0);
     }
-    // Headbands: along the block's spine at head and foot, on the spine board.
+    // Headbands: across the block's spine at head and foot, glued to it (see HEADBAND).
+    // The path runs along the sheets' roots, offset outward: the bead's centre a little past
+    // the signatures' folds (it caps the spine's corner), the tail on the folds' outside.
     const inner = scene.leaves.slice(1, -1);
-    const sink = m.thickness[1] / 2 + 0.76 + m.foldDepth; // into the hollow: from the sheets' roots, past the folds, to the band's centre
     const stepBy = Math.max(1, Math.ceil(inner.length / 24));
-    const path = [];
-    for (let k = 0; k < inner.length; k += stepBy) {
-      const p = inner[k].profile;
-      path.push(new THREE.Vector2(p.x[0] - Math.sin(p.phi[0]) * sink, p.y[0] - Math.cos(p.phi[0]) * sink));
-    }
-    const lastP = inner[inner.length - 1]?.profile;
-    if (lastP && (inner.length - 1) % stepBy !== 0) path.push(new THREE.Vector2(lastP.x[0] - Math.sin(lastP.phi[0]) * sink, lastP.y[0] - Math.cos(lastP.phi[0]) * sink));
+    const picks = [];
+    for (let k = 0; k < inner.length; k += stepBy) picks.push(inner[k].profile);
+    if (inner.length && (inner.length - 1) % stepBy !== 0) picks.push(inner[inner.length - 1].profile);
+    const at = (p, off) => new THREE.Vector2(p.x[0] - Math.sin(p.phi[0]) * off, p.y[0] - Math.cos(p.phi[0]) * off);
+    const beadPath = picks.map((p) => at(p, m.foldDepth + HEADBAND.beadRadius * HEADBAND.beadOut));
+    const tailPath = picks.map((p) => at(p, m.foldDepth + HEADBAND.tailLift));
     // Rebuilt only when the spine moved (a page turning over the block leaves it as it is).
-    const along = path.flatMap((q) => [q.x, q.y]);
+    const along = beadPath.flatMap((q) => [q.x, q.y]);
     for (const band of ex.headbands) {
-      band.visible = path.length >= 2;
+      const { tail, sgn, z } = band.userData;
+      band.visible = tail.visible = beadPath.length >= 2;
       if (!band.visible) continue;
       const was = band.userData.along;
       if (was && was.length === along.length && was.every((v, k) => v === along[k])) continue;
       band.userData.along = along;
-      const z = band.userData.z;
-      const curve = new THREE.CatmullRomCurve3(path.map((q) => new THREE.Vector3(q.x, q.y, z)));
+      const curve = new THREE.CatmullRomCurve3(beadPath.map((q) => new THREE.Vector3(q.x, q.y, z)));
       band.geometry.dispose();
-      band.geometry = new THREE.TubeGeometry(curve, Math.max(4, path.length * 2), 0.75, 8, false);
+      band.geometry = new THREE.TubeGeometry(curve, Math.max(4, beadPath.length * 2), HEADBAND.beadRadius, 10, false);
+      tail.geometry.dispose();
+      tail.geometry = tailGeometry(tailPath, z, z - sgn * HEADBAND.tailLength);
     }
   }
   if (ex.coil) {
@@ -663,6 +669,34 @@ function writeFoldGeometry(geo, leaves, book) {
 }
 
 /**
+ * A hardcover's headband (mm): a cord with cloth sewn round it, glued across the block's
+ * spine at head and foot. The cord, the bead, sits on the spine's corner at the cut edge:
+ * its centre `beadDrop` radii inside the edge (negative: above it, so most of the bead
+ * stands above the cut, as a headband's does) and `beadOut` radii past the signatures'
+ * folds. The cloth tail is
+ * glued down the spine from there, `tailLength` long, `tailLift` off the folds. The case's
+ * hollow leaves the bead room (CASE_HOLLOW).
+ */
+const HEADBAND = { beadRadius: 0.75, beadDrop: -0.2, beadOut: 0.5, tailLength: 12, tailLift: 0.06 };
+/** From the signatures' folds to the inside of the case's spine (mm): the hollow, which the bead fits. */
+const CASE_HOLLOW = 1.4;
+
+/** The headband's tail: a strip along `path` (the spine's width) from z0 to z1. */
+function tailGeometry(path, z0, z1) {
+  const pos = [];
+  const index = [];
+  for (const [k, q] of path.entries()) {
+    pos.push(q.x, q.y, z0, q.x, q.y, z1);
+    if (k) index.push(2 * k - 2, 2 * k - 1, 2 * k, 2 * k, 2 * k - 1, 2 * k + 1);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(index);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
  * The folds of a sewn block's signatures (see makeSignatureFolds): for every sheet, a half
  * circle from its first leaf's root to its last's, bulging `out` (away from the pages) by
  * half the distance between them, as thick as the sheet; nested within a signature, since
@@ -806,13 +840,16 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
     ox = -ox;
     oy = -oy;
   }
-  // The spine board's centre line: clear of the sheets' spine edges, reaching past the
-  // block by the boards' thickness on either side (flush with the boards' outer faces).
+  // The spine board's centre line. Across: past the block by the boards' thickness on
+  // either side (flush with the boards' outer faces). Behind the block: the signatures'
+  // folds, the hollow the headbands sit in, and half the covering, whatever the boards
+  // (tied to the boards, 5 mm boards left a 2 mm gap the headband hung in).
   const tl = book.thickness[1] ?? 0;
   const th = book.thickness[n - 2] ?? 0;
-  const deep = Math.max(tb - tc / 2, book.foldDepth + 0.4 + tc / 2); // past the signatures' folds too
-  const C1 = { x: Pl.x - ax * (tl / 2 + deep) + ox * (tl + deep), y: Pl.y - ay * (tl / 2 + deep) + oy * (tl + deep) };
-  const C2 = { x: Ph.x + ax * (th / 2 + deep) + ox * (th + deep), y: Ph.y + ay * (th / 2 + deep) + oy * (th + deep) };
+  const wide = (t) => t / 2 + tb - tc / 2;
+  const back = book.foldDepth + CASE_HOLLOW + tc / 2;
+  const C1 = { x: Pl.x - ax * wide(tl) + ox * back, y: Pl.y - ay * wide(tl) + oy * back };
+  const C2 = { x: Ph.x + ax * wide(th) + ox * back, y: Ph.y + ay * wide(th) + oy * back };
   // Each end: just under the board's outer face at its spine edge, a little inside the
   // board (no seam opens).
   const end = (p, outSign) => {
