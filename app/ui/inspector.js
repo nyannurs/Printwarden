@@ -228,7 +228,9 @@ export class Inspector {
     const row = field("CMYK profile", profile);
     row.classList.add("wide"); // profile names run long: the panel's whole width
     const overprint = select([["on", "Shown"], ["off", "Ignored"]], colour.overprint === false ? "off" : "on", (v) => this.deps.onOverprint(v === "on"));
-    return section("Color", null, row, field("Overprint", overprint));
+    const overprintRow = field("Overprint", overprint);
+    overprintRow.classList.add("wide"); // stacked like the profile above it: the section reads alike
+    return section("Color", null, row, overprintRow);
   }
 
   #findingsSection(findings, book, colour) {
