@@ -116,22 +116,43 @@ export async function renderVideo(preset = null) {
     // The book starts closed on its front cover, camera at rest.
     scene.turnMs = choice.turnSeconds * 1000;
     scene.closeMs = choice.turnSeconds * 1250;
-    scene.goTo(0, { animate: false });
-    scene.settleCamera();
+    const reset = () => {
+      scene.goTo(0, { animate: false });
+      scene.settleCamera();
+    };
+    reset();
     const step = (choice.turnSeconds + choice.pauseSeconds) * 1000;
     const cues = Array.from({ length: turns }, (_, k) => ({ at: 1000 + k * step, run: () => scene.goTo(k + 1) }));
     const durationMs = videoLength(turns, choice.turnSeconds, choice.pauseSeconds);
-    // Pages sharp for the video: the spread now and the next one (a turning leaf shows both).
-    const pageHeight = Math.min(4096, Math.round(Math.max(choice.width, choice.height) * 1.4));
+    // Each page's image at the size that draws it sharpest where it lies at rest in the video:
+    // 1.5 image pixels to a video pixel where the page is nearest the camera. (The page shader
+    // samples four times a pixel; more pixels than that, and the GPU blends in the next smaller
+    // mipmap level, which blurs: images at 1.4 times the video's size were soft at rest, sharp
+    // only once a turn swapped them for the screen's.) Measured by planning the video first.
+    const maxHeight = Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize);
+    const fallback = Math.min(maxHeight, Math.round(Math.max(choice.width, choice.height) * 1.4));
+    const heightFor = (folio, density) => {
+      const g = a.geometry[folio - 1];
+      // A page never at rest in the picture (a tall video shows one page of a spread): as
+      // large as the largest that is.
+      const px = density.get(folio) ?? (density.size ? Math.max(...density.values()) : 0);
+      if (!g || !px) return fallback;
+      return Math.max(256, Math.min(maxHeight, Math.round(1.5 * px * (g.trim.y1 - g.trim.y0))));
+    };
     const openingAt = (ms) => cues.filter((c) => c.at <= ms).length;
     await scene.recordVideo({
       ...choice,
       durationMs,
       cues,
-      prepare: async (ms) => {
+      reset,
+      prepare: async (ms, density) => {
         if (cancelled) throw new Error("cancelled");
+        // Sharp for the video: the spread before (a turning leaf shows it until it lands), the
+        // spread now and the next one. (Leaving out the one before swapped the lifting page and
+        // the page under it to the screen's images the moment a turn began.)
         const o = openingAt(ms);
-        await sharpenForVideo(sharp, [2 * o, 2 * o + 1, 2 * o + 2, 2 * o + 3, 2 * o + 4, 2 * o + 5], pageHeight);
+        const folios = Array.from({ length: 8 }, (_, k) => 2 * o - 2 + k);
+        await sharpenForVideo(sharp, folios, (f) => heightFor(f, density));
       },
       onFrame: (rgba, i) => writer.frame(rgba, i),
       onProgress: (done, total) => busy.progress(done / total),
@@ -162,7 +183,7 @@ export async function renderVideo(preset = null) {
   }
 }
 
-/** Have exactly these folios at the video's resolution (rendering what's missing). */
+/** Have exactly these folios at the video's resolution (rendering what's missing). `height(folio)`: its image's. */
 async function sharpenForVideo(sharp, folios, height) {
   const a = state.analysis;
   const want = new Set(folios.filter((f) => f >= 1 && f <= a.book.pages.length && a.geometry[f - 1]));
@@ -173,7 +194,7 @@ async function sharpenForVideo(sharp, folios, height) {
     sharp.delete(folio);
   }
   await Promise.all([...want].filter((f) => !sharp.has(f)).map(async (folio) => {
-    const image = await pageImage(folio, height, CAPTURE_PRIORITY, { cache: false, vector: VECTOR_TEXT });
+    const image = await pageImage(folio, height(folio), CAPTURE_PRIORITY, { cache: false, vector: VECTOR_TEXT });
     sharp.set(folio, image);
     scene.showPageImage(folio, image);
   }));
