@@ -142,7 +142,7 @@ export class Inspector {
   #bindingSection(setup, imposed) {
     const rows = [];
     if (!imposed) rows.push(field("Pages are", select(
-      [[SpreadMode.AUTO, "Detect automatically"], [SpreadMode.SINGLE, "Single pages"], [SpreadMode.SPREADS, "Spreads"]],
+      [[SpreadMode.AUTO, "Detect"], [SpreadMode.SINGLE, "Single pages"], [SpreadMode.SPREADS, "Spreads"]],
       setup.spreadMode, (v) => this.deps.onSetup({ spreadMode: v }),
     )));
     rows.push(field("Binding", select(

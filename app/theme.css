@@ -37,7 +37,7 @@
      a pill's middle, whole too): an edge on a fraction of a pixel is drawn a pixel off, so two
      pills alike came out a pixel apart in height. */
   --u: clamp(32px, round(down, calc(100vw / var(--cols)), 2px), 64px);
-  --panel-cols: 6; /* the info panel, squares wide (5 in the first sketch: too narrow for its fields) */
+  --panel-cols: 7; /* the info panel, squares wide (5 in the first sketch, 6 until the thickness fields widened the label column and the swatches ran under the scrollbar) */
   --strip-rows: 3; /* the timeline, squares tall */
 
   /* Type: sizes are shares of a square, never smaller than readable (the same from 1600 px
