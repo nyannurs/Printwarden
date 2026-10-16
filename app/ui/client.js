@@ -1,0 +1,225 @@
+// The client viewer export: one HTML file with the book in it, for a designer to send a
+// client (see app/client/viewer.js, which runs inside it). The file carries the viewer's own
+// modules and three.js, the pages as JPEG images at the height chosen, and the book as
+// shown here (binding, paper, spine, wire, headband, side glue); no PDF, nothing fetched,
+// so it opens from disk or hosted.
+//
+// The modules go in as text and are loaded through an import map of blob URLs: every
+// import between them is rewritten to a key (viewer/scene.js, three, three/addons/...),
+// resolved here from the app's own files.
+
+import { label } from "../core/book.js";
+import { hasWire, WIRE_COLORS } from "../core/binding.js";
+import { APP_VERSION, chooseSaveLocation } from "../platform.js";
+import { scene, state } from "./app.js";
+import { clientViewerDialog } from "./dialogs.js";
+import { showBusy, toast } from "./dom.js";
+import { pageImage } from "./pages.js";
+
+const ENTRY = "client/viewer.js";
+const JPEG_QUALITY = 0.86;
+
+/** Ask, build and save the viewer (the Viewer button). */
+export async function exportClientViewer() {
+  const a = state.analysis;
+  if (!a) return;
+  const choice = await clientViewerDialog(a);
+  if (!choice) return;
+  const base = state.name.replace(/\.pdf$/i, "");
+  const target = await chooseSaveLocation(`${base} viewer.html`, { name: "HTML", extensions: ["html"], mime: "text/html" });
+  if (!target) return;
+  const busy = showBusy("Building the viewer…");
+  try {
+    const html = await buildClientHtml(a, choice.heightPx, (done, total) => busy.progress(done / total));
+    busy.title("Saving…");
+    const saved = await target.write(new TextEncoder().encode(html));
+    toast(`Saved ${saved}`, "info");
+  } catch (err) {
+    toast(`Viewer export failed: ${err.message}`, "error");
+  } finally {
+    busy.remove();
+  }
+}
+
+/**
+ * The viewer as one HTML document.
+ * @param {ReturnType<typeof import("../core/analysis.js").analyse>} analysis
+ * @param {number} heightPx the page images' height
+ * @param {(done: number, total: number) => void} [progress]
+ */
+export async function buildClientHtml(analysis, heightPx, progress = () => {}) {
+  const modules = await bundleModules(ENTRY);
+  const data = await clientBook(analysis, heightPx, progress);
+  const json = (v) => JSON.stringify(v).replace(/<\//g, "<\\/"); // never closes its script
+  const title = escapeHtml(data.title);
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>${CLIENT_CSS}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="application/json" id="modules">${json(modules)}</script>
+<script type="application/json" id="book">${json(data)}</script>
+<script>
+(() => {
+  const modules = JSON.parse(document.getElementById("modules").textContent);
+  const imports = {};
+  for (const [key, text] of Object.entries(modules)) imports[key] = URL.createObjectURL(new Blob([text], { type: "text/javascript" }));
+  const map = document.createElement("script");
+  map.type = "importmap";
+  map.textContent = JSON.stringify({ imports });
+  document.head.append(map);
+  const main = document.createElement("script");
+  main.type = "module";
+  main.textContent = 'import { start } from "${ENTRY}"; start(JSON.parse(document.getElementById("book").textContent), document.getElementById("root"))'
+    + '.catch((e) => { document.getElementById("root").textContent = "The viewer could not start: " + e.message; });';
+  document.body.append(main);
+})();
+</script>
+</body>
+</html>
+`;
+}
+
+/**
+ * The book as the viewer needs it (see ClientBook in client/viewer.js): the scene's own
+ * spec and look as they stand, and the pages rendered as JPEGs.
+ * @returns {Promise<import("../client/viewer.js").ClientBook>}
+ */
+async function clientBook(analysis, heightPx, progress) {
+  const m = scene.model;
+  const { book, setup } = analysis;
+  const n = book.pages.length;
+  const hex = (c) => `#${c.getHexString()}`;
+  const spineImage = scene.spineMat.map?.image;
+  const glued = (setup.binding === "perfect" || setup.binding === "sewn") && n >= 6 ? setup.glueMm ?? 0 : 0;
+  const pages = [];
+  for (let folio = 1; folio <= n; folio++) {
+    progress(folio - 1, n);
+    const page = book.pages[folio - 1];
+    if (!page.source) {
+      pages.push(null);
+      continue;
+    }
+    const image = await pageImage(folio, heightPx, 0, { cache: false });
+    pages.push(image ? await toDataUrl(image, "image/jpeg", JPEG_QUALITY) : null);
+    image?.close?.();
+  }
+  progress(n, n);
+  return {
+    title: state.name.replace(/\.pdf$/i, ""),
+    version: APP_VERSION,
+    book: {
+      pageCount: n,
+      pageSize: { width: m.width, height: m.height },
+      binding: m.binding,
+      signaturePages: m.signaturePages ?? null,
+      boardMm: m.boardMm ?? null,
+      endpapers: !!m.endpapers,
+      roundSpine: !!m.roundSpine,
+      paper: {
+        ...scene.paper,
+        thickness: m.thickness.find((_, i) => i > 0 && i < m.leafCount - 1) ?? m.thickness[0],
+        coverThickness: m.coverThickness,
+        gsm: m.gsm,
+        finish: m.finish,
+      },
+    },
+    background: state.background,
+    spine: {
+      color: hex(scene.spineMat.color),
+      artwork: spineImage ? await toDataUrl(spineImage, "image/png") : null,
+      frontEdge: hex(scene.frontWrapMat.color),
+      backEdge: hex(scene.backWrapMat.color),
+    },
+    wire: hasWire(setup.binding) ? { hex: setup.wire, metal: WIRE_COLORS.find((w) => w.hex === setup.wire.toLowerCase())?.metal ?? false } : null,
+    headband: setup.binding === "hardcover" ? setup.headband : null,
+    glue: { folios: glued ? [2, 3, n - 2, n - 1] : [], mm: glued },
+    score: { folios: glued ? [1, n] : [], mm: glued },
+    labels: book.pages.map((_, i) => label(book, i + 1)),
+    pages,
+  };
+}
+
+/** An image (bitmap or canvas) as a data URL. */
+async function toDataUrl(image, type, quality = undefined) {
+  const canvas = new OffscreenCanvas(image.width, image.height);
+  canvas.getContext("2d").drawImage(image, 0, 0);
+  const blob = await canvas.convertToBlob({ type, quality });
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${type};base64,${btoa(binary)}`;
+}
+
+// --- bundling ------------------------------------------------------------------------------
+
+const IMPORT_RE = /^((?:import|export)[^;]*?from\s*|import\s*)(['"])([^'"]+)\2/gm;
+
+/**
+ * The entry module and everything it imports, by key, their imports rewritten to keys.
+ * @returns {Promise<Record<string, string>>}
+ */
+async function bundleModules(entry) {
+  /** @type {Record<string, string>} */
+  const modules = {};
+  const queue = [entry];
+  while (queue.length) {
+    const key = queue.shift();
+    if (modules[key] !== undefined) continue;
+    const response = await fetch(urlOf(key));
+    if (!response.ok) throw new Error(`${key} is missing (${response.status})`);
+    const text = await response.text();
+    modules[key] = text.replace(IMPORT_RE, (_, pre, quote, spec) => {
+      const target = resolveKey(key, spec);
+      queue.push(target);
+      return `${pre}${quote}${target}${quote}`;
+    });
+  }
+  return modules;
+}
+
+/** Where a key's file is: three.js and its addons in vendor/, the rest under app/. */
+function urlOf(key) {
+  if (key === "three") return new URL("../../vendor/three.module.js", import.meta.url);
+  if (key.startsWith("three/addons/")) return new URL(`../../vendor/three-addons/${key.slice("three/addons/".length)}`, import.meta.url);
+  return new URL(`../${key}`, import.meta.url);
+}
+
+/** A specifier as a key: relative ones resolved against the importing module's key. */
+function resolveKey(fromKey, spec) {
+  if (!spec.startsWith(".")) return spec;
+  const parts = fromKey.split("/").slice(0, -1);
+  for (const piece of spec.split("/")) {
+    if (piece === "." || piece === "") continue;
+    if (piece === "..") parts.pop();
+    else parts.push(piece);
+  }
+  return parts.join("/");
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+}
+
+const CLIENT_CSS = `
+html, body { margin: 0; height: 100%; background: #56575b; color: #fff; font: 13px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+#root { position: fixed; inset: 0; }
+#root .view { position: absolute; inset: 0; }
+#root .view canvas { display: block; }
+#root .top { position: absolute; top: 12px; left: 12px; display: flex; gap: 8px; }
+#root .bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; }
+#root .made { position: absolute; bottom: 12px; right: 12px; opacity: 0.6; }
+#root .pill { height: 30px; padding: 0 14px; border-radius: 15px; border: 0; background: #000; color: #fff; font: inherit; display: inline-flex; align-items: center; white-space: nowrap; cursor: pointer; }
+#root .pill:hover { background: #fff; color: #000; }
+#root .pill:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#root .pill:disabled { opacity: 0.4; cursor: default; }
+#root .pill:disabled:hover { background: #000; color: #fff; }
+#root .pill.label { cursor: default; }
+#root .pill.label:hover { background: #000; color: #fff; }
+#root select.pill { appearance: none; -webkit-appearance: none; padding-right: 14px; }
+`;

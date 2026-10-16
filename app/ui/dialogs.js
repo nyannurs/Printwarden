@@ -140,6 +140,35 @@ function sheetsNote(rule, layout) {
 }
 
 /**
+ * The client viewer's settings (see ui/client.js): how tall the page images are. Resolves
+ * to {heightPx}, or null if cancelled.
+ * @param {ReturnType<typeof import("../core/analysis.js").analyse>} analysis
+ * @returns {Promise<{heightPx: number} | null>}
+ */
+export function clientViewerDialog(analysis) {
+  return new Promise((resolve) => {
+    const d = dialog("Export client viewer");
+    const n = analysis.book.pages.length;
+    const summary = el("p", "dialog-summary", [`${n} pages as images in one HTML file: the book as shown here, to turn and look round in any browser. Nothing else is needed, no PDF goes with it.`]);
+    const height = select([["1024", "1024 px tall (sharp on a phone)"], ["1536", "1536 px tall"], ["2048", "2048 px tall (sharp on a large screen)"]], "1536");
+    const note = el("p", "dialog-note", ["About 100 to 400 KB a page, with three.js and the viewer (1.7 MB) in the file."]);
+    const exportBtn = button("Export", () => finish(true), "btn primary");
+    const actions = el("div", "dialog-actions", [button("Cancel", () => finish(false)), exportBtn]);
+    d.body.append(summary, row("Page images", height), note, actions);
+    function finish(ok) {
+      d.el.close();
+      d.el.remove();
+      resolve(ok ? { heightPx: Number(height.value) } : null);
+    }
+    d.el.addEventListener("cancel", (e) => {
+      e.preventDefault();
+      finish(false);
+    });
+    d.el.showModal();
+  });
+}
+
+/**
  * Imposition settings. Resolves to ExportOptions, or null if cancelled. `onSheetPages`:
  * the pages a sheet holds is part of the setup (the timeline's press sheets show it): set
  * through it, it gives the analysis made with it.

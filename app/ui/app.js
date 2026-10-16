@@ -15,6 +15,7 @@ import { makeSamplePdf } from "../pdf/sample.js";
 import { APP_NAME, APP_VERSION, canQuit, latestRelease, onMenuCommand, openReleases, quit, savePdf } from "../platform.js";
 import { BookScene } from "../viewer/scene.js";
 import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js";
+import { buildClientHtml, exportClientViewer } from "./client.js";
 import { colourOptions, profileBytes, setColourProfile, setOverprint } from "./colour.js";
 import { makeCompass } from "./compass.js";
 import { aboutDialog, exportDialog, importDialog } from "./dialogs.js";
@@ -312,6 +313,7 @@ function reanalyse(opening = scene.opening) {
   }
   inspector.render(analysis, state.name, state.colour);
   /** @type {HTMLButtonElement} */ ($("export-btn")).disabled = analysis.imposed;
+  /** @type {HTMLButtonElement} */ ($("viewer-btn")).disabled = false;
   scene.goTo(Math.min(opening, book.pages.length >> 1), { animate: false });
   onOpeningChanged();
   loadAllTextures();
@@ -374,6 +376,7 @@ function showFocus() {
 $("import-btn").addEventListener("click", () => startImport());
 $("empty-import").addEventListener("click", () => startImport());
 $("export-btn").addEventListener("click", startExport);
+$("viewer-btn").addEventListener("click", () => exportClientViewer());
 $("sample-btn").addEventListener("click", async () => {
   openDocument({ file: { name: "sample.pdf", bytes: await makeSamplePdf() }, source: "pages" });
 });
@@ -422,5 +425,5 @@ prepareSpareWorkers(300);
 
 // For debugging from the developer console.
 window.app = {
-  state, scene, openDocument, updateSetup, sharpen, setColourProfile, setOverprint, prepareCaptureTile, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
+  state, scene, openDocument, updateSetup, sharpen, setColourProfile, setOverprint, prepareCaptureTile, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
 };
