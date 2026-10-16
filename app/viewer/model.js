@@ -123,12 +123,16 @@ export function restingAngle(book, i, opening) {
 /**
  * Coil pages on each side lie parallel, sloping from the ring (raised above the table
  * by the wire) down so the bottom page of the stack meets the table at its fore-edge.
+ * A page sloping down has its hole below the ring's centre too, on the ring at its angle
+ * (leafProfile): over a slope σ the top page's fore-edge comes down R sin σ at the hole
+ * and (width − hole offset) sin σ along the page. (Figured from the page's length alone,
+ * a 540-page book's thin side ran 3 mm under the table beside its 22 mm ring.)
  */
 function coilRestingAngle(book, left, opening) {
   const split = opening === 0 ? 0 : book.cum[opening - 1] + book.thickness[opening - 1] / 2;
   const sideThickness = left ? split : book.total - split;
   const drop = book.coilOpen.y - (book.ground + sideThickness);
-  const slope = Math.atan2(Math.max(0, drop), book.width - HOLE_OFFSET_MM) / DEG;
+  const slope = Math.asin(Math.min(1, Math.max(0, drop) / (book.coilRadius + book.width - HOLE_OFFSET_MM))) / DEG;
   const a = 90 + slope;
   return left ? -a : a;
 }
@@ -170,8 +174,22 @@ export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 
     const psi = theta * DEG;
     const t0 = theta * DEG;
     const off = split - cum[i];
-    const holeX = book.coilOpen.x + R * Math.sin(psi) - Math.cos(t0) * off;
-    const holeY = book.coilOpen.y + R * Math.cos(psi) + Math.sin(t0) * off;
+    // The pile a page lies in rests on the table. A thin pile hangs from the ring's side, its
+    // top page at the ring's centre height sloping down to the fore-edge (coilRestingAngle).
+    // A pile taller than that (a thick book open near a cover) is lifted so it still rests on
+    // the table: its top page lies flat on it, above the centre, and the holes up there sit
+    // on the ring where it is at that height, inside its side, as a thick spiral book's top
+    // pages hug the coil. (Stacked down from the centre, a 540-page block sank 17 mm into the
+    // table at its cover.) Pages in the air take the ring's point at their angle, as before:
+    // the lift and the hug fade as a page rises, so a turn stays continuous.
+    const s = Math.sin(psi) >= 0 ? 1 : -1; // the pile it lies in: right of the ring, or left
+    const flat = Math.abs(Math.sin(psi));
+    const pile = s > 0 ? total - split : split; // paper on that side
+    const lift = Math.max(0, book.ground + pile - book.coilOpen.y) * flat;
+    const holeY = book.coilOpen.y + R * Math.cos(psi) + Math.sin(t0) * off + lift;
+    const above = Math.max(0, holeY - book.coilOpen.y); // over the centre: the ring is inside its side there
+    const onRing = Math.max(HOLE_OFFSET_MM + 1, Math.sqrt(Math.max(0, R * R - above * above)));
+    const holeX = book.coilOpen.x + s * (R - flat * (R - onRing)) + (R * Math.sin(psi) - s * R) - Math.cos(t0) * off;
     const openA = { x: holeX - Math.sin(t0) * HOLE_OFFSET_MM, y: holeY - Math.cos(t0) * HOLE_OFFSET_MM };
     // Closed front up, the first leaf on top; back up (flipped through to the end), the last.
     const closedA = { x: 0, y: side > 0 ? ground + total - cum[i] : ground + cum[i] };

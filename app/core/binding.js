@@ -40,8 +40,10 @@ const DEFAULT_SIGNATURE = { perfect: 4, sewn: 16, hardcover: 16 };
  *   pageMultiple: number,            // of the pages that fold: all of them, or between the covers
  *   signaturePages: number | null,   // null: unfolded leaves, or saddle (one signature)
  *   coverPages: number,              // 4: the cover is made apart (outside and inside, front and back)
- *   minPagesHint?: number, maxPagesHint?: number, innerEdgeLossMm: number,
+ *   minPagesHint?: number, maxPagesHint?: number, maxThicknessMm?: number, innerEdgeLossMm: number,
  * }} BindingRule
+ * maxThicknessMm: the thickest block the largest coil made takes (plastic spiral 50 mm
+ * across, about 44 mm of block; wire-o 1 1/4 inch, about 28 mm).
  * @returns {BindingRule}
  */
 export function ruleFor(binding, signaturePages = null) {
@@ -68,8 +70,9 @@ export function ruleFor(binding, signaturePages = null) {
       };
     }
     case Binding.SPIRAL:
+      return { binding, pageMultiple: 1, signaturePages: null, coverPages: 0, innerEdgeLossMm: 9, maxThicknessMm: 44 };
     case Binding.WIRE_O:
-      return { binding, pageMultiple: 1, signaturePages: null, coverPages: 0, innerEdgeLossMm: 9 };
+      return { binding, pageMultiple: 1, signaturePages: null, coverPages: 0, innerEdgeLossMm: 9, maxThicknessMm: 28 };
     default:
       throw new Error(`Unknown binding ${binding}`);
   }

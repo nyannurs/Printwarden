@@ -213,6 +213,12 @@ export class Inspector {
       const shown = colour.options.find((o) => o.id === colour.choice)?.name ?? colour.choice;
       findings = [...findings, { severity: "info", code: "profile-chosen", folios: [],
         message: `The PDF names its own CMYK profile, ${intent.name.replace(/^From PDF: /, "")}. It is shown with ${shown}, as chosen under Color.` }];
+    } else if (colour) {
+      // Which profile the colours follow, and what it reaches: plain CMYK only. (A print
+      // designer compared two FOGRA39 profiles and saw no change: there is almost none.)
+      const shown = colour.options.find((o) => o.id === colour.choice)?.name.replace(/^(Included|From PDF): /, "") ?? colour.choice;
+      findings = [...findings, { severity: "info", code: "profile", folios: [],
+        message: `Plain CMYK is shown with ${shown}. Images with their own profile and RGB keep their colors, whatever is chosen.` }];
     }
     if (!findings.length) list.append(Object.assign(el("li", "muted"), { textContent: "Nothing to report." }));
     for (const f of findings) {

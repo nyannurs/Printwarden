@@ -1,7 +1,7 @@
 // The app's dialogs: import, export, screenshot, video, spot finish, book spine, About and
 // its licenses, and reports.
 
-import { BINDING_LABELS } from "../core/binding.js";
+import { Binding, BINDING_LABELS } from "../core/binding.js";
 import { defaultExportOptions, planSheets, SHEET_PRESETS } from "../core/sheets.js";
 import { formatMm } from "../core/units.js";
 import { readImposition } from "../pdf/load.js";
@@ -94,6 +94,20 @@ export function importDialog(initialFile = null) {
 }
 
 /**
+ * What the press sheets are, plainly: every sheet holds one spread a side (2-up), and a
+ * signature is sheets inserted into one another, not one sheet folded; signatures are gathered
+ * (stacked) in order. Imposition software folds whole signatures from one sheet; this doesn't.
+ */
+function sheetsNote(rule, layout) {
+  const S = layout.signaturePages;
+  const sheets = S / 4;
+  if (rule.binding === Binding.SADDLE) return `Each sheet holds one spread per side, all ${sheets} inserted into one another.`;
+  const cover = layout.coverSheet ? ", then the cover on its own sheet" : "";
+  return `Each sheet holds one spread per side. ${S === 8 ? "An" : "A"} ${S}-page signature is ${sheets} sheet${sheets === 1 ? "" : "s"}` +
+    `${sheets === 1 ? "" : " inserted into one another"}; the signatures are gathered in order${cover}.`;
+}
+
+/**
  * Imposition settings. Resolves to ExportOptions, or null if cancelled.
  * @param {ReturnType<typeof import("../core/analysis.js").analyse>} analysis
  */
@@ -102,6 +116,7 @@ export function exportDialog(analysis, remembered = null) {
     const opts = structuredClone(remembered ?? defaultExportOptions());
     const d = dialog("Export imposed PDF");
     const summary = el("p", "dialog-summary");
+    const how = el("p", "dialog-note"); // what the sheets are: no folding schemes here (see sheetsNote)
 
     const sheetChoices = [["auto", "Automatic (fits pages, bleed and marks)"],
       ...SHEET_PRESETS.map((p) => [p.name, `${p.name} (${formatMm(p.size.width)} × ${formatMm(p.size.height)} mm)`]),
@@ -126,7 +141,7 @@ export function exportDialog(analysis, remembered = null) {
 
     const exportBtn = button("Export", () => finish(true), "btn primary");
     const actions = el("div", "dialog-actions", [button("Cancel", () => finish(false)), exportBtn]);
-    d.body.append(summary, row("Sheet size", sheet), custom, sheetSize, bleed.wrap, marks, creep.wrap, creepInfo, errors, actions);
+    d.body.append(summary, how, row("Sheet size", sheet), custom, sheetSize, bleed.wrap, marks, creep.wrap, creepInfo, errors, actions);
 
     const read = () => {
       opts.sheet = sheet.value === "auto" ? "auto"
@@ -145,6 +160,7 @@ export function exportDialog(analysis, remembered = null) {
       summary.textContent = layout
         ? `${BINDING_LABELS[rule.binding]} • ${book.pages.length} pages on ${plan.sheetCount} sheet${plan.sheetCount === 1 ? "" : "s"}`
         : "";
+      how.textContent = layout ? sheetsNote(rule, layout) : "";
       sheetSize.textContent = `Sheet: ${formatMm(plan.sheetSize.width)} × ${formatMm(plan.sheetSize.height)} mm, landscape`;
       creepInfo.textContent = opts.creep ? `Up to ${plan.maxCreepMm.toFixed(2)} mm toward the spine, on the innermost sheet` : "";
       errors.replaceChildren(...plan.errors.map((m) => el("li", "", [m])));

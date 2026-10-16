@@ -53,6 +53,50 @@ function outlineOf(scene, leaf) {
   return [...front, ...back]; // along the front, back along the back
 }
 
+test("thick coil books rest on the table at every opening, and closing from a cover", async () => {
+  // A pile taller than the ring's centre is high (a thick book open near a cover) was stacked
+  // down from that centre, through the table: 540 pages at their cover lay 17 mm under it.
+  const box = document.createElement("div");
+  box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 320px; height: 200px;";
+  document.body.append(box);
+  const scene = new BookScene(box);
+  const bad = [];
+  const lowest = () => Math.min(...scene.leaves.map((l) => Math.min(...l.profile.y.slice(1)) - scene.model.thickness[l.i] / 2));
+  try {
+    for (const binding of ["spiral", "wire-o"]) {
+      for (const pageCount of [200, 540]) {
+        scene.setBook({ pageCount, pageSize: { width: 148, height: 210 }, binding, paper });
+        const n = scene.model.leafCount;
+        const table = scene.model.ground - 0.5; // the table, less the slack the thin books' sloping pages use
+        for (const opening of [0, 1, 2, Math.floor(n / 2), n - 1, n]) {
+          scene.clock = 1000;
+          scene.goTo(opening, { animate: false });
+          scene.debugStep();
+          const low = lowest();
+          if (low < table) bad.push(`${binding}, ${pageCount} pages, opening ${opening}: a page ${(table - low).toFixed(2)} mm under the table`);
+          if (opening === 0 && pageCount === 200) {
+            // Closing from the cover: every page stays above the table and clear of the others.
+            scene.close();
+            for (let t = 0; t < 3000 && bad.length < 8; t += 32) {
+              scene.clock += 32;
+              scene.debugStep();
+              const l2 = lowest();
+              if (l2 < table) bad.push(`${binding}, ${pageCount} pages, closing, ${t} ms: a page ${(table - l2).toFixed(2)} mm under the table`);
+              const pairs = crossingPairs(scene.leaves.map((l) => outlineOf(scene, l)));
+              if (pairs.length) bad.push(`${binding}, ${pageCount} pages, closing, ${t} ms: ${pairs.slice(0, 3).map((q) => q.join("/")).join(" ")}`);
+            }
+            ok(scene.isClosed && scene.closed === 1, `${binding} ${pageCount}: closed at the end`);
+          }
+        }
+      }
+    }
+    eq(bad, []);
+  } finally {
+    scene.clock = null;
+    box.remove();
+  }
+});
+
 test("coil books closing from anywhere, pages still in the air: no sheet passes through another, none sinks into the table, frame by frame", async () => {
   const box = document.createElement("div");
   box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 320px; height: 200px;";

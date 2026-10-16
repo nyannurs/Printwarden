@@ -181,8 +181,9 @@ function* checkPageCount({ book, rule, imposed }) {
   }
 }
 
-function* checkBindingHints({ book, rule }) {
+function* checkBindingHints({ book, rule, setup }) {
   const n = book.pages.length;
+  const thicknessMm = bookThicknessMm(setup, n);
   const name = BINDING_LABELS[rule.binding].toLowerCase();
   if (rule.maxPagesHint && n > rule.maxPagesHint) {
     yield finding("warning", "too-thick",
@@ -190,6 +191,11 @@ function* checkBindingHints({ book, rule }) {
   }
   if (rule.minPagesHint && n < rule.minPagesHint) {
     yield finding("warning", "too-thin", `${n} pages may be too few for a ${name} spine (usually ${rule.minPagesHint}+).`);
+  }
+  if (rule.maxThicknessMm && thicknessMm > rule.maxThicknessMm) {
+    yield finding("warning", "too-thick",
+      `The block is about ${formatMm(thicknessMm)} mm thick: the largest coil made for ${name} takes about ${rule.maxThicknessMm} mm. ` +
+      "Ask your printer, or split the book.");
   }
   if (rule.innerEdgeLossMm) {
     yield finding("info", "punch", `The punch for ${name} takes ~${rule.innerEdgeLossMm} mm of the inner edge.`);
