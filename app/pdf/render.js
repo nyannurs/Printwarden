@@ -61,11 +61,14 @@ export function routedRenderer(main, cover) {
  * `cmykProfile` (ICC bytes, or a promise of them, optional) converts plain CMYK; without
  * it, pdf.js's built-in profile is used. Embedded ICC profiles are always honoured. The
  * workers start loading right away and wait for the profile only before opening.
+ * `overprint` (or a promise of it): whether overprinting objects are shown as on press (see
+ * parser-profile.js).
+ * @param {boolean | Promise<boolean>} [overprint]
  */
-export async function createRenderer(bytes, fallbackPdf, cmykProfile = null) {
+export async function createRenderer(bytes, fallbackPdf, cmykProfile = null, overprint = true) {
   try {
     const slots = takeSpareWorkers(poolSize());
-    return await WorkerPool.start(bytes, slots, cmykProfile);
+    return await WorkerPool.start(bytes, slots, cmykProfile, overprint);
   } catch (err) {
     console.warn("Background rendering unavailable, using the main thread:", err);
     return new MainThreadRenderer(await fallbackPdf());
@@ -233,7 +236,8 @@ class WorkerPool extends Scheduler {
     this.vectorJobs = new Map(); // id -> {resolve, slot}
   }
 
-  static async start(bytes, slots, cmykProfile) {
+  /** @param {boolean | Promise<boolean>} [overprint] */
+  static async start(bytes, slots, cmykProfile, overprint = true) {
     const pool = new WorkerPool();
     const shared = bytes.byteLength >= SHARED_FILE_BYTES ? new Blob([bytes]) : null;
     pool.workers = await Promise.all(slots.map((slot) => new Promise((resolve, reject) => {
@@ -262,8 +266,8 @@ class WorkerPool extends Scheduler {
           worker.postMessage({ type: "open", bytes: copy }, [copy.buffer]);
         }
       }, reject);
-      Promise.resolve(cmykProfile).then((profile) => {
-        worker.postMessage({ type: "profile", bytes: profile ?? null });
+      Promise.all([cmykProfile, overprint]).then(([profile, shown]) => {
+        worker.postMessage({ type: "profile", bytes: profile ?? null, overprint: shown });
         profiled = true;
         maybeReady();
       }, reject);

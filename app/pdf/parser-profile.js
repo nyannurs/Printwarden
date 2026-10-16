@@ -10,9 +10,14 @@
 const BUILT_IN = "CGATS001Compat-v2-micro.icc";
 let profile = null;
 
+// The message also says whether overprint is shown (bookviewOverprint): pdf.js's graphics
+// state, patched (tools/patch-pdfjs.py), multiplies overprinting fills and strokes while it is.
+/** @type {any} */ (self).bookviewOverprint = true;
+
 self.addEventListener("message", (/** @type {MessageEvent} */ event) => {
   if (event.data && typeof event.data === "object" && "bookviewProfile" in event.data) {
     profile = event.data.bookviewProfile;
+    /** @type {any} */ (self).bookviewOverprint = event.data.bookviewOverprint !== false;
     event.stopImmediatePropagation();
   }
 });

@@ -29,7 +29,7 @@ export class Inspector {
    * @param {{onSetup: (patch: object) => void, onGoToFolio: (folio: number) => void,
    *          onPaperPreview: (colors: {color?: string, coverColor?: string}) => void,
    *          onWirePreview: (color: string) => void,
-   *          onColourProfile: (id: string) => void, onSpine: () => void, onFinish: () => void,
+   *          onColourProfile: (id: string) => void, onOverprint: (on: boolean) => void, onSpine: () => void, onFinish: () => void,
    *          onBackground: (color: string, commit: boolean) => void, background: () => string,
    *          onAbout: () => void}} deps
    */
@@ -212,7 +212,8 @@ export class Inspector {
     const profile = select(colour.options.map((o) => [o.id, o.name]), colour.choice, (id) => this.deps.onColourProfile(id));
     const row = field("CMYK profile", profile);
     row.classList.add("wide"); // profile names run long: the panel's whole width
-    return section("Color", null, row);
+    const overprint = select([["on", "Shown"], ["off", "Ignored"]], colour.overprint === false ? "off" : "on", (v) => this.deps.onOverprint(v === "on"));
+    return section("Color", null, row, field("Overprint", overprint));
   }
 
   #findingsSection(findings, book, colour) {
@@ -229,7 +230,9 @@ export class Inspector {
       // designer compared two FOGRA39 profiles and saw no change: there is almost none.)
       const shown = colour.options.find((o) => o.id === colour.choice)?.name.replace(/^(Included|From PDF): /, "") ?? colour.choice;
       findings = [...findings, { severity: "info", code: "profile", folios: [],
-        message: `Plain CMYK is shown with ${shown}. Images with their own profile and RGB keep their colors, whatever is chosen.` }];
+        message: `Plain CMYK is shown with ${shown}. Images with their own profile and RGB keep their colors, whatever is chosen.`
+          + (colour.overprint === false ? " Overprint is ignored: overprinting objects cover what is under them."
+            : " Overprinting objects are shown as printed, their ink over what is under them.") }];
     }
     if (!findings.length) list.append(Object.assign(el("li", "muted"), { textContent: "Nothing to report." }));
     for (const f of findings) {

@@ -8,6 +8,7 @@ import { forgetThumbnails, loadAllTextures } from "./pages.js";
 import { applySpine, renderSpineArt } from "./spine-panel.js";
 
 const PROFILE_PREF = "cmykProfile"; // remembered choice (localStorage)
+const OVERPRINT_PREF = "overprint"; // "off" when overprint is not to be shown
 
 // Shipped with the app by the European Color Initiative's permission (see vendor/icc/README.txt):
 // the default everywhere, so colours look the same on every computer, whatever is installed.
@@ -30,14 +31,16 @@ export async function colourOptions(outputIntent) {
   }
   options.push({ id: "builtin", name: "Built-in: US coated (GRACoL)" });
   let pref = null;
+  let overprint = true;
   try {
     pref = localStorage.getItem(PROFILE_PREF);
+    overprint = localStorage.getItem(OVERPRINT_PREF) !== "off";
   } catch {
     // no storage: fine
   }
   const has = (id) => options.some((o) => o.id === id);
   const choice = pref !== "intent" && has(pref) ? pref : outputIntent ? "intent" : INCLUDED_PROFILE.id;
-  return { options, choice };
+  return { options, choice, overprint };
 }
 
 export async function profileBytes(colour, id) {
@@ -62,8 +65,29 @@ export async function setColourProfile(id) {
   } catch {
     // no storage: fine
   }
+  rerender();
+}
+
+/**
+ * Show overprint or not: overprinting objects (the graphics state's OP and op) are drawn as
+ * the press lays them, ink over ink (multiplied), as Acrobat's Overprint Preview shows them;
+ * off, they cover what is under them, as most viewers draw them. Remembered.
+ */
+export function setOverprint(on) {
+  if (!state.bytes || on === state.colour.overprint) return;
+  state.colour = { ...state.colour, overprint: on };
+  try {
+    localStorage.setItem(OVERPRINT_PREF, on ? "on" : "off");
+  } catch {
+    // no storage: fine
+  }
+  rerender();
+}
+
+/** Restart the renderer with the colour settings and re-render every page. */
+function rerender() {
   const old = state.renderer;
-  const rendererReady = startRenderers({ bytes: state.bytes, cover: state.cover }, profileBytes(state.colour, id));
+  const rendererReady = startRenderers({ bytes: state.bytes, cover: state.cover }, profileBytes(state.colour, state.colour.choice));
   state.rendererReady = rendererReady;
   state.renderer = null;
   rendererReady.then((r) => {

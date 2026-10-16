@@ -137,9 +137,10 @@ self.postMessage({ type: "loaded" });
 
 self.onmessage = async ({ data }) => {
   if (data.type === "profile") {
-    // The CMYK profile, once known (see parser-profile.js). Sent before any page request.
+    // The CMYK profile, once known, and whether overprint is shown (see parser-profile.js).
+    // Sent before any page request.
     const url = data.bytes ? URL.createObjectURL(new Blob([data.bytes], { type: "application/vnd.iccprofile" })) : null;
-    parser.postMessage({ bookviewProfile: url });
+    parser.postMessage({ bookviewProfile: url, bookviewOverprint: data.overprint !== false });
     return;
   }
   if (data.type === "open") {
