@@ -6,6 +6,7 @@
 // 115 mm in one frame before 0.17.82, a stack swung over to close the book 16 mm).
 
 import { restingAngle } from "../app/viewer/model.js";
+import { STACK_FILL } from "../app/viewer/shaders.js";
 import { BookScene } from "../app/viewer/scene.js";
 import { eq, ok, test } from "./harness.js";
 
@@ -156,7 +157,7 @@ test("turning: a stack swung over together is drawn at its full thickness (no ga
     scene.debugStep();
     const moving = scene.leaves.filter((l) => l.start != null);
     eq(moving.length, 10);
-    ok(moving.every((l) => l.fill === 1), "every sheet of the stack at its full thickness");
+    ok(moving.every((l) => l.fill === STACK_FILL), "every sheet of the stack at its full thickness and a hair over");
     ok(scene.leaves.filter((l) => l.start == null).every((l) => l.fill < 1), "the rest thinned");
     scene.clock = 32000;
     scene.debugStep();

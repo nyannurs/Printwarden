@@ -532,13 +532,13 @@ export function packSheet(leaf, sheets, thickness) {
   data[o + 8] = b[8];
   const fill = leaf.fill ?? LEAF_FILL;
   data[o + 9] = (thickness * fill) / 2;
-  // Sheets of a stack swung over together (fill 1, see layoutLeaves) end flush: between
+  // Sheets of a stack swung over together (STACK_FILL, see layoutLeaves) end flush: between
   // them no face is drawn, so a sheet standing a hair past its neighbour left a window the
   // hair wide straight through the stack, at every sheet. Seen from the fore-edge or the
   // head, with multisampling a faint line a sheet; without it (ANGLE over Metal gives the
   // canvas none), at a lowered motion resolution, dashes of background across the stack's
   // edges: the author's "see-through, flickering stack" (0.17.83 to 0.17.87).
-  const flush = fill === 1;
+  const flush = fill >= 1;
   data[o + 10] = -leaf.height / 2 + (flush ? 0 : leaf.jitter.along);
   data[o + 11] = leaf.height;
   data[o + 12] = flush ? 0 : leaf.jitter.fore;

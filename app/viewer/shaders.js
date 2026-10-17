@@ -11,6 +11,14 @@ export const MAX_DETAIL = 6; // sharp strips per page
 // Leaves are drawn this much of their thickness: neighbours never share a surface (which
 // flickers at grazing angles), and the stack's edges show the fine lines of real paper.
 export const LEAF_FILL = 0.9;
+// Sheets of a stack swung over together: a little more than their thickness, so the edge
+// faces of neighbours overlap by a hair instead of merely touching. The faces between them
+// aren't drawn (see layoutLeaves), and quads that only touch, each computed from its own
+// sheet's numbers, leave hairline cracks between them that then go straight through to the
+// background: on a canvas without multisampling (ANGLE over Metal: the author's Mac) a
+// flying stack's edges were dashes of background, found with the faces drawn again
+// (0.17.88).
+export const STACK_FILL = 1.02;
 export const LEAF_ROWS = 9; // vertex rows from head to foot: enough for a page's gentle bow
 export const MID_ROW = (LEAF_ROWS - 1) / 2;
 // The sheets texture's rows (see packSheet): the rows of a corner-led turn other than the
