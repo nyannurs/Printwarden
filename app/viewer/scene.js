@@ -988,14 +988,30 @@ export class BookScene {
         }
       }
       if (u1 < u0 || v1 < v0) continue; // not on screen
-      // Grow by one grid cell: the screen edge can fall between rays.
-      const du = Math.max(0.01, (u1 - u0) / cols);
-      const dv = Math.max(0.01, (v1 - v0) / rows);
-      out.push({
-        folio,
-        region: { u0: Math.max(0, u0 - du), v0: Math.max(0, v0 - dv), u1: Math.min(1, u1 + du), v1: Math.min(1, v1 + dv) },
-        samples,
-      });
+      // Grow by one ray spacing, as measured on the page (the widest step between neighbouring
+      // rays): its edge, or the screen's, can lie up to that far past the last ray that met
+      // it. (Until 0.17.79 by a sixteenth of the part met, a ninth of the true spacing on a
+      // page filling six of the sixteen columns: the strips stopped 12 % short of the spine,
+      // and the page showed a seam there between its strip and its base image.)
+      let du = 0.01;
+      let dv = 0.01;
+      for (let j = 0; j <= rows; j++) {
+        for (let i = 0; i <= cols; i++) {
+          const q = grid[j][i];
+          if (!q) continue;
+          for (const n of [grid[j][i + 1], grid[j + 1]?.[i]]) {
+            if (!n) continue;
+            du = Math.max(du, Math.min(0.5, Math.abs(n.x - q.x)));
+            dv = Math.max(dv, Math.min(0.5, Math.abs(n.y - q.y)));
+          }
+        }
+      }
+      // Within a further spacing of the page's own edge: to the edge. Where the page curves
+      // away into the spine its steps on screen are shorter than the widest measured, and the
+      // last millimetres there fell between rays.
+      const lo = (a, d) => (a - 2 * d <= 0 ? 0 : a - d);
+      const hi = (a, d) => (a + 2 * d >= 1 ? 1 : a + d);
+      out.push({ folio, region: { u0: lo(u0, du), v0: lo(v0, dv), u1: hi(u1, du), v1: hi(v1, dv) }, samples });
     }
     return out;
   }
@@ -1005,14 +1021,14 @@ export class BookScene {
    * over its base image. Replaces the page's previous strips; pass [] to clear. The
    * images are owned: closed when replaced.
    */
-  setPageDetails(folio, strips, { mipmaps = true, immediate = false } = {}) {
+  setPageDetails(folio, strips, { immediate = false } = {}) {
     // Replaces any set still being prepared for this page.
     const pending = this.detailQueue.get(folio);
     if (pending) {
       for (const tex of pending.textures) disposeTexture(tex, this.white);
       for (const s of pending.strips.slice(pending.textures.length)) s.image.close?.();
     }
-    this.detailQueue.set(folio, { strips: strips.slice(0, MAX_DETAIL), textures: [], mipmaps });
+    this.detailQueue.set(folio, { strips: strips.slice(0, MAX_DETAIL), textures: [] });
     if (immediate) while (this.detailQueue.has(folio)) this.#prepareDetails(folio);
     this.dirty = true;
   }
@@ -1031,18 +1047,12 @@ export class BookScene {
         continue;
       }
       if (job.textures.length < job.strips.length) {
-        const { image } = job.strips[job.textures.length];
-        const tex = new THREE.Texture(image);
-        tex.flipY = false;
-        tex.colorSpace = PAGE_COLOR_SPACE;
-        // At rest: rendered above screen resolution and filtered down (mipmaps). While
-        // moving: screen resolution, no mipmaps, so it is cheap to swap in.
-        tex.generateMipmaps = job.mipmaps;
-        tex.minFilter = job.mipmaps ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
-        tex.anisotropy = job.mipmaps ? this.renderer.capabilities.getMaxAnisotropy() : 1;
-        tex.needsUpdate = true;
+        // Exactly as a page's base image goes up (see #flushUploads): the same texture, drawn
+        // from once before its pixels are let go. (Until 0.17.79 strips had a way of their
+        // own, without that first draw.)
+        const tex = this.#pageTexture(job.strips[job.textures.length].image);
         tex.userData.owned = true;
-        this.renderer.initTexture(tex);
+        this.#warm(tex);
         freeImage(tex);
         job.textures.push(tex);
         this.dirty = true;

@@ -156,7 +156,7 @@ export function loadAllTextures() {
  * The strips render in parallel on every thread that knows the page (warmVisiblePages).
  */
 const PASSES = {
-  sharp: { priority: SHARP_FINE, supersample: SUPERSAMPLE, maxTiles: MAX_DETAIL, step: 1.3, mipmaps: true, enough: 0.9 },
+  sharp: { priority: SHARP_FINE, supersample: SUPERSAMPLE, maxTiles: MAX_DETAIL, step: 1.3, enough: 0.9 },
 };
 export const isSharp = (job) => job.priority === SHARP_FINE;
 let sharpenRun = 0;
@@ -178,7 +178,6 @@ export function sharpen() {
       state.details.delete(folio);
     }
   }
-  const screenPixels = scene.renderer.domElement.width * scene.renderer.domElement.height;
   for (const view of visible) {
     const { folio } = view;
     const g = a.geometry[folio - 1];
@@ -193,13 +192,18 @@ export function sharpen() {
         supersample: pass.supersample,
         maxTiles: pass.maxTiles,
         maxSide: Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize),
-        // Screen-resolution passes: about one screen of pixels, cheap to render and swap in.
-        maxPixels: pass.mipmaps ? DETAIL_MAX_PIXELS : Math.min(DETAIL_MAX_PIXELS / 4, screenPixels * 1.2),
+        maxPixels: DETAIL_MAX_PIXELS,
         maxStripPixels: STRIP_MAX_PIXELS,
         step: pass.step,
       });
-      // The base image is enough where the page is small on screen.
-      if (plan.every((tile) => tile.heightPx / ((tile.region.v1 - tile.region.v0) || 1) <= t.height)) {
+      // The base image is enough wherever it has at least a pixel for every screen pixel: it
+      // is drawn as crisp as the strips would be, and nothing on screen changes as the view
+      // settles. (Until 0.17.79 strips came as soon as the base had fewer than 1.25 pixels a
+      // screen pixel, which made strips hardly finer than the base, 5.9 pixels a millimetre
+      // over its 5.85, at an ordinary size of the view: the page changed look when it came
+      // to rest for no gain, and on a Mac the strip came out softer than the base beside it.)
+      const baseDensity = t.height / pageMm.height;
+      if (plan.every((tile) => tile.pxPerMm / pass.supersample <= baseDensity)) {
         if (state.details.delete(folio)) scene.setPageDetails(folio, []);
         break;
       }
@@ -232,7 +236,7 @@ function renderStrips(folio, g, pageMm, seen, plan, pass, outdated) {
       for (const img of images) img.close();
       return;
     }
-    scene.setPageDetails(folio, images.map((image, i) => ({ image, region: plan[i].region })), { mipmaps: pass.mipmaps });
+    scene.setPageDetails(folio, images.map((image, i) => ({ image, region: plan[i].region })));
     state.details.set(folio, plan.map(({ region, pxPerMm }) => ({ region, pxPerMm })));
   }, (err) => Promise.all(renders.map((r) => r.then((img) => img.close(), () => {}))).then(() => { throw err; }));
 }

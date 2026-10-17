@@ -79,6 +79,9 @@ export async function prepareCaptureTile(visible) {
       y0: tr.y1 - region.v1 * pageMm.height, y1: tr.y1 - region.v0 * pageMm.height,
     }, heightPx, CAPTURE_PRIORITY, { cache: false, flex: true, vector: VECTOR_TEXT })));
     scene.setPageDetails(folio, images.map((image, i) => ({ image, region: plan[i].region })), { immediate: true });
+    // Known, so the capture's strips go with the others once it ends (until 0.17.79 the strips
+    // of a page that had none before stayed on it after a screenshot, at the capture's size).
+    state.details.set(folio, plan.map(({ region, pxPerMm }) => ({ region, pxPerMm })));
   }));
 }
 
