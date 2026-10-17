@@ -221,6 +221,7 @@ uniform float uSpineAtU0;
 uniform vec4 uHoles;      // shape (0 none, 1 round, 2 square), pitch, radius or half-width, offset from spine (mm)
 uniform vec2 uPageSize;   // mm
 uniform float uDetailCount; // sharp strips over the page, see MAX_DETAIL
+uniform float uDetailFade;  // how far the strips have faded in over the base image (0 to 1), see #prepareDetails
 ${DETAIL_UNIFORMS}
 uniform vec2 uGutter;      // shade width (mm), depth at the fold
 uniform float uOpenness;
@@ -266,6 +267,9 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
     bool covered = false;
     ${DETAIL_LOOKUPS}
     if ( !covered ) sampledDiffuseColor = pageSample( map, vMapUv, detailDx, detailDy );
+    // Strips just arrived: the base image gives way to them over a few frames (swapped in at
+    // once, the page's pixels visibly shifted as it came to rest).
+    else if ( uDetailFade < 1.0 ) sampledDiffuseColor = mix( pageSample( map, vMapUv, detailDx, detailDy ), sampledDiffuseColor, uDetailFade );
     // Text from its outlines, over the image (which leaves it out), blended as stored, as
     // a canvas blends: see vectortext.js.
     sampledDiffuseColor.rgb = pvVectorText( sampledDiffuseColor.rgb, vMapUv, detailDx, detailDy );

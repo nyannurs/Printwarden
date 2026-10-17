@@ -22,9 +22,13 @@ export function makeExtras(scene) {
     // Box faces: +x (the back cover's side), -x (the front cover's), +y (against the pages),
     // -y (the spine's outside, v running from head to foot, see layoutExtras), +z and -z
     // (foot and head: cut paper edges).
-    const c = scene.coverMat;
+    // Its ends at head and foot are the cover's cut edge, in the same shade as the leaves'
+    // edges; its face toward the pages shows only in the slit between a cover's root and the
+    // signatures' folds (a sewn block's slab stands a fold's depth behind the roots), as the
+    // cover's wrap does there: the cover's colour. (The cover stock's white on both, 0.17.83,
+    // drew a bright line along the spine's corner where the cover met it.)
     extras.slab = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
-      [scene.backWrapMat, scene.frontWrapMat, c, scene.spineMat, c, c]);
+      [scene.backWrapMat, scene.frontWrapMat, scene.frontWrapMat, scene.spineMat, scene.coverEdgeMat, scene.coverEdgeMat]);
     extras.slab.castShadow = extras.slab.receiveShadow = true;
     group.add(extras.slab);
     if (scene.model.binding === "sewn") {
@@ -77,26 +81,30 @@ export function makeExtras(scene) {
     extras.caseSpine.frustumCulled = false;
     group.add(extras.caseSpine);
     extras.signatureFolds = makeSignatureFolds(scene, group);
-    // Each board's covering rolls round its head, foot and fore-edge: rounded edges and
-    // corners, as a cased book's are (capsules along the edges, as thick as the board).
+    // Each board's covering rolls round its head, foot and fore-edge: rounded edges, as a
+    // cased book's are (rolls as thick as the board, flat-ended: along the head and foot
+    // from the joint to the fore-edge, down the fore-edge from head to foot), rounded only
+    // where head and foot meet the fore-edge. (Capsules until 0.17.83: domed ends that stood
+    // out past the spine's corner like pipes.)
     const r = scene.model.thickness[0] / 2; // the boards' thickness
     const faceW = leafShape(scene.model, 0).width;
     const faceH = leafShape(scene.model, 0).height;
-    // Rounding the fore-edge corners, stopping short of the joint.
-    const along = new THREE.CapsuleGeometry(r, faceW - r, 6, 16);
-    const down = new THREE.CapsuleGeometry(r, faceH, 6, 16).rotateX(Math.PI / 2);
+    const along = new THREE.CylinderGeometry(r, r, faceW, 16, 1);
+    const down = new THREE.CylinderGeometry(r, r, faceH, 16, 1).rotateX(Math.PI / 2);
+    const corner = new THREE.SphereGeometry(r, 16, 10);
     extras.boardEdges = [scene.frontWrapMat, scene.backWrapMat].map((mat) => {
       const g = new THREE.Group();
       const head = new THREE.Mesh(along, mat);
       const foot = new THREE.Mesh(along, mat);
       const fore = new THREE.Mesh(down, mat);
+      const corners = [new THREE.Mesh(corner, mat), new THREE.Mesh(corner, mat)];
       head.position.z = -faceH / 2;
       foot.position.z = faceH / 2;
-      for (const m of [head, foot, fore]) {
+      for (const m of [head, foot, fore, ...corners]) {
         m.castShadow = m.receiveShadow = true;
         g.add(m);
       }
-      g.userData = { head, foot, fore, faceW };
+      g.userData = { head, foot, fore, corners, faceW };
       group.add(g);
       return g;
     });
@@ -106,9 +114,13 @@ export function makeExtras(scene) {
     extras.headbands = [-1, 1].map((sgn) => {
       const bead = new THREE.Mesh(new THREE.BufferGeometry(), scene.headbandMat);
       const tail = new THREE.Mesh(new THREE.BufferGeometry(), scene.headbandMat);
+      // The bead's ends, closed (a tube is open at both ends: seen from the spine's end the
+      // headband looked hollow, 0.17.83).
+      const cap = new THREE.SphereGeometry(HEADBAND.beadRadius, 12, 8);
+      const caps = [new THREE.Mesh(cap, scene.headbandMat), new THREE.Mesh(cap, scene.headbandMat)];
       bead.castShadow = tail.castShadow = true;
-      bead.userData = { sgn, z: sgn * (h / 2 - HEADBAND.beadRadius * HEADBAND.beadDrop), tail };
-      group.add(bead, tail);
+      bead.userData = { sgn, z: sgn * (h / 2 - HEADBAND.beadRadius * HEADBAND.beadDrop), tail, caps };
+      group.add(bead, tail, ...caps);
       return bead;
     });
   } else if (style.spine === "coil") {
@@ -293,13 +305,14 @@ export function layoutExtras(scene) {
       const dx = p.x[last] - p.x[0];
       const dy = p.y[last] - p.y[0];
       const turn = Math.atan2(dy, dx) - Math.PI / 2;
-      const span = Math.hypot(dx, dy) || 1;
       for (const e of [g.userData.head, g.userData.foot]) {
-        e.position.x = (p.x[0] + p.x[last]) / 2 + (dx / span) * (m.thickness[0] / 4);
-        e.position.y = (p.y[0] + p.y[last]) / 2 + (dy / span) * (m.thickness[0] / 4);
+        e.position.x = (p.x[0] + p.x[last]) / 2;
+        e.position.y = (p.y[0] + p.y[last]) / 2;
         e.rotation.z = turn;
       }
       g.userData.fore.position.set(p.x[last], p.y[last], 0);
+      g.userData.corners[0].position.set(p.x[last], p.y[last], g.userData.head.position.z);
+      g.userData.corners[1].position.set(p.x[last], p.y[last], g.userData.foot.position.z);
     }
     // Headbands: across the block's spine at head and foot, glued to it (see HEADBAND).
     // The path runs along the sheets' roots, offset outward: the bead's centre a little past
@@ -315,8 +328,8 @@ export function layoutExtras(scene) {
     // Rebuilt only when the spine moved (a page turning over the block leaves it as it is).
     const along = beadPath.flatMap((q) => [q.x, q.y]);
     for (const band of ex.headbands) {
-      const { tail, sgn, z } = band.userData;
-      band.visible = tail.visible = beadPath.length >= 2;
+      const { tail, sgn, z, caps } = band.userData;
+      band.visible = tail.visible = caps[0].visible = caps[1].visible = beadPath.length >= 2;
       if (!band.visible) continue;
       const was = band.userData.along;
       if (was && was.length === along.length && was.every((v, k) => v === along[k])) continue;
@@ -324,6 +337,8 @@ export function layoutExtras(scene) {
       const curve = new THREE.CatmullRomCurve3(beadPath.map((q) => new THREE.Vector3(q.x, q.y, z)));
       band.geometry.dispose();
       band.geometry = new THREE.TubeGeometry(curve, Math.max(4, beadPath.length * 2), HEADBAND.beadRadius, 10, false);
+      caps[0].position.copy(curve.getPoint(0));
+      caps[1].position.copy(curve.getPoint(1));
       tail.geometry.dispose();
       tail.geometry = tailGeometry(tailPath, z, z - sgn * HEADBAND.tailLength);
     }
@@ -670,16 +685,17 @@ function writeFoldGeometry(geo, leaves, book) {
 
 /**
  * A hardcover's headband (mm): a cord with cloth sewn round it, glued across the block's
- * spine at head and foot. The cord, the bead, sits on the spine's corner at the cut edge:
- * its centre `beadDrop` radii inside the edge (negative: above it, so most of the bead
- * stands above the cut, as a headband's does) and `beadOut` radii past the signatures'
- * folds. The cloth tail is
- * glued down the spine from there, `tailLength` long, `tailLift` off the folds. The case's
- * hollow leaves the bead room (CASE_HOLLOW).
+ * spine at head and foot. The cord, the bead, lies on the signatures' folds (its centre a
+ * radius past them: it touches them, `beadOut`) at the cut edge, its centre `beadDrop`
+ * radii inside the edge, so most of it stands proud of the cut as a headband's does. The
+ * cloth tail is glued down the spine from there, `tailLength` long, `tailLift` off the
+ * folds. The case's hollow leaves the bead room (CASE_HOLLOW). (Until 0.17.83 the bead's
+ * centre was half a radius past the folds and a fifth of a radius beyond the cut: it hung in
+ * the hollow, clear of the block.)
  */
-const HEADBAND = { beadRadius: 0.75, beadDrop: -0.2, beadOut: 0.5, tailLength: 12, tailLift: 0.06 };
+const HEADBAND = { beadRadius: 0.75, beadDrop: 0.3, beadOut: 1, tailLength: 12, tailLift: 0.06 };
 /** From the signatures' folds to the inside of the case's spine (mm): the hollow, which the bead fits. */
-const CASE_HOLLOW = 1.4;
+const CASE_HOLLOW = 1.7;
 
 /** The headband's tail: a strip along `path` (the spine's width) from z0 to z1. */
 function tailGeometry(path, z0, z1) {

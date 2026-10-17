@@ -38,6 +38,9 @@ const SETTLE_MS = 120; // quiet time before the view counts as settled
 // PDF and sent to the GPU, four times the pixels on a Retina screen) as the next click comes.
 const TURN_SETTLE_MS = 350;
 const UPLOADS_PER_FRAME = 2;
+// Sharp strips arriving on a page that had none fade in over the base image this long: the
+// swap no longer reads as the page's pixels shifting as it comes to rest.
+const DETAIL_FADE_MS = 220;
 // Page images are filtered as stored (sRGB values) and only then turned into light: type
 // keeps its weight, the way browsers and Acrobat antialias it. Filtered as light, the grey
 // edge pixels of dark type on white come out too light, and text looks thin and grey.
@@ -272,6 +275,8 @@ export class BookScene {
     this.shadowState = null; // what the shadow map was last drawn for (draw.js)
     this.uploads = new Map(); // folio -> image waiting for GPU upload
     this.detailQueue = new Map(); // folio -> detail strips being prepared
+    this.fading = new Set(); // page uniforms whose strips are fading in (uDetailFade < 1)
+    this.lastFadeTime = null;
     this.dirty = true;
     this.geometryDirty = false;
     this.lastMotion = 0;
@@ -1071,6 +1076,7 @@ export class BookScene {
         return; // one per frame
       }
       const u = (folio % 2 ? leaf.front : leaf.back).userData.uniforms;
+      const had = u.uDetailCount.value > 0;
       for (let i = 0; i < MAX_DETAIL; i++) {
         disposeTexture(u[`uDetail${i}`].value, this.white);
         u[`uDetail${i}`].value = job.textures[i] ?? this.white;
@@ -1078,6 +1084,15 @@ export class BookScene {
         if (r) u[`uDetailRect${i}`].value.set(r.u0, r.v0, r.u1, r.v1);
       }
       u.uDetailCount.value = job.textures.length;
+      // New strips over the base image fade in (see DETAIL_FADE_MS); sharper strips replacing
+      // strips, or strips going, change at once (fading to or from the base would soften).
+      if (job.textures.length && !had) {
+        u.uDetailFade.value = 0;
+        this.fading.add(u);
+      } else {
+        u.uDetailFade.value = 1;
+        this.fading.delete(u);
+      }
       this.detailQueue.delete(folio);
       this.dirty = true;
       return;
@@ -1199,6 +1214,7 @@ export class BookScene {
       leaf.first.material[1].dispose();
     }
     this.leaves = [];
+    this.fading.clear();
     for (const flap of this.flaps.values()) freeFlap(this, flap); // the flaps lay on them
     this.flaps.clear();
     // Sharp strips still on their way to the GPU were for the old book's leaves.
@@ -1329,6 +1345,15 @@ export class BookScene {
     const inMotion = animating || moving;
     // Back at rest after frames drawn smaller: once more, at full resolution.
     if (!inMotion && this.motion.low) this.dirty = true;
+    if (this.fading.size) {
+      const dt = this.lastFadeTime == null ? 1000 / 60 : Math.min(100, time - this.lastFadeTime);
+      for (const u of this.fading) {
+        u.uDetailFade.value = Math.min(1, u.uDetailFade.value + dt / DETAIL_FADE_MS);
+        if (u.uDetailFade.value >= 1) this.fading.delete(u);
+      }
+      this.dirty = true;
+    }
+    this.lastFadeTime = time;
     const draw = inMotion || this.dirty;
     this.#adaptResolution(time, inMotion && draw);
     if (!draw) {

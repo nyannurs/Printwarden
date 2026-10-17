@@ -145,6 +145,35 @@ for (const binding of ["perfect", "hardcover", "spiral"]) {
   });
 }
 
+test("turning: a stack swung over together is drawn at its full thickness (no gaps to see through), single pages thinned", () => {
+  const { scene, box } = makeScene();
+  try {
+    scene.setBook({ pageCount: 32, pageSize: { width: 148, height: 210 }, binding: "perfect", paper });
+    settleAt(scene, 0);
+    scene.clock = 30000;
+    scene.goTo(10); // ten leaves swing over as one stack
+    scene.clock = 30300;
+    scene.debugStep();
+    const moving = scene.leaves.filter((l) => l.start != null);
+    eq(moving.length, 10);
+    ok(moving.every((l) => l.fill === 1), "every sheet of the stack at its full thickness");
+    ok(scene.leaves.filter((l) => l.start == null).every((l) => l.fill < 1), "the rest thinned");
+    scene.clock = 32000;
+    scene.debugStep();
+    ok(scene.leaves.every((l) => l.start == null && l.fill < 1), "landed: thinned again");
+    // One page turning alone: thinned (it has neighbours' faces under and over it).
+    settleAt(scene, 10);
+    scene.clock = 40000;
+    scene.goTo(11);
+    scene.clock = 40300;
+    scene.debugStep();
+    ok(scene.leaves[10].start != null && scene.leaves[10].fill < 1, "a page on its own stays thinned");
+  } finally {
+    scene.clock = null;
+    box.remove();
+  }
+});
+
 test("turning: a quick second click's page lands with the first, never before it", () => {
   const { scene, box } = makeScene();
   try {

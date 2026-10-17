@@ -115,6 +115,58 @@ test("video: every frame's need lists the pages that can be in the picture, a tu
   }
 });
 
+/**
+ * The first and last rows of a frame lighter than the backdrop: the paper. (A page swinging
+ * up throws a soft shadow on the backdrop, darker than it: that is room, not book.)
+ */
+function bookRows(rgba, W, H, bg) {
+  let top = -1;
+  let bottom = -1;
+  const floor = bg[0] + bg[1] + bg[2] + 24;
+  for (let y = 0; y < H; y++) {
+    let has = false;
+    for (let x = 0; x < W && !has; x += 2) {
+      const k = 4 * (y * W + x);
+      if (rgba[k] + rgba[k + 1] + rgba[k + 2] > floor) has = true;
+    }
+    if (has) {
+      if (top < 0) top = y;
+      bottom = y;
+    }
+  }
+  return [top, H - 1 - bottom];
+}
+
+test("video: the picture is balanced, the room above all the book does equals the room below, in every camera preset", async () => {
+  const { scene, box } = makeScene();
+  try {
+    scene.setBook({ pageCount: 16, pageSize: { width: 148, height: 210 }, binding: "perfect", paper });
+    scene.setBackground("#56575b");
+    const W = 180;
+    const H = 320;
+    const bad = [];
+    for (const preset of ["top", "reading", "isometric"]) {
+      scene.setPreset(preset);
+      const turns = 2;
+      const cues = Array.from({ length: turns }, (_, k) => ({ at: 600 + k * 900, run: () => scene.goTo(k + 1) }));
+      let minTop = Infinity;
+      let minBottom = Infinity;
+      await scene.recordVideo({ width: W, height: H, fps: 20, durationMs: 600 + turns * 900 + 500, cues,
+        reset: () => { scene.goTo(0, { animate: false }); scene.settleCamera(); }, prepare: async () => {},
+        onFrame: (rgba) => {
+          const [top, bottom] = bookRows(rgba, W, H, [0x56, 0x57, 0x5b]);
+          minTop = Math.min(minTop, top);
+          minBottom = Math.min(minBottom, bottom);
+        }, onProgress: () => {} });
+      // Within a few pixels of each other (the frame's 8 % margin, bows and paper thickness aside).
+      if (Math.abs(minTop - minBottom) > 6 || minTop < 4) bad.push(`${preset}: ${minTop} px above the book at its most, ${minBottom} below`);
+    }
+    eq(bad, []);
+  } finally {
+    box.remove();
+  }
+});
+
 test("sharp strips go to the GPU as page images do: mipmapped, the image freed, the page's uniforms set", async () => {
   const { scene, box } = makeScene();
   try {
@@ -125,6 +177,16 @@ test("sharp strips go to the GPU as page images do: mipmapped, the image freed, 
     scene.setPageDetails(5, [{ image, region: { u0: 0.1, v0: 0, u1: 0.9, v1: 1 } }], { immediate: true });
     const u = scene.leaves[2].front.userData.uniforms; // page 5: leaf 2's front
     eq(u.uDetailCount.value, 1);
+    // New over the base image: they fade in over a few frames (DETAIL_FADE_MS), then stay.
+    eq(u.uDetailFade.value, 0, "the fade starts at the base image");
+    scene.debugSample(0.5, 0.5);
+    ok(u.uDetailFade.value > 0 && u.uDetailFade.value < 1, `a frame later: part way (${u.uDetailFade.value.toFixed(2)})`);
+    // A frame counts at most 100 ms of it (a stalled frame doesn't skip the fade): frames.
+    for (let k = 0; k < 4; k++) {
+      await new Promise((r) => setTimeout(r, 80));
+      scene.debugSample(0.5, 0.5);
+    }
+    eq(u.uDetailFade.value, 1, "faded in");
     const tex = u.uDetail0.value;
     ok(tex.generateMipmaps, "mipmapped (for when the view moves on)");
     eq(tex.anisotropy, scene.renderer.capabilities.getMaxAnisotropy());

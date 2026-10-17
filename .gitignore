@@ -30,3 +30,6 @@ referencescreenshot.pdf
 /icons/
 # The JPEG decoder's build (tools/build-jpeg-wasm.sh); the .wasm it makes is in vendor/
 tools/jpegwasm/target/
+
+# The heavy test document (tools/make-heavy-pdf.py): too large for GitHub
+testfiles/heavy*.pdf

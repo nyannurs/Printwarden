@@ -166,7 +166,7 @@ export function makeLeaf(scene, i) {
   // Paper never lines up perfectly: each leaf a fixed hair off at the fore-edge and along
   // the spine (tenths of a millimetre).
   const jitter = { fore: (hash(i * 2 + 1) - 0.5) * 0.16, along: (hash(i * 2 + 2) - 0.5) * 0.1 };
-  const leaf = { i, mesh, first, geo, front, back, profile, jitter, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true };
+  const leaf = { i, mesh, first, geo, front, back, profile, jitter, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
@@ -282,6 +282,7 @@ function pageMaterial(scene, isFront, holesOf = null) {
       [`uDetailRect${i}`, { value: new THREE.Vector4(0, 0, 0, 0) }],
     ]).flat()),
     uDetailCount: { value: 0 },
+    uDetailFade: { value: 1 }, // strips fading in over the base image (see #prepareDetails in scene.js)
     uOuterCover: { value: 0 }, // 1 on the outside of the covers: no gutter shade there
     uFinish: { value: scene.none }, // spot finish mask (any ink = finished), see setFinish
     uFinishKind: { value: 0 },
@@ -524,7 +525,7 @@ export function packSheet(leaf, sheets, thickness) {
   const b = leaf.bows;
   for (let r = 0; r < 8; r++) data[o + r] = b[r];
   data[o + 8] = b[8];
-  data[o + 9] = (thickness * LEAF_FILL) / 2;
+  data[o + 9] = (thickness * (leaf.fill ?? LEAF_FILL)) / 2;
   data[o + 10] = -leaf.height / 2 + leaf.jitter.along;
   data[o + 11] = leaf.height;
   data[o + 12] = leaf.jitter.fore;
@@ -574,8 +575,10 @@ export function shapeChanged(leaf) {
   const n = leaf.profile.x.length;
   const size = rows.length * n * 3 + leaf.bows.length;
   let w = leaf.written;
-  let same = !!w && w.rowsActive === leaf.rowsActive && w.values.length === size;
-  if (!w || w.values.length !== size) w = leaf.written = { rowsActive: leaf.rowsActive, values: new Float64Array(size) };
+  const fill = leaf.fill ?? LEAF_FILL;
+  let same = !!w && w.rowsActive === leaf.rowsActive && w.fill === fill && w.values.length === size;
+  if (!w || w.values.length !== size) w = leaf.written = { rowsActive: leaf.rowsActive, fill, values: new Float64Array(size) };
+  w.fill = fill;
   const v = w.values;
   let o = 0;
   for (const p of rows) {

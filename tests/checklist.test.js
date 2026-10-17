@@ -84,7 +84,16 @@ test("hardcover: the boards' thickness sets the spine and the 3D block; the head
               for (const [rx, ry] of roots) d = Math.min(d, Math.hypot(px - rx, py - ry));
               far = Math.max(far, d);
             }
-            ok(far < m.foldDepth + 3.5, `${label}: a point of the headband ${far.toFixed(1)} mm from the nearest root (floating)`);
+            ok(far < m.foldDepth + 2.4, `${label}: a point of the headband ${far.toFixed(1)} mm from the nearest root (floating)`);
+            // The bead touches the folds: its nearest point to the roots is a fold's depth away, not more.
+            let nearest = Infinity;
+            for (let k = 0; k < pos.count; k += 3) {
+              const px = pos.getX(k);
+              const py = pos.getY(k);
+              for (const [rx, ry] of roots) nearest = Math.min(nearest, Math.hypot(px - rx, py - ry));
+            }
+            ok(nearest < m.foldDepth + 0.35, `${label}: the bead's nearest point is ${nearest.toFixed(2)} mm from the roots, the folds reach ${m.foldDepth.toFixed(2)}`);
+            ok(band.userData.caps.every((c) => c.visible && c.geometry.attributes.position.count > 20), "closed at both ends");
             ok(n > 4, "leaves");
           }
         }

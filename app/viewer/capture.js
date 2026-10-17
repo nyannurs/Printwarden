@@ -203,19 +203,32 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
     return need;
   };
   let distance = Math.max(view.distance, fit());
-  for (let round = 0; round < 2; round++) {
+  const fix = () => {
+    aim();
+    scene.fitDistance = distance / view.zoom;
+  };
+  // Centred: the room left above all the book does in the picture equals the room below, and
+  // left equals right. Measured as the camera projects it (the camera placed as the video
+  // will, every frame), the aim moved by half the difference at the aim's distance, and the
+  // distance fitted again; three rounds settle it. (Reckoned from the points' depths instead,
+  // until 0.17.84, a top-down video had 148 px above the swinging page and 180 below.)
+  for (let round = 0; round < 3; round++) {
     const { tanH, tanV } = halfFov(scene.camera, 1);
+    const v = new THREE.Vector3();
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     run(() => {
-      aim();
+      fix();
       own.placeCamera();
+      scene.camera.updateMatrixWorld();
+      const e = scene.camera.matrixWorld.elements;
+      const t = own.currentTarget();
       bookPoints(scene, own, (x, y, d) => {
-        const depth = Math.max(1e-3, distance - d);
-        x0 = Math.min(x0, x / (depth * tanH)); x1 = Math.max(x1, x / (depth * tanH));
-        y0 = Math.min(y0, y / (depth * tanV)); y1 = Math.max(y1, y / (depth * tanV));
+        // Back to a world point, then through the camera: where it lands in the picture.
+        v.set(t.x + e[0] * x + e[4] * y + e[8] * d, t.y + e[1] * x + e[5] * y + e[9] * d, t.z + e[2] * x + e[6] * y + e[10] * d).project(scene.camera);
+        x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x);
+        y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
       });
     });
-    // Across and up in the camera's frame, at the aim's distance (near enough: the shift is small).
     scene.camera.updateMatrixWorld();
     const e = scene.camera.matrixWorld.elements;
     const sx = ((x0 + x1) / 2) * distance * tanH;
@@ -223,10 +236,6 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
     view.target.add(new THREE.Vector3(e[0] * sx + e[4] * sy, e[1] * sx + e[5] * sy, e[2] * sx + e[6] * sy));
     distance = fit();
   }
-  const fix = () => {
-    aim();
-    scene.fitDistance = distance / view.zoom;
-  };
   // The pages that can be in the picture: the spread turned to and the one before (its
   // leaves are still turning), the pages under them (a page lifting shows the one below),
   // and the covers. Their own rays tell which are met (see visiblePages).

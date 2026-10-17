@@ -5,7 +5,7 @@
 import { layoutExtras } from "./extras.js";
 import { packSheet, shapeChanged, uploadSheets } from "./leaf.js";
 import { layoutBook, rowTurn } from "./model.js";
-import { LEAF_ROWS } from "./shaders.js";
+import { LEAF_FILL, LEAF_ROWS } from "./shaders.js";
 
 // How far an open page's corners lift at the fore-edge (mm); the middle of the fore-edge
 // half of that. Subtle on purpose: paper, not a curl.
@@ -137,8 +137,17 @@ export function layoutLeaves(scene) {
     leaf.back.visible = leaf.first.material[1].visible = !against(leaf, leaf.i + 1);
   }
   // Only sheets whose shape changed go to the GPU: while one page turns, the rest hold still.
+  // Sheets are drawn a little thinner than they are (LEAF_FILL), so neighbours never share a
+  // surface; in a stack turning together the faces between its sheets aren't drawn at all
+  // (above), and through the gaps between its thinned sheets the whole stack could be seen
+  // through, edge-on (opening a closed book deep in, the pile swung over looked transparent,
+  // 0.17.83). Such a stack's sheets are drawn at their full thickness: offsets of one curve,
+  // they close up exactly.
+  const stacked = new Map();
+  for (const l of scene.leaves) if (l.group != null) stacked.set(l.group, (stacked.get(l.group) ?? 0) + 1);
   const changed = [];
   for (const leaf of scene.leaves) {
+    leaf.fill = leaf.group != null && stacked.get(leaf.group) > 1 ? 1 : LEAF_FILL;
     if (!shapeChanged(leaf)) continue;
     packSheet(leaf, scene.sheets, m.thickness[leaf.i]);
     leaf.stale = true; // for picking (see makeLeaf)

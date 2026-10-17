@@ -290,7 +290,18 @@ function shapeAndResolution(initialShape, longSides, initialIndex) {
 
 // The settings last rendered with, for the rest of the session (the dialogs open with them).
 let lastScreenshot = { shape: "16:9", resolution: 1, transparent: false };
-let lastVideo = { shape: "9:16", resolution: 0, fps: "30", turn: 1.2, pause: 0.8, transparent: false };
+let lastVideo = { shape: "9:16", resolution: 0, fps: "30", turn: 1.2, pause: 0.8, transparent: false, quality: "1" };
+
+// An MP4's bits per pixel per frame (its bitrate ceiling: width × height × frames a second ×
+// this, 16 to 240 Mbit/s): a master for editing, or smaller files. Dithered images, fine type
+// and pixel art are the hardest content for H.264; at 0.4 the encoder visibly softened pages
+// mid-turn (measured, 0.17.80).
+const VIDEO_QUALITIES = [["1", "Master (1 bit per pixel)"], ["0.5", "High (0.5 bit per pixel)"], ["0.25", "Standard (0.25 bit per pixel)"]];
+/** The MP4 encoder's bitrate ceiling (bit/s) for a picture size, frame rate and bits per pixel. */
+export const mp4Bitrate = (width, height, fps, bitsPerPixel) => Math.round(Math.min(240e6, Math.max(16e6, width * height * fps * bitsPerPixel)));
+// ProRes 4444's data rate on the book's frames (bits per pixel per frame): measured, 4K60 of
+// a pixel-art book came to 6.4 GB a minute, about 1.6.
+const PRORES_BITS_PER_PIXEL = 1.6;
 
 /** Screenshot shape, resolution and background. Resolves to {width, height, transparent} or null. */
 export function screenshotDialog() {
@@ -335,17 +346,27 @@ export function videoDialog(turns, proRes) {
     const pause = unitField(last.pause, "s", 0, 0.1);
     const transparent = check("Transparent background", "ProRes 4444 (.mov)", last.transparent && proRes);
     transparent.input.disabled = !proRes;
+    const quality = select(VIDEO_QUALITIES, last.quality ?? "1");
+    const qualityRow = row("Quality", quality);
     const length = el("span", "dialog-value");
+    const size = el("span", "dialog-value");
+    const seconds = () => videoLength(turns, Math.max(0.3, turn.number() || 1.2), Math.max(0, pause.number() || 0)) / 1000;
     const syncLength = () => {
-      const t = Math.max(0.3, turn.number() || 1.2);
-      const p = Math.max(0, pause.number() || 0);
-      length.textContent = `${(videoLength(turns, t, p) / 1000).toFixed(1)} s`;
+      const s = seconds();
+      length.textContent = `${s.toFixed(1)} s`;
+      const { width, height } = chosen();
+      const perSecond = width * height * Number(fps.value);
+      qualityRow.hidden = transparent.input.checked;
+      // ProRes writes what the frames need; the MP4 at most its ceiling (still frames take less).
+      size.textContent = transparent.input.checked
+        ? `about ${fmt((perSecond * PRORES_BITS_PER_PIXEL * s) / 8 / 1e9, 1)} GB`
+        : `up to ${Math.round((mp4Bitrate(width, height, Number(fps.value), Number(quality.value)) * s) / 8 / 1e6)} MB`;
     };
-    for (const c of [turn, pause]) for (const type of ["input", "change"]) c.addEventListener(type, syncLength);
+    for (const c of [turn, pause, shape, resolution, fps, quality, transparent.input]) for (const type of ["input", "change"]) c.addEventListener(type, syncLength);
     syncLength();
     const go = button("Render", () => finish(true), "btn primary");
     d.body.append(row("Shape", shape), row("Resolution", resolution), row("Frames per second", fps),
-      row("Page turn", turn), row("Pause on each spread", pause), row("Length", length), transparent.wrap,
+      row("Page turn", turn), row("Pause on each spread", pause), row("Length", length), transparent.wrap, qualityRow, row("File size", size),
       el("div", "dialog-actions", [button("Cancel", () => finish(false)), go]));
     function finish(ok) {
       d.el.close();
@@ -357,10 +378,11 @@ export function videoDialog(turns, proRes) {
         turnSeconds: Math.max(0.3, turn.number() || 1.2),
         pauseSeconds: Math.max(0, pause.number() || 0),
         transparent: transparent.input.checked,
+        bitsPerPixel: Number(quality.value),
       };
       lastVideo = {
         shape: shape.value, resolution: resolution.selectedIndex, fps: fps.value,
-        turn: settings.turnSeconds, pause: settings.pauseSeconds,
+        turn: settings.turnSeconds, pause: settings.pauseSeconds, quality: quality.value,
         // Unticked only where it couldn't be ticked: a computer with ProRes keeps the choice.
         transparent: proRes ? settings.transparent : last.transparent,
       };

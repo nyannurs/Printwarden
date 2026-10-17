@@ -6,7 +6,7 @@ import { chooseSaveLocation, proResAvailable } from "../platform.js";
 import { planDetail, videoImageHeight } from "../viewer/detail.js";
 import { MAX_DETAIL } from "../viewer/shaders.js";
 import { onOpeningChanged, scene, state } from "./app.js";
-import { screenshotDialog, videoDialog, videoLength } from "./dialogs.js";
+import { mp4Bitrate, screenshotDialog, videoDialog, videoLength } from "./dialogs.js";
 import { showBusy, toast } from "./dom.js";
 import { CAPTURE_PRIORITY, DETAIL_MAX_SIDE, isSharp, pageImage, pageRegionImage, sharpen, VECTOR_TEXT } from "./pages.js";
 
@@ -197,17 +197,17 @@ export async function sharpenForVideo(sharp, need) {
 }
 
 /** An MP4 (H.264) encoder: the computer's own, through WebCodecs. Frames: RGBA. */
-async function mp4Writer({ width, height, fps }) {
+async function mp4Writer({ width, height, fps, bitsPerPixel = 1 }) {
   const { Muxer, ArrayBufferTarget } = await import("../../vendor/mp4-muxer/mp4-muxer.mjs");
-  // A master, not a delivery copy: up to 1 bit a pixel a frame (1080p at 30 fps 62 Mbit/s, 4K
-  // the most High 5.2 takes, 240), at least 16 Mbit/s; a ceiling the encoder stays under
-  // where it can. Dithered and halftoned images, fine type and pixel art are the hardest
-  // content there is for H.264. Measured on a page turn of the author's pixel-art book, 1080p,
-  // encoded and decoded again, the pages' edge energy against the frames as drawn: at 0.4 bits
-  // (until 0.17.80) the encoder used 14 Mbit/s and kept 0.88-0.93 of it, soft; at 1 bit it used
-  // 38 and kept 0.985-1.0, and allowing 120 changed nothing more. At 0.12 (8 Mbit/s, until
-  // 0.17.75) still frames came out soft. Editors and platforms re-encode anyway.
-  const bitrate = Math.round(Math.min(240e6, Math.max(16e6, width * height * fps)));
+  // The bitrate ceiling: the quality chosen in the dialog (VIDEO_QUALITIES), 1 bit a pixel a
+  // frame for a master (1080p at 30 fps 62 Mbit/s, 4K the most High 5.2 takes, 240), at least
+  // 16 Mbit/s; the encoder stays under it where it can. Dithered and halftoned images, fine
+  // type and pixel art are the hardest content there is for H.264. Measured on a page turn of
+  // the author's pixel-art book, 1080p, encoded and decoded again, the pages' edge energy
+  // against the frames as drawn: at 0.4 bits (until 0.17.80) the encoder used 14 Mbit/s and
+  // kept 0.88-0.93 of it, soft; at 1 bit it used 38 and kept 0.985-1.0, and allowing 120
+  // changed nothing more. At 0.12 (8 Mbit/s, until 0.17.75) still frames came out soft.
+  const bitrate = mp4Bitrate(width, height, fps, bitsPerPixel);
   let config = null;
   // The graphics card's own encoder if it has one, else the processor.
   search: for (const hardwareAcceleration of /** @type {HardwareAcceleration[]} */ (["prefer-hardware", "no-preference"])) {
