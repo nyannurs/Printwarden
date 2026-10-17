@@ -114,7 +114,6 @@ function forget() {
     if (inUse.has(i)) continue;
     pages.delete(i);
     blocks.delete(i);
-    skips.delete(i);
     p.then((pg) => pg.cleanup(), () => {});
     self.postMessage({ type: "forgot", index: i });
   }
@@ -161,7 +160,6 @@ self.onmessage = async ({ data }) => {
     for (const i of pages.keys()) self.postMessage({ type: "forgot", index: i });
     pages.clear();
     blocks.clear();
-    skips.clear();
     if (source?.blob) {
       // Read by the piece, the pieces read so far go with the document: it is opened again
       // (its structure only) and reads what the next render needs.
@@ -245,9 +243,14 @@ function skipFor(index, p, r) {
 
 const draw = (id, index, ...rest) => held(index, () => drawPage(id, index, ...rest));
 
-async function drawPage(id, index, r, height, vector = false) {
-  // For the 3D page: without the glyphs it draws as vector text.
-  const skipText = vector ? skips.get(index) ?? (await analyse(index)).skip : null;
+async function drawPage(id, index, r, height, vector = null) {
+  // For the 3D page: without exactly the glyphs it draws as vector text, as the main thread
+  // says (one decision a page, see vectorText in ui/pages.js). Until 0.17.81 each thread
+  // decided for itself from its own analysis, and the analysis depends on what the thread has
+  // loaded (a glyph's outline not yet there keeps it in the image): a thread could leave out
+  // text the page's vector text didn't have, and that text was nowhere, in some renders and
+  // not others (it came and went as pages turned and sharpened).
+  const skipText = vector?.length && (await hookText()) ? new Set(vector) : null;
   const p = await page(index);
   const base = p.getViewport({ scale: 1 });
   // PDF user space (pt) to viewport pixels at scale 1, via the viewport's matrix.
@@ -301,10 +304,9 @@ async function drawPage(id, index, r, height, vector = false) {
 const TEXT_ANALYSIS_HEIGHT = 512;
 const CLIP_SLACK_PT = 0.1; // a glyph this far over its clip still counts as inside
 const textModes = new Map(); // canvas context -> {ops} or {skip}, during a render
-// A page's analysis is kept only while it is being made (its outlines go to the main thread
-// once); what renders of the page leave out, while the page is kept (see forget).
-const analyses = new Map(); // page index -> Promise<{skip, glyphs, instances}>, while made
-const skips = new Map(); // page index -> Set of the glyphs its renders leave out
+// A page's analysis is kept only while it is being made (its outlines go to the main thread,
+// which then tells every render what to leave out).
+const analyses = new Map(); // page index -> Promise<{glyphs, instances}>, while made
 let hooked = null;
 
 /** Hook pdf.js's glyph painting (once): a tiny render hands us its drawing class. */
@@ -409,7 +411,7 @@ function parseColor(style) {
 function analyse(index) {
   if (!analyses.has(index)) {
     const made = held(index, async () => {
-      const none = { skip: new Set(), glyphs: new Map(), instances: [] };
+      const none = { glyphs: new Map(), instances: [] };
       if (!(await hookText())) return none;
       const p = await page(index);
       if (p.rotate % 360 !== 0) return none; // a turned page (/Rotate) keeps its text in the image
@@ -427,12 +429,9 @@ function analyse(index) {
       const boxes = p.recordedBBoxes;
       if (!boxes || !mode.ops.size) return none;
       return decide(mode, boxes, operatorList(p)?.fnArray ?? [], canvas.width, canvas.height, viewport);
-    }).catch(() => ({ skip: new Set(), glyphs: new Map(), instances: [] }));
+    }).catch(() => ({ glyphs: new Map(), instances: [] }));
     analyses.set(index, made);
-    made.then((a) => {
-      analyses.delete(index);
-      if (pages.has(index)) skips.set(index, a.skip);
-    });
+    made.then(() => analyses.delete(index));
   }
   return analyses.get(index);
 }
@@ -487,9 +486,9 @@ function decide(mode, boxes, fnArray, w, h, viewport) {
   const instances = [];
   for (const gl of vector.reverse()) { // in drawing order
     if (!glyphs.has(gl.glyph)) glyphs.set(gl.glyph, Float32Array.from(gl.path));
-    instances.push({ glyph: gl.glyph, m: mul(inv, gl.m), color: gl.color });
+    instances.push({ glyph: gl.glyph, m: mul(inv, gl.m), color: gl.color, key: gl.key });
   }
-  return { skip: new Set(vector.map((gl) => gl.key)), glyphs, instances };
+  return { glyphs, instances };
 }
 
 function toViewport(viewport, x, y) {

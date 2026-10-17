@@ -111,11 +111,13 @@ function boundsOf(q) {
 
 /**
  * Pack a page's vector text.
- * @param {{glyphs: Map<string, ArrayLike<number>>, instances: {glyph: string, m: number[], color: number[]}[]}} text
+ * @param {{glyphs: Map<string, ArrayLike<number>>, instances: {glyph: string, m: number[], color: number[], key?: string}[]}} text
  *   glyph outlines (draw ops), and placements: `m` maps glyph space to the page's texture
- *   uv (a, b, c, d, e, f: u = a x + c y + e, v = b x + d y + f), colour in sRGB 0-1.
+ *   uv (a, b, c, d, e, f: u = a x + c y + e, v = b x + d y + f), colour in sRGB 0-1, `key`
+ *   the glyph as the render threads name it.
  * @returns {{floats: Float32Array, ints: Uint32Array, rowsF: number, rowsU: number,
- *            info: number[], count: number} | null} info: [instance start, grid w, grid h, grid start]
+ *            info: number[], count: number, keys: string[]} | null} info: [instance start, grid w,
+ *   grid h, grid start]; keys: the placements packed, for the page's images to leave out
  */
 export function packVectorText(text) {
   const F = []; // float texels, 4 numbers each
@@ -186,6 +188,7 @@ export function packVectorText(text) {
   if (!placed.length) return null;
   const instanceStart = F.length / 4;
   const uvBoxes = [];
+  const keys = []; // the glyphs drawn here: exactly what the page's images leave out
   for (const p of placed) {
     const g = glyphInfo.get(p.glyph);
     const [a, b, c, d, e, f] = p.m;
@@ -199,6 +202,7 @@ export function packVectorText(text) {
     }
     if (u1 < 0 || u0 > 1 || v1 < 0 || v0 > 1) continue;
     uvBoxes.push([u0, v0, u1, v1]);
+    keys.push(p.key);
     const det = a * d - b * c;
     // uv -> glyph space: the inverse of [a c e; b d f].
     const ia = d / det, ib = -b / det, ic = -c / det, id = a / det;
@@ -241,7 +245,7 @@ export function packVectorText(text) {
   floats.set(F);
   const ints = new Uint32Array(rowsU * TEX_W * 2);
   ints.set(U);
-  return { floats, ints, rowsF, rowsU, info: [instanceStart, gw, gh, gridStart], count: uvBoxes.length };
+  return { floats, ints, rowsF, rowsU, info: [instanceStart, gw, gh, gridStart], count: uvBoxes.length, keys };
 }
 
 function invertible(m) {

@@ -8,7 +8,7 @@ import { MAX_DETAIL } from "../viewer/shaders.js";
 import { onOpeningChanged, scene, state } from "./app.js";
 import { screenshotDialog, videoDialog, videoLength } from "./dialogs.js";
 import { showBusy, toast } from "./dom.js";
-import { CAPTURE_PRIORITY, DETAIL_MAX_SIDE, isSharp, pageImage, sharpen, VECTOR_TEXT } from "./pages.js";
+import { CAPTURE_PRIORITY, DETAIL_MAX_SIDE, isSharp, pageImage, pageRegionImage, sharpen, VECTOR_TEXT } from "./pages.js";
 
 /**
  * When a picture or video was made, for its file name, so each render has a name of its
@@ -72,12 +72,11 @@ export async function prepareCaptureTile(visible) {
       maxSide: Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize),
       maxPixels: 40e6,
     });
-    const index = a.book.pages[folio - 1].source.index;
     const tr = g.trim;
-    const images = await Promise.all(plan.map(({ region, heightPx }) => state.renderer.render(index, {
+    const images = await Promise.all(plan.map(({ region, heightPx }) => pageRegionImage(folio, {
       x0: tr.x0 + region.u0 * pageMm.width, x1: tr.x0 + region.u1 * pageMm.width,
       y0: tr.y1 - region.v1 * pageMm.height, y1: tr.y1 - region.v0 * pageMm.height,
-    }, heightPx, CAPTURE_PRIORITY, { cache: false, flex: true, vector: VECTOR_TEXT })));
+    }, heightPx, CAPTURE_PRIORITY, { cache: false, flex: true })));
     scene.setPageDetails(folio, images.map((image, i) => ({ image, region: plan[i].region })), { immediate: true });
     // Known, so the capture's strips go with the others once it ends (until 0.17.79 the strips
     // of a page that had none before stayed on it after a screenshot, at the capture's size).

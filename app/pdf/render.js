@@ -120,17 +120,18 @@ class Scheduler {
    * Lower priority numbers go first; re-requesting a queued key re-prioritises it.
    * `cache: false` for one-off sharp renders, which are large; "pending" to share a render
    * only while it runs (an image handed on and freed, see loadAllTextures in ui/pages.js). `vector`:
-   * for the 3D page, leaving out the text it draws from outlines (see vectorText).
+   * for the 3D page, the glyphs to leave out (it draws them from their outlines; see
+   * vectorText in ui/pages.js), null for all text in the image.
    */
   /**
    * @param {number} index
    * @param {{x0: number, y0: number, x1: number, y1: number}} rectMm
    * @param {number} height
    * @param {number} [priority]
-   * @param {{cache?: boolean | "pending", flex?: boolean, slot?: any, vector?: boolean}} [options]
+   * @param {{cache?: boolean | "pending", flex?: boolean, slot?: any, vector?: string[] | null}} [options]
    * @returns {Promise<ImageBitmap>}
    */
-  render(index, rectMm, height, priority = 10, { cache = true, flex = false, slot = null, vector = false } = {}) {
+  render(index, rectMm, height, priority = 10, { cache = true, flex = false, slot = null, vector = null } = {}) {
     const key = `${index}|${height}|${[rectMm.x0, rectMm.y0, rectMm.x1, rectMm.y1].map((v) => v.toFixed(2))}|${vector ? "v" : ""}`;
     const hit = this.cache.get(key);
     if (hit) {
@@ -251,7 +252,7 @@ class WorkerPool extends Scheduler {
       worker.onmessage = ({ data }) => {
         if (data.type === "ready") {
           worker.onmessage = ({ data: msg }) => pool.#finished(slot, msg);
-          worker.onerror = (e) => pool.#finished(slot, { type: "fail", message: e.message });
+          worker.onerror = (e) => pool.#finished(slot, { type: "fail", message: e.message, crashed: true });
           opened = true;
           maybeReady();
         } else if (data.type === "error") {
@@ -380,7 +381,12 @@ class WorkerPool extends Scheduler {
       this.pump();
       return;
     }
-    if (msg.type === "fail") this.#dropVectorJobs(slot);
+    // Only a thread that crashed leaves its text requests unanswered. A render that failed,
+    // most often one cancelled because the view moved on, is no reason: until 0.17.81 every
+    // cancelled render answered the thread's waiting requests with "no vector text", so pages
+    // loading while you flipped quickly got their image without its text and no text to draw
+    // over it, and their text was missing.
+    if (msg.crashed) this.#dropVectorJobs(slot);
     const job = slot.job;
     slot.job = null;
     if (job) {

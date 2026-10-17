@@ -43,31 +43,60 @@ export const VECTOR_TEXT = true;
 /**
  * A page's vector text, packed for the 3D page, or null: the glyphs' placements from the
  * render threads (glyph space to PDF user space) taken to this page's texture coordinates
- * (u across its trim box, v down from the head).
+ * (u across its trim box, v down from the head). Asked once a page (and colour profile):
+ * the same answer for the 3D page and for every image of it, which leaves out exactly the
+ * glyphs packed here (`keys`) and nothing else. Without vector text, images keep all text.
+ * @returns {Promise<ReturnType<typeof packVectorText>>}
  */
-async function vectorText(folio) {
-  const a = state.analysis;
-  const g = a.geometry[folio - 1];
-  if (!VECTOR_TEXT || !g) return null;
-  const renderer = await state.rendererReady;
-  const text = await renderer.vectorText(a.book.pages[folio - 1].source.index);
-  if (!text?.instances.length) return null;
-  const t = g.trim;
-  const w = t.x1 - t.x0;
-  const h = t.y1 - t.y0;
-  const k = MM_PER_PT;
-  const instances = text.instances.map(({ glyph, m: [a1, b1, c1, d1, e1, f1], color }) => ({
-    glyph, color, m: [(a1 * k) / w, (-b1 * k) / h, (c1 * k) / w, (-d1 * k) / h, (e1 * k - t.x0) / w, (t.y1 - f1 * k) / h],
-  }));
-  return packVectorText({ glyphs: text.glyphs, instances });
+export function vectorText(folio) {
+  const key = textureKey(folio);
+  if (!texts.has(key)) {
+    texts.set(key, (async () => {
+      const a = state.analysis;
+      const g = a.geometry[folio - 1];
+      if (!VECTOR_TEXT || !g) return null;
+      const renderer = await state.rendererReady;
+      const text = await renderer.vectorText(a.book.pages[folio - 1].source.index);
+      if (!text?.instances.length) return null;
+      const t = g.trim;
+      const w = t.x1 - t.x0;
+      const h = t.y1 - t.y0;
+      const k = MM_PER_PT;
+      const instances = text.instances.map(({ glyph, m: [a1, b1, c1, d1, e1, f1], color, key: id }) => ({
+        glyph, color, key: id, m: [(a1 * k) / w, (-b1 * k) / h, (c1 * k) / w, (-d1 * k) / h, (e1 * k - t.x0) / w, (t.y1 - f1 * k) / h],
+      }));
+      return packVectorText({ glyphs: text.glyphs, instances });
+    })().catch(() => null));
+  }
+  return texts.get(key);
+}
+const texts = new Map(); // textureKey -> Promise of the page's packed vector text (see vectorText)
+
+/** What a render of the page for the 3D view leaves out: its vector text's glyphs (null: nothing). */
+async function textLeftOut(folio) {
+  const keys = (await vectorText(folio))?.keys;
+  return keys?.length ? keys : null;
 }
 
-/** A rendered image (ImageBitmap) of a finished page, or null for a blank. */
-export function pageImage(folio, height, priority, options) {
+/**
+ * A rendered image (ImageBitmap) of a finished page, or null for a blank. `vector: true`:
+ * for the 3D page, without the glyphs it draws from their outlines (see vectorText).
+ */
+export async function pageImage(folio, height, priority, options = {}) {
   const g = state.analysis.geometry[folio - 1];
-  if (!g) return Promise.resolve(null);
+  if (!g) return null;
   const page = state.analysis.book.pages[folio - 1];
-  return state.rendererReady.then((r) => r.render(page.source.index, g.trim, height, priority, options));
+  const vector = options.vector ? await textLeftOut(folio) : null;
+  const r = await state.rendererReady;
+  return r.render(page.source.index, g.trim, height, priority, { ...options, vector });
+}
+
+/** Part of a page (`rect`, mm in PDF user space) for the 3D page: without its vector text. */
+export async function pageRegionImage(folio, rect, height, priority, options = {}) {
+  const page = state.analysis.book.pages[folio - 1];
+  const vector = await textLeftOut(folio);
+  const r = await state.rendererReady;
+  return r.render(page.source.index, rect, height, priority, { ...options, vector });
 }
 
 /**
@@ -217,8 +246,6 @@ export function sharpen() {
 
 /** Render a page's planned strips and lay them over it, unless outdated by then. */
 function renderStrips(folio, g, pageMm, seen, plan, pass, outdated) {
-  const a = state.analysis;
-  const index = a.book.pages[folio - 1].source.index;
   const tr = g.trim;
   const renders = plan.map(({ region, heightPx }) => {
     // Image v runs from the head down; PDF y runs up.
@@ -226,7 +253,7 @@ function renderStrips(folio, g, pageMm, seen, plan, pass, outdated) {
       x0: tr.x0 + region.u0 * pageMm.width, x1: tr.x0 + region.u1 * pageMm.width,
       y0: tr.y1 - region.v1 * pageMm.height, y1: tr.y1 - region.v0 * pageMm.height,
     };
-    return state.renderer.render(index, rect, heightPx, pass.priority, { cache: false, flex: true, vector: VECTOR_TEXT });
+    return pageRegionImage(folio, rect, heightPx, pass.priority, { cache: false, flex: true });
   });
   return Promise.all(renders).then((images) => {
     const stale = outdated() || !scene.visiblePages().some((v) => v.folio === folio)
@@ -273,4 +300,5 @@ export function warmVisiblePages() {
 /** Thumbnails made again (a new file, a new CMYK profile). */
 export function forgetThumbnails() {
   thumbs.clear();
+  texts.clear(); // a page's vector text, asked again with its images
 }
