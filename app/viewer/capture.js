@@ -148,12 +148,15 @@ function bookPoints(scene, own, visit) {
  * every page stays in the picture in every frame (distanceToFit: the farthest any frame
  * needs; never closer than the scene frames that spread). Before (0.17.72) the distance
  * followed the pages, easing out for each turn: the picture pulsed; and the camera turned
- * and moved as the book opened and closed, as on screen. Then the pages' density: how many
- * pixels a millimetre each page has where it lies at rest (before each turn, and at the
- * end), so its image can be rendered at the size that draws sharpest (see renderVideo in
- * ui/capture.js).
- * @returns {{fix: () => void, density: Map<number, number>}} `fix`: after the scene frames
- *   its camera, put the video's in place (then placeCamera)
+ * and moved as the book opened and closed, as on screen. Then, frame by frame, the pages'
+ * density: how many pixels a millimetre each page that can be in the picture has at its
+ * densest, so its image can be as sharp as that frame needs (see renderVideo in
+ * ui/capture.js). Every frame, not only the frames at rest (until 0.17.80): a page swinging
+ * up comes nearer the camera than it lies, and its image, sized for it at rest, was enlarged
+ * and soft through every turn.
+ * @returns {{fix: () => void, need: Map<number, number>[]}} `fix`: after the scene frames
+ *   its camera, put the video's in place (then placeCamera); `need`: by frame, by folio, px
+ *   per mm (0: a page that may be in the picture but wasn't met)
  */
 function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin, start }) {
   const run = (each) => {
@@ -224,19 +227,28 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
     aim();
     scene.fitDistance = distance / view.zoom;
   };
-  const rest = new Set([frames - 1, ...cues.map((c) => frameOf(c.at))]);
-  const density = new Map();
+  // The pages that can be in the picture: the spread turned to and the one before (its
+  // leaves are still turning), the pages under them (a page lifting shows the one below),
+  // and the covers. Their own rays tell which are met (see visiblePages).
+  const candidates = () => {
+    const o = scene.opening;
+    const set = new Set([1, scene.pageCount]);
+    for (let f = 2 * o - 4; f <= 2 * o + 3; f++) set.add(f);
+    return [...set].filter((f) => f >= 1 && f <= scene.pageCount);
+  };
+  const need = [];
   run((i) => {
-    if (!rest.has(i)) return;
     fix();
     own.placeCamera();
     scene.camera.updateMatrixWorld();
-    for (const seen of scene.visiblePages({ width, height })) {
-      const most = Math.max(0, ...seen.samples.map((q) => q.pxPerMm));
-      density.set(seen.folio, Math.max(density.get(seen.folio) ?? 0, most));
+    const folios = candidates();
+    const here = new Map(folios.map((f) => [f, 0]));
+    for (const seen of scene.visiblePages({ width, height, folios })) {
+      here.set(seen.folio, Math.max(0, ...seen.samples.map((q) => q.pxPerMm)));
     }
+    need[i] = here;
   });
-  return { fix, density };
+  return { fix, need };
 }
 
 /**
@@ -247,7 +259,7 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
  * top down, straight (not premultiplied) alpha, in order. Framed for the output's shape.
  * With `reset` (puts the book where the video starts), the video is planned first (see
  * planVideo): one camera for all of it, every page in the picture, and `prepare` gets the
- * pages' density at rest (px per mm, by folio).
+ * density each page has in that frame (px per mm, by folio; 0: may be in the picture).
  *
  * Pipelined: the GPU turns each frame top down and straight-alpha itself, frames are read
  * back without stalling it, and while `onFrame` hands one frame on (to the encoder), the
@@ -256,7 +268,7 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
  * @param {import("./scene.js").SceneSteps} own
  * @param {{width: number, height: number, fps: number, durationMs: number,
  *          cues: {at: number, run: () => void}[], transparent?: boolean,
- *          reset?: () => void, prepare?: (ms: number, density: Map<number, number>) => Promise<void>,
+ *          reset?: () => void, prepare?: (ms: number, need: Map<number, number>) => Promise<void>,
  *          onFrame: (rgba: Uint8Array, index: number) => any,
  *          onProgress?: (done: number, total: number) => void}} options
  */
@@ -299,7 +311,7 @@ export async function recordVideo(scene, own, { width, height, fps, durationMs, 
   scene.capturing = true;
   try {
     scene.camera.aspect = width / height;
-    // Planned first (camera distance per frame, pages' density), then run again for real.
+    // Planned first (the camera, the pages' density frame by frame), then run again for real.
     const plan = reset ? planVideo(scene, own, { width, height, fps, frames, cues, reset, margin: 0.92, start }) : null;
     reset?.();
     const pending = [...cues].sort((a, b) => a.at - b.at);
@@ -310,7 +322,7 @@ export async function recordVideo(scene, own, { width, height, fps, durationMs, 
       const ms = (i * 1000) / fps;
       scene.clock = start + ms;
       while (pending.length && pending[0].at <= ms) pending.shift().run();
-      await prepare(ms, plan?.density ?? new Map());
+      await prepare(ms, plan?.need[i] ?? new Map());
       own.update(scene.clock);
       while (scene.uploads.size) own.flushUploads(); // every page image for this frame
       own.frameCamera();

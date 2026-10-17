@@ -108,7 +108,8 @@ export async function renderVideo(preset = null) {
   let cancelled = false;
   const busy = showBusy("Rendering video…", () => { cancelled = true; });
   const before = { opening: scene.opening, closed: scene.isClosed, turnMs: scene.turnMs, closeMs: scene.closeMs };
-  const sharp = new Map(); // folio -> page image at the video's resolution, while in view
+  /** @type {Map<number, {image: ImageBitmap, height: number}>} its image at the video's resolution, while it may be in view */
+  const sharp = new Map();
   let writer = null;
   state.capturing = true;
   state.renderer.cancel(isSharp);
@@ -127,33 +128,14 @@ export async function renderVideo(preset = null) {
     const step = (choice.turnSeconds + choice.pauseSeconds) * 1000;
     const cues = Array.from({ length: turns }, (_, k) => ({ at: 1000 + k * step, run: () => scene.goTo(k + 1) }));
     const durationMs = videoLength(turns, choice.turnSeconds, choice.pauseSeconds);
-    // Each page's image at the size that draws it sharpest where it lies at rest in the video:
-    // 1.25 image pixels to a video pixel where the page is densest (see SUPERSAMPLE in
-    // pages.js; the density measured by planning the video first).
-    const maxHeight = Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize);
-    const fallback = Math.min(maxHeight, Math.round(Math.max(choice.width, choice.height) * 1.25));
-    const heightFor = (folio, density) => {
-      const g = a.geometry[folio - 1];
-      // A page never at rest in the picture (a tall video shows one page of a spread): as
-      // large as the largest that is.
-      const px = density.get(folio) ?? (density.size ? Math.max(...density.values()) : 0);
-      if (!g || !px) return fallback;
-      return Math.max(256, Math.min(maxHeight, Math.round(1.25 * px * (g.trim.y1 - g.trim.y0))));
-    };
-    const openingAt = (ms) => cues.filter((c) => c.at <= ms).length;
     await scene.recordVideo({
       ...choice,
       durationMs,
       cues,
       reset,
-      prepare: async (ms, density) => {
+      prepare: async (ms, need) => {
         if (cancelled) throw new Error("cancelled");
-        // Sharp for the video: the spread before (a turning leaf shows it until it lands), the
-        // spread now and the next one. (Leaving out the one before swapped the lifting page and
-        // the page under it to the screen's images the moment a turn began.)
-        const o = openingAt(ms);
-        const folios = Array.from({ length: 8 }, (_, k) => 2 * o - 2 + k);
-        await sharpenForVideo(sharp, folios, (f) => heightFor(f, density));
+        await sharpenForVideo(sharp, need);
       },
       onFrame: (rgba, i) => writer.frame(rgba, i),
       onProgress: (done, total) => busy.progress(done / total),
@@ -171,7 +153,7 @@ export async function renderVideo(preset = null) {
     busy.remove();
     state.capturing = false;
     // Back to the screen's page images and to where the book was.
-    for (const [folio, image] of sharp) {
+    for (const [folio, { image }] of sharp) {
       scene.showPageImage(folio, null);
       image.close();
     }
@@ -184,31 +166,59 @@ export async function renderVideo(preset = null) {
   }
 }
 
-/** Have exactly these folios at the video's resolution (rendering what's missing). `height(folio)`: its image's. */
-async function sharpenForVideo(sharp, folios, height) {
+// A video's page image: 1.25 image pixels to a video pixel where the page is densest in the
+// frame (see SUPERSAMPLE in pages.js), rendered again as soon as a frame needs it sharper, or
+// needs under 1/1.3 of it (read from a smaller mipmap level, a sharper image goes softer; and
+// it holds memory for nothing). Rendered at 1.1 times the need: a page coming nearer is
+// rendered again every few frames, not every frame.
+const VIDEO_SUPERSAMPLE = 1.25;
+const VIDEO_SLACK = 1.3;
+const VIDEO_AHEAD = 1.1;
+
+/**
+ * Every page in the frame at the resolution the frame needs (`need`: px per mm by folio, see
+ * recordVideo; 0: may be in the picture, kept as it is), rendering what's missing or no longer
+ * right; images of pages that can't be in the picture are let go.
+ * @param {Map<number, {image: ImageBitmap, height: number}>} sharp
+ * @param {Map<number, number>} need
+ */
+export async function sharpenForVideo(sharp, need) {
   const a = state.analysis;
-  const want = new Set(folios.filter((f) => f >= 1 && f <= a.book.pages.length && a.geometry[f - 1]));
-  for (const [folio, image] of sharp) {
-    if (want.has(folio)) continue;
+  const maxHeight = Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize);
+  for (const [folio, { image }] of sharp) {
+    if (need.has(folio)) continue;
     scene.showPageImage(folio, null);
     image.close();
     sharp.delete(folio);
   }
-  await Promise.all([...want].filter((f) => !sharp.has(f)).map(async (folio) => {
-    const image = await pageImage(folio, height(folio), CAPTURE_PRIORITY, { cache: false, vector: VECTOR_TEXT });
-    sharp.set(folio, image);
+  await Promise.all([...need].map(async ([folio, px]) => {
+    const g = a.geometry[folio - 1];
+    if (!g || !px) return;
+    const mm = g.trim.y1 - g.trim.y0;
+    const least = Math.min(maxHeight, Math.max(256, Math.ceil(VIDEO_SUPERSAMPLE * px * mm)));
+    const have = sharp.get(folio);
+    if (have && have.height >= least && have.height <= least * VIDEO_SLACK) return;
+    const height = Math.min(maxHeight, Math.round(least * VIDEO_AHEAD));
+    const image = await pageImage(folio, height, CAPTURE_PRIORITY, { cache: false, vector: VECTOR_TEXT });
+    if (!image) return;
     scene.showPageImage(folio, image);
+    have?.image.close();
+    sharp.set(folio, { image, height });
   }));
 }
 
 /** An MP4 (H.264) encoder: the computer's own, through WebCodecs. Frames: RGBA. */
 async function mp4Writer({ width, height, fps }) {
   const { Muxer, ArrayBufferTarget } = await import("../../vendor/mp4-muxer/mp4-muxer.mjs");
-  // A master, not a delivery copy: 0.4 bits a pixel a frame (1080p at 30 fps about 25 Mbit/s,
-  // 4K about 100), 16 to 120 Mbit/s. Dithered and halftoned images, fine type and pixel art
-  // are the hardest content there is for H.264; at 0.12 (8 Mbit/s for 1080p) still frames
-  // came out soft, the first after a keyframe most. Editors and platforms re-encode anyway.
-  const bitrate = Math.round(Math.min(120e6, Math.max(16e6, width * height * fps * 0.4)));
+  // A master, not a delivery copy: up to 1 bit a pixel a frame (1080p at 30 fps 62 Mbit/s, 4K
+  // the most High 5.2 takes, 240), at least 16 Mbit/s; a ceiling the encoder stays under
+  // where it can. Dithered and halftoned images, fine type and pixel art are the hardest
+  // content there is for H.264. Measured on a page turn of the author's pixel-art book, 1080p,
+  // encoded and decoded again, the pages' edge energy against the frames as drawn: at 0.4 bits
+  // (until 0.17.80) the encoder used 14 Mbit/s and kept 0.88-0.93 of it, soft; at 1 bit it used
+  // 38 and kept 0.985-1.0, and allowing 120 changed nothing more. At 0.12 (8 Mbit/s, until
+  // 0.17.75) still frames came out soft. Editors and platforms re-encode anyway.
+  const bitrate = Math.round(Math.min(240e6, Math.max(16e6, width * height * fps)));
   let config = null;
   // The graphics card's own encoder if it has one, else the processor.
   search: for (const hardwareAcceleration of /** @type {HardwareAcceleration[]} */ (["prefer-hardware", "no-preference"])) {

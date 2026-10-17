@@ -929,11 +929,11 @@ export class BookScene {
    * testing thousands of triangles each took about 50 ms a call while moving.
    * @returns {{folio: number, region: {u0: number, v0: number, u1: number, v1: number},
    *            samples: {u: number, v: number, pxPerMm: number}[]}[]}
-   * @param {{width?: number, height?: number}} [size] a capture tile's, in device pixels (else the canvas's)
+   * @param {{width?: number, height?: number, folios?: number[]}} [size] a capture tile's, in
+   *   device pixels (else the canvas's); `folios`: the pages to look for (else the open spread's)
    */
-  visiblePages({ width, height } = {}) {
+  visiblePages({ width, height, folios = this.shownFolios } = {}) {
     if (!this.model) return [];
-    const folios = this.shownFolios;
     // In device pixels of the canvas, or of a capture tile when given.
     const W = width ?? this.renderer.domElement.width;
     const H = height ?? this.renderer.domElement.height;
