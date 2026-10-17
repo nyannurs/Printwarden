@@ -131,7 +131,10 @@ export function layoutLeaves(scene) {
   // for half a 240-page book standing up.) Not a coil book's (its pages fan out in the air)
   // nor against a hardcover's board (it overhangs the pages).
   const coil = m.style.spine === "coil";
-  const against = (leaf, j) => !coil && leaf.group != null && !leaf.board && scene.leaves[j]?.group === leaf.group && !scene.leaves[j].board;
+  // Diagnosis from the console (the author's Mac draws a flying stack's edges as dashes;
+  // nothing here reproduces it): `app.scene.debugInnerFaces = true` draws the faces between
+  // a stack's sheets, `app.scene.debugStackFill = 0.9` packs them as a pile at rest is.
+  const against = (leaf, j) => !scene.debugInnerFaces && !coil && leaf.group != null && !leaf.board && scene.leaves[j]?.group === leaf.group && !scene.leaves[j].board;
   for (const leaf of scene.leaves) {
     leaf.front.visible = leaf.first.material[0].visible = !against(leaf, leaf.i - 1); // the front lies on the leaf before
     leaf.back.visible = leaf.first.material[1].visible = !against(leaf, leaf.i + 1);
@@ -147,7 +150,7 @@ export function layoutLeaves(scene) {
   for (const l of scene.leaves) if (l.group != null) stacked.set(l.group, (stacked.get(l.group) ?? 0) + 1);
   const changed = [];
   for (const leaf of scene.leaves) {
-    leaf.fill = leaf.group != null && stacked.get(leaf.group) > 1 ? 1 : LEAF_FILL;
+    leaf.fill = leaf.group != null && stacked.get(leaf.group) > 1 ? (scene.debugStackFill ?? 1) : LEAF_FILL;
     if (!shapeChanged(leaf)) continue;
     packSheet(leaf, scene.sheets, m.thickness[leaf.i]);
     leaf.stale = true; // for picking (see makeLeaf)

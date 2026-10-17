@@ -283,6 +283,8 @@ export class BookScene {
     this.uploads = new Map(); // folio -> image waiting for GPU upload
     this.detailQueue = new Map(); // folio -> detail strips being prepared
     this.fading = new Set(); // page uniforms whose strips are fading in (uDetailFade < 1)
+    this.debugInnerFaces = false; // see layoutLeaves: diagnosis switches, off
+    this.debugStackFill = null;
     this.lastFadeTime = null;
     this.dirty = true;
     this.geometryDirty = false;
