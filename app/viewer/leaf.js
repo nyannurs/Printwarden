@@ -482,6 +482,11 @@ function edgeMaterial(scene, base, front, back) {
     shader.fragmentShader = patchShader(shader.fragmentShader, [
       ["void main() {", EDGE_FRAGMENT_HEADER + "void main() {"],
       ["#include <color_fragment>", (line) => line + "\n" + EDGE_INK],
+      // A sheet's cut edges take no shadow: 0.15 mm faces at a grazing angle to the light,
+      // they are the one place a shadow map's precision shows. On the author's Mac the
+      // edges of a stack swinging over went dark with light dashes, as if see-through, and
+      // flickered as it moved (0.17.86); nothing a cut edge gains from a shadow is worth that.
+      ["#include <lights_fragment_begin>", THREE.ShaderChunk.lights_fragment_begin.replaceAll("receiveShadow", "false")],
     ]);
   };
   m.customProgramCacheKey = () => "bookview-sheet-edge";
