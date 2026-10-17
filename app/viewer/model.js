@@ -1034,6 +1034,12 @@ export function coilCentre(book, closed, side = 1) {
 }
 
 /**
+ * A leaf's shape: arc-length samples along it, its flat width and height (mm), where on the
+ * page its content starts (uStart, mm: what a fold or a joint takes), and whether it is a board.
+ * @typedef {{s: Float32Array, width: number, height: number, uStart: number, board: boolean}} LeafShape
+ */
+
+/**
  * A leaf's size, its page image's place on it, and its samples along it (shared by every
  * leaf of the same kind). Pages: the trim. A hardcover's boards: from the joint to a square
  * past the fore-edge, a square taller at head and foot; the flat face, as the edges are
@@ -1042,15 +1048,8 @@ export function coilCentre(book, closed, side = 1) {
  * repeat its edge). Coil pages run straight from the ring, no fold to follow: evenly, every
  * 2 mm (half the points to lay out and draw, for every page of a coil book moves as one
  * turns).
- * @returns {{s: Float32Array, width: number, height: number, uStart: number}}
+ * @returns {LeafShape}
  */
-/**
- * A leaf's shape: arc-length samples along it, its flat width and height (mm), where on the
- * page its content starts (uStart, mm: what a fold or a joint takes), and whether it is a board.
- * @typedef {{s: Float32Array, width: number, height: number, uStart: number, board: boolean}} LeafShape
- */
-
-/** @returns {LeafShape} */
 export function leafShape(book, i) {
   const st = book.style;
   const n = book.leafCount;

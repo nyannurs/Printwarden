@@ -210,8 +210,8 @@ export const PAGE_FRAGMENT_HEADER = /* glsl */ `
 // the spine (mm): nothing printed there can be seen, and the paper creases at its edge.
 uniform float uGlue;
 // The cover's hinge score outside, this far from the spine (mm): a shallow groove's shade.
-// (A flap over a page is a sheet of its own, see makeFlap in leaf.js: the page shader has no
-// texture unit to spare for it, GPUs give sixteen.)
+// (A flap over a page is a sheet of its own, see makeFlap in leaf.js: the page shader is at
+// the texture units a GPU gives a shader, so a flap can't be one more image in it.)
 uniform float uScore;
 uniform sampler2D uBack;
 uniform sampler2D uSmall;

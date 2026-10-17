@@ -3,7 +3,7 @@
 // rendered from the PDF at the output's resolution.
 
 import { chooseSaveLocation, proResAvailable } from "../platform.js";
-import { planDetail } from "../viewer/detail.js";
+import { planDetail, videoImageHeight } from "../viewer/detail.js";
 import { MAX_DETAIL } from "../viewer/shaders.js";
 import { onOpeningChanged, scene, state } from "./app.js";
 import { screenshotDialog, videoDialog, videoLength } from "./dialogs.js";
@@ -165,19 +165,11 @@ export async function renderVideo(preset = null) {
   }
 }
 
-// A video's page image: 1.25 image pixels to a video pixel where the page is densest in the
-// frame (see SUPERSAMPLE in pages.js), rendered again as soon as a frame needs it sharper, or
-// needs under 1/1.3 of it (read from a smaller mipmap level, a sharper image goes softer; and
-// it holds memory for nothing). Rendered at 1.1 times the need: a page coming nearer is
-// rendered again every few frames, not every frame.
-const VIDEO_SUPERSAMPLE = 1.25;
-const VIDEO_SLACK = 1.3;
-const VIDEO_AHEAD = 1.1;
-
 /**
  * Every page in the frame at the resolution the frame needs (`need`: px per mm by folio, see
  * recordVideo; 0: may be in the picture, kept as it is), rendering what's missing or no longer
- * right; images of pages that can't be in the picture are let go.
+ * right (videoImageHeight in detail.js); images of pages that can't be in the picture are let
+ * go. Exported for the tests.
  * @param {Map<number, {image: ImageBitmap, height: number}>} sharp
  * @param {Map<number, number>} need
  */
@@ -192,12 +184,10 @@ export async function sharpenForVideo(sharp, need) {
   }
   await Promise.all([...need].map(async ([folio, px]) => {
     const g = a.geometry[folio - 1];
-    if (!g || !px) return;
-    const mm = g.trim.y1 - g.trim.y0;
-    const least = Math.min(maxHeight, Math.max(256, Math.ceil(VIDEO_SUPERSAMPLE * px * mm)));
+    if (!g) return;
     const have = sharp.get(folio);
-    if (have && have.height >= least && have.height <= least * VIDEO_SLACK) return;
-    const height = Math.min(maxHeight, Math.round(least * VIDEO_AHEAD));
+    const height = videoImageHeight(px, g.trim.y1 - g.trim.y0, have?.height ?? null, maxHeight);
+    if (height == null) return;
     const image = await pageImage(folio, height, CAPTURE_PRIORITY, { cache: false, vector: VECTOR_TEXT });
     if (!image) return;
     scene.showPageImage(folio, image);

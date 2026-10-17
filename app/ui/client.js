@@ -6,18 +6,18 @@
 //
 // The modules go in as text and are loaded through an import map of blob URLs: every
 // import between them is rewritten to a key (viewer/scene.js, three, three/addons/...),
-// resolved here from the app's own files.
+// resolved from the app's own files (see client/bundle.js).
 
+import { bundleModules, CLIENT_ENTRY } from "../client/bundle.js";
+import { hasWire, WIRE_COLORS } from "../core/binding.js";
 import { label } from "../core/book.js";
 import { baseHeight } from "../pdf/render.js";
-import { hasWire, WIRE_COLORS } from "../core/binding.js";
 import { APP_VERSION, chooseSaveLocation } from "../platform.js";
 import { scene, state } from "./app.js";
 import { clientViewerDialog } from "./dialogs.js";
 import { showBusy, toast } from "./dom.js";
 import { pageImage } from "./pages.js";
 
-const ENTRY = "client/viewer.js";
 const JPEG_QUALITY = 0.86;
 
 /** Ask, build and save the viewer (the Viewer button). */
@@ -49,7 +49,7 @@ export async function exportClientViewer() {
  * @param {(done: number, total: number) => void} [progress]
  */
 export async function buildClientHtml(analysis, heightPx, progress = () => {}) {
-  const modules = await bundleModules(ENTRY);
+  const modules = await bundleModules(CLIENT_ENTRY);
   const data = await clientBook(analysis, heightPx, progress);
   const json = (v) => JSON.stringify(v).replace(/<\//g, "<\\/"); // never closes its script
   const title = escapeHtml(data.title);
@@ -76,7 +76,7 @@ export async function buildClientHtml(analysis, heightPx, progress = () => {}) {
   document.head.append(map);
   const main = document.createElement("script");
   main.type = "module";
-  main.textContent = 'import { start } from "${ENTRY}"; start(JSON.parse(document.getElementById("book").textContent), document.getElementById("root"))'
+  main.textContent = 'import { start } from "${CLIENT_ENTRY}"; start(JSON.parse(document.getElementById("book").textContent), document.getElementById("root"))'
     + '.then((scene) => { window.viewer = scene; }, (e) => { document.getElementById("root").textContent = "The viewer could not start: " + e.message; });';
   document.body.append(main);
 })();
@@ -157,52 +157,6 @@ async function toDataUrl(image, type, quality = undefined) {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return `data:${type};base64,${btoa(binary)}`;
-}
-
-// --- bundling ------------------------------------------------------------------------------
-
-const IMPORT_RE = /^((?:import|export)[^;]*?from\s*|import\s*)(['"])([^'"]+)\2/gm;
-
-/**
- * The entry module and everything it imports, by key, their imports rewritten to keys.
- * @returns {Promise<Record<string, string>>}
- */
-async function bundleModules(entry) {
-  /** @type {Record<string, string>} */
-  const modules = {};
-  const queue = [entry];
-  while (queue.length) {
-    const key = queue.shift();
-    if (modules[key] !== undefined) continue;
-    const response = await fetch(urlOf(key));
-    if (!response.ok) throw new Error(`${key} is missing (${response.status})`);
-    const text = await response.text();
-    modules[key] = text.replace(IMPORT_RE, (_, pre, quote, spec) => {
-      const target = resolveKey(key, spec);
-      queue.push(target);
-      return `${pre}${quote}${target}${quote}`;
-    });
-  }
-  return modules;
-}
-
-/** Where a key's file is: three.js and its addons in vendor/, the rest under app/. */
-function urlOf(key) {
-  if (key === "three") return new URL("../../vendor/three.module.js", import.meta.url);
-  if (key.startsWith("three/addons/")) return new URL(`../../vendor/three-addons/${key.slice("three/addons/".length)}`, import.meta.url);
-  return new URL(`../${key}`, import.meta.url);
-}
-
-/** A specifier as a key: relative ones resolved against the importing module's key. */
-function resolveKey(fromKey, spec) {
-  if (!spec.startsWith(".")) return spec;
-  const parts = fromKey.split("/").slice(0, -1);
-  for (const piece of spec.split("/")) {
-    if (piece === "." || piece === "") continue;
-    if (piece === "..") parts.pop();
-    else parts.push(piece);
-  }
-  return parts.join("/");
 }
 
 function escapeHtml(s) {

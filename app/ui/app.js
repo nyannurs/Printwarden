@@ -34,6 +34,11 @@ export const state = {
   name: "",
   bytes: null, // the source PDF, kept for export
   pages: null, // SourcePage[]
+  cover: null, // a separate cover file: {name, bytes, pages}, or null (see coverPages in analysis.js)
+  spineArt: null, // spine artwork from a PDF: {name, bytes, box, sizeMm, image}, or null (spine-panel.js)
+  finish: null, // a spot finish: {name, pages, kind, images}, or null (finish.js)
+  pendingFinishKind: null, // the finish chosen before a finish PDF was imported
+  capturing: false, // a screenshot or video is being rendered (capture.js)
   renderer: null, // set once the render workers are up
   rendererReady: null, // Promise of the renderer
   setup: defaultSetup(),

@@ -4,7 +4,7 @@
 
 import { MM_PER_PT } from "../core/units.js";
 import { baseHeight, THUMB_HEIGHT } from "../pdf/render.js";
-import { planDetail } from "../viewer/detail.js";
+import { baseSuffices, planDetail } from "../viewer/detail.js";
 import { MAX_DETAIL } from "../viewer/shaders.js";
 import { packVectorText } from "../viewer/vectortext.js";
 import { scene, state } from "./app.js";
@@ -14,9 +14,6 @@ import { applySpine, averageEdge } from "./spine-panel.js";
 // Sharp renders jump the queue, ahead of everything else.
 const SHARP_FINE = -1;
 export const CAPTURE_PRIORITY = -3; // screenshot tiles: never cancelled by the view
-// Detail images: rendered at three times the screen's resolution and filtered down by the
-// page shader's four-sample filter (the way print previews antialias type), with a margin
-// so small pans stay sharp. Bounded so a render stays well under a second.
 // Image pixels per device pixel in a sharp strip, at the strip's densest point. With the
 // page shader's one tap and its 0.7 gradients (see pageSample), 1.25 read crispest against
 // pdf.js's own rendering (1.0 and 1.1 a little softer, more a little aliased); it also keeps
@@ -231,8 +228,7 @@ export function sharpen() {
       // screen pixel, which made strips hardly finer than the base, 5.9 pixels a millimetre
       // over its 5.85, at an ordinary size of the view: the page changed look when it came
       // to rest for no gain, and on a Mac the strip came out softer than the base beside it.)
-      const baseDensity = t.height / pageMm.height;
-      if (plan.every((tile) => tile.pxPerMm / pass.supersample <= baseDensity)) {
+      if (baseSuffices(plan, t.height / pageMm.height, pass.supersample)) {
         if (state.details.delete(folio)) scene.setPageDetails(folio, []);
         break;
       }

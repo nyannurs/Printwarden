@@ -540,7 +540,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .finding.warning .sev { color: var(--warning); }
 .finding.info .sev { color: var(--info); }
 .finding p { margin: 3px 0 0; }
-.finding .fix, .finding .goto { margin-top: 8px; }
+.finding .goto { margin-top: 8px; }
 .muted { color: var(--wire-muted); }
 
 /* ---------- dialogs ---------- */

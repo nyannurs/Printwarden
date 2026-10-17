@@ -81,7 +81,7 @@ export function signatureLayout(pageCount, signaturePages, sheetPages = 2) {
 export const saddleStitchLayout = (pageCount, sheetPages = 2) => signatureLayout(pageCount, pageCount, sheetPages);
 
 /** Whether a scheme of `sheetPages` a sheet folds `signaturePages` signatures (2: always). */
-export const schemeFits = (sheetPages, signaturePages) => sheetPages === 2 || (signaturePages > 0 && signaturePages % sheetPages === 0);
+const schemeFits = (sheetPages, signaturePages) => sheetPages === 2 || (signaturePages > 0 && signaturePages % sheetPages === 0);
 
 /**
  * The sheet layout, or null when the binding is not imposed, the count is invalid, or the

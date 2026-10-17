@@ -48,7 +48,7 @@ export const coverOf = (paper) => ({
 });
 
 /** A stock's bulk (cm³/g): its own, or the finish's typical one. */
-export const volumeOf = (finish, volume = null) => volume ?? PAPER_FINISHES[finish]?.bulk ?? 1.2;
+const volumeOf = (finish, volume = null) => volume ?? PAPER_FINISHES[finish]?.bulk ?? 1.2;
 
 /** Sheet thickness in mm, from grammage and bulk (the stock's own volume, or the finish's typical). */
 export function paperThicknessMm(gsm, finish = "uncoated", volume = null) {

@@ -188,7 +188,6 @@ function makeCoil(scene, style) {
   return coil;
 }
 
-/** Sewing threads through the centre fold of each signature. */
 /**
  * A sewn block's signatures, folded: each sheet a U round the ones inside it, at the
  * sheets' roots, reaching foldDepth beyond them toward the cover or case. Seen at head and
@@ -203,6 +202,7 @@ function makeSignatureFolds(scene, group) {
   return m;
 }
 
+/** Sewing threads through the centre fold of each signature. */
 function makeThreads(scene, group) {
   const sig = scene.signatureLeaves; // leaves per signature (a 16-page one has 8)
   const threads = [];
@@ -466,15 +466,6 @@ function stapleGeometry(points, BEND = 0.45) {
 }
 
 /**
- * Saddle stitch: each sheet is one piece of paper folded round the ones inside it. Its two
- * halves are leaves k and n - 1 - k; between their roots it bends in a U, leaving each
- * root in the direction that leaf starts in, so the paper runs on without a kink. Built as
- * one mesh: outside, inside and the cut edges at head and foot of every sheet's fold.
- * Material groups: 0 the cover's outside (the spine colour), 1 the rest of the cover's
- * fold, 2 the pages'. Returns the outside of the cover's fold and the inside of the centre
- * sheet's, at their middle (for the staples' crowns and legs).
- */
-/**
  * The outside of the cover's fold: the front cover's page image from its root back to the
  * fold's apex, then the back cover's from the apex to its root (the strips of them the fold
  * takes: `uFoldStart` of each, as leafShape sets their uStart). The mesh's uv is the way
@@ -517,6 +508,15 @@ function syncFoldCover(m, scene, book) {
   m.clearcoatRoughness = front.clearcoatRoughness;
 }
 
+/**
+ * Saddle stitch: each sheet is one piece of paper folded round the ones inside it. Its two
+ * halves are leaves k and n - 1 - k; between their roots it bends in a U, leaving each
+ * root in the direction that leaf starts in, so the paper runs on without a kink. Built as
+ * one mesh: outside, inside and the cut edges at head and foot of every sheet's fold.
+ * Material groups: 0 the cover's outside (the spine colour), 1 the rest of the cover's
+ * fold, 2 the pages'. Returns the outside of the cover's fold and the inside of the centre
+ * sheet's, at their middle (for the staples' crowns and legs).
+ */
 function writeFoldGeometry(geo, leaves, book) {
   const SEGS = 32;
   const ROW = SEGS + 1;

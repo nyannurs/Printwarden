@@ -17,9 +17,6 @@
  *            folds: string[]}} Scheme front and back: rows of cells, row 0 at the sheet's top
  */
 
-/** The schemes offered, by pages per sheet. */
-export const SCHEMES = /** @type {const} */ ([8, 16]);
-
 /** @type {Record<number, {rows: number, cols: number, folds: ("vertical" | "horizontal")[]}>} */
 const FOLDING = {
   8: { rows: 2, cols: 2, folds: ["vertical", "horizontal"] },
