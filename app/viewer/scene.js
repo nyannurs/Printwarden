@@ -213,6 +213,7 @@ export class BookScene {
     };
     this.edgeMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide });
     this.coverEdgeMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide }); // the covers' cut edges
+    this.kraftMat = new THREE.MeshStandardMaterial({ color: 0x5c4b3a, roughness: 1, side: THREE.DoubleSide }); // a case's spine lining, inside the hollow
     this.coverMat = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
     // The outside of the spine: a colour, or imported artwork (see setSpine). Its two narrow
     // sides are the covers wrapping onto it: each shows its cover's colour at the spine edge.

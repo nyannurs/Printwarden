@@ -82,7 +82,10 @@ export function makeExtras(scene) {
     // joints, from the corners to the boards, in each cover's colour at its spine edge (the
     // artwork's edge columns stretched across them, to 0.17.84, drew its lettering as
     // streaks up the boards).
-    extras.caseSpine = new THREE.Mesh(new THREE.BufferGeometry(), [scene.spineMat, scene.liningMat, scene.spineMat, scene.frontWrapMat, scene.backWrapMat]);
+    // Inside: the endpaper across the joints, kraft lining across the spine panel (the
+    // hollow's tunnel is dark, as a real one; lit in endpaper white, to 0.17.85, the far
+    // headband showed through it and the near one looked afloat).
+    extras.caseSpine = new THREE.Mesh(new THREE.BufferGeometry(), [scene.spineMat, scene.liningMat, scene.spineMat, scene.frontWrapMat, scene.backWrapMat, scene.kraftMat]);
     extras.caseSpine.castShadow = extras.caseSpine.receiveShadow = true;
     extras.caseSpine.frustumCulled = false;
     group.add(extras.caseSpine);
@@ -260,12 +263,17 @@ export function layoutExtras(scene) {
   if (ex.signatureFolds) writeSignatureFolds(ex.signatureFolds.geometry, scene.leaves, m, out);
   if (ex.slab) {
     // Flush against the leaves' roots (any gap shows the slab's inner face as a light
-    // line), or against a sewn block's folds.
-    const mid = P.clone().add(Q).multiplyScalar(0.5).addScaledVector(out, tc / 2 + m.foldDepth);
+    // line). A sewn block's signatures fold a fold's depth past the roots: the slab takes
+    // them in, as deep as the folds and the cover together, its outside where it was. (A
+    // slab a cover's thickness deep standing behind the folds, to 0.17.85, left a slit the
+    // fold's depth wide between the cover's root and the spine, the white folds in it: "the
+    // white line where the cover meets the spine", 0.6 to 1.7 mm wide.)
+    const deep = tc + m.foldDepth;
+    const mid = P.clone().add(Q).multiplyScalar(0.5).addScaledVector(out, deep / 2);
     const along = Q.clone().sub(P);
     ex.slab.position.set(mid.x, mid.y, 0);
     ex.slab.rotation.z = Math.atan2(along.y, along.x);
-    ex.slab.scale.set(along.length() + tc, tc, m.height);
+    ex.slab.scale.set(along.length() + tc, deep, m.height);
   }
   if (ex.fold) {
     const { outerApex, innerApex } = writeFoldGeometry(ex.fold.geometry, scene.leaves, m);
@@ -841,7 +849,8 @@ function writeSignatureFolds(geo, leaves, book, out) {
  * mapped across the flat spine (u from the front cover's side, v from the head); the
  * the joints take the covers' spine-edge colours. pa, pb: the boards; pl, ph: the block's
  * first and last sheets (their roots are the block's spine). Material groups: 0 outside, 1
- * inside, 2 the cut edges at head and foot, 3 the front joint's outside, 4 the back's.
+ * inside (the joints), 2 the cut edges at head and foot, 3 the front joint's outside, 4
+ * the back's, 5 the spine panel's inside (kraft lining).
  */
 function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const tb = book.thickness[0];
@@ -953,7 +962,7 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const pos = [];
   const nor = [];
   const uv = [];
-  const groups = [[], [], [], [], []];
+  const groups = [[], [], [], [], [], []];
   // `group`: the material group, or a function of the segment (the outside: joints apart).
   const strip = (group, rowA, rowB, normal, uvs) => {
     const base = pos.length / 3;
@@ -974,6 +983,8 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   };
   const JOINT_SEGS = 10; // each joint run is 11 points (see joint)
   const outsideGroup = (j) => (j < JOINT_SEGS ? 3 : j >= SEGS - JOINT_SEGS ? 4 : 0);
+  // The inside: kraft across the panel and round its corners, endpaper across the joints.
+  const insideGroup = (j) => (j >= panelFrom - 7 && j < panelTo + 7 ? 5 : 1);
   const outer = [];
   const inner = [];
   const nOut = [];
@@ -1003,7 +1014,7 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const uAt = (j) => Math.min(1, Math.max(0, (len[j] - u0) / ((u1 - u0) || 1)));
   const uvOut = len.map((_, j) => [[uAt(j), vHead], [uAt(j), vFoot]]);
   strip(outsideGroup, at(outer, -h2), at(outer, h2), nOut, uvOut);
-  strip(1, at(inner, h2), at(inner, -h2), nIn);
+  strip(insideGroup, at(inner, h2), at(inner, -h2), nIn);
   strip(2, at(inner, -h2), at(outer, -h2), outer.map(() => [0, 0, -1]));
   strip(2, at(outer, h2), at(inner, h2), outer.map(() => [0, 0, 1]));
   commitGeometry(geo, { position: [pos, 3], normal: [nor, 3], uv: [uv, 2] }, groups);

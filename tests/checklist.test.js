@@ -160,3 +160,33 @@ test("one book through every binding, deep in it: no error, the opening kept, th
     box.remove();
   }
 });
+
+test("sewn and glued: the spine block reaches the covers' roots (no slit over the folds); a case's spine is lined with kraft across its panel", () => {
+  const { scene, box } = makeScene();
+  try {
+    scene.setBook({ pageCount: 36, pageSize: { width: 148, height: 210 }, binding: "sewn", signaturePages: 16, paper });
+    scene.goTo(0, { animate: false });
+    scene.debugStep();
+    const m = scene.model;
+    ok(m.foldDepth > 0.3, `the signatures fold ${m.foldDepth.toFixed(2)} mm past the roots`);
+    near(scene.extras.slab.scale.y, m.coverThickness + m.foldDepth, 1e-6, "the slab takes the folds in, as deep as folds and cover together");
+    // Its inner face at the roots: across the spine (the slab's own y), its centre is half
+    // its depth from the first leaf's root.
+    const root = scene.leaves[0].profile;
+    const th = scene.extras.slab.rotation.z;
+    const d = Math.abs(-(scene.extras.slab.position.x - root.x[0]) * Math.sin(th) + (scene.extras.slab.position.y - root.y[0]) * Math.cos(th));
+    ok(Math.abs(d - scene.extras.slab.scale.y / 2) < 0.05, `the slab's centre ${d.toFixed(2)} mm behind the cover's root, half its depth ${(scene.extras.slab.scale.y / 2).toFixed(2)}`);
+    // Its narrow sides in the spine's tone, not the cover's.
+    eq(scene.extras.slab.material[1], scene.spineSideFrontMat);
+    scene.setBook({ pageCount: 36, pageSize: { width: 148, height: 210 }, binding: "perfect", paper });
+    scene.debugStep();
+    near(scene.extras.slab.scale.y, scene.model.coverThickness, 1e-6, "a glued block has no folds: the cover's thickness");
+    scene.setBook({ pageCount: 36, pageSize: { width: 148, height: 210 }, binding: "hardcover", signaturePages: 16, paper, boardMm: 2.5, roundSpine: true, endpapers: true });
+    scene.debugStep();
+    const groups = new Set(scene.extras.caseSpine.geometry.groups.map((g) => g.materialIndex));
+    ok(groups.has(5) && groups.has(3) && groups.has(4), `the case spine's groups: ${[...groups].join(", ")}`);
+    eq(scene.extras.caseSpine.material[5], scene.kraftMat);
+  } finally {
+    box.remove();
+  }
+});
