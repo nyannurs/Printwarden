@@ -284,9 +284,11 @@ export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 
  * ring, parallel by construction).
  *
  * @param {ReturnType<typeof makeBook>} book
- * @param {{theta: number, curl: number, s: Float32Array, profile: Profile, group?: string | null}[]} leaves
+ * @param {{theta: number, curl: number, s: Float32Array, profile: Profile, group?: string | null,
+ *          start?: number | null, from?: number, to?: number}[]} leaves
  *   by index; `group`: leaves turning together (one motion, e.g. a pile swung over to close
- *   the book) share it, and are laid out as one stack
+ *   the book) share it, and are laid out as one stack; `start`, `from`, `to`: a turning
+ *   leaf's (coil books: how far it is in the air)
  * @param {{closed: number, side: 1 | -1, opening: number}} state
  * @param {{cache?: any, only?: Set<number>, turning?: Set<number>}} [options] `cache`: an
  *   object kept for one frame, so the rows of a corner-led turn (several layouts of the same
@@ -304,12 +306,20 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
     // rest hold (weighted fit). Pages in the air also fan out a little at the fore-edge
     // (FAN degrees each): pages bent alike from a ring are shifted copies, not offsets, and
     // where they bend the paper's thickness between them would shrink below what's drawn.
+    // How much in the air each leaf is: 0 on its pile, 1 once it is AIR_DEG from both where it
+    // left and where it lands, between those smoothly. A leaf yields to the order and fans out
+    // as much as it is in the air. (Until 0.17.82 a leaf counted as in the air until the frame
+    // it landed, then at once held fast with no fan: 40 pages swung over to close the book
+    // landed together and the cover jumped 6 mm in that frame.)
     const FAN = 0.3;
-    const still = leaves.map((l) => !l.curl);
-    const theta = isotonic(leaves.map((l) => l.theta), still);
+    const AIR_DEG = 9;
+    const air = leaves.map((l) => (l.start == null || l.from == null || l.to == null ? (l.curl ? 1 : 0)
+      : Math.min(1, Math.min(Math.abs(l.theta - l.from), Math.abs(l.theta - l.to)) / AIR_DEG)));
+    const weight = air.map((a) => 1e6 ** (1 - a)); // held fast on a pile, yielding in the air
+    const theta = isotonic(leaves.map((l) => l.theta), weight);
     const fan = [0];
-    for (let i = 1; i < leaves.length; i++) fan.push(fan[i - 1] + (still[i] || still[i - 1] ? 0 : FAN));
-    const tip = isotonic(leaves.map((l, i) => l.theta + l.curl - fan[i]), still).map((v, i) => v + fan[i]);
+    for (let i = 1; i < leaves.length; i++) fan.push(fan[i - 1] + FAN * Math.min(air[i], air[i - 1]));
+    const tip = isotonic(leaves.map((l, i) => l.theta + l.curl - fan[i]), weight).map((v, i) => v + fan[i]);
     // Where the block divides (how much paper lies left of the ring, which places every page on
     // it): from the leaves as they lie now, each counting as it crosses over, not from the
     // opening asked for. (From that, pressing Close jumped it to every page lying right while
@@ -496,7 +506,14 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
   // less far over than the one after it, by a hair (ORDER_GAP); one that would fall behind
   // is carried along with it, as a page pushes the next (pool adjacent violators, the
   // standard least-squares fit of an ordered sequence), within the piles at either end.
+  // The hair only between leaves moving on their own, and fading out as either comes within
+  // AIR of a pile: leaves turning together are one stack (below), kept apart by their paper,
+  // and on a pile the piles' own offsets keep them apart. (Until 0.17.82 a hair between every
+  // two: 35 leaves swung over to close the book held their top one 35 hairs, about 9 degrees,
+  // short of its pile, and it fell the rest in the frame they landed, 16 mm at the
+  // fore-edge; opening, the same jump the other way in the first frame.)
   const ORDER_GAP = 0.0015;
+  const AIR = 0.05;
   const info = [];
   for (let i = lo; i <= hi; i++) {
     const l = leaves[i];
@@ -542,6 +559,16 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
   if (info.every((q) => q.still || q.f.length === K)) {
     const sums = new Float64Array(info.length); // the blocks being pooled (no objects per point)
     const counts = new Int32Array(info.length);
+    const offsets = new Float64Array(info.length);
+    // The hair between each leaf and the next (see ORDER_GAP).
+    const air = (q) => Math.min(1, Math.max(0, Math.min(q.e, 1 - q.e)) / AIR);
+    const gapAfter = info.map((q, r) => {
+      const next = info[r + 1];
+      if (!next || q.still || next.still) return 0;
+      const g = leaves[q.i].group;
+      if (g && g === leaves[next.i].group) return 0;
+      return ORDER_GAP * Math.min(air(q), air(next));
+    });
     for (let k = 0; k < K; k++) {
       let m = 0;
       while (m < info.length) {
@@ -555,10 +582,12 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
         // (the table or a board is under each pile's bottom sheet).
         const upper = m > 0 ? bound(info[m - 1], k, -ORDER_GAP) : boardBound(0, lo, k, -ORDER_GAP, Math.max) ?? 1;
         const lower = end < info.length ? bound(info[end], k, ORDER_GAP) : boardBound(n - 1, hi, k, ORDER_GAP, Math.min) ?? 0;
-        // Non-increasing with the gap: g = f + rank × gap must not increase.
+        // Non-increasing with the gaps: g = f + (the gaps before it) must not increase.
+        offsets[m] = 0;
+        for (let r = m + 1; r < end; r++) offsets[r] = offsets[r - 1] + gapAfter[r - 1];
         let blocks = 0;
         for (let r = m; r < end; r++) {
-          sums[blocks] = info[r].f[k] + (r - m) * ORDER_GAP;
+          sums[blocks] = info[r].f[k] + offsets[r];
           counts[blocks++] = 1;
           while (blocks > 1 && sums[blocks - 2] / counts[blocks - 2] < sums[blocks - 1] / counts[blocks - 1]) {
             blocks--;
@@ -569,7 +598,7 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
         let r = m;
         for (let b = 0; b < blocks; b++) {
           for (let q = 0; q < counts[b]; q++, r++) {
-            const v = sums[b] / counts[b] - (r - m) * ORDER_GAP;
+            const v = sums[b] / counts[b] - offsets[r];
             info[r].f[k] = Math.min(upper, Math.max(lower, v));
           }
         }
@@ -833,12 +862,12 @@ function integrate(sv, ang, x0, y0, out = null) {
 
 /**
  * The closest non-decreasing sequence to `values` (least squares; pool adjacent
- * violators). Entries marked `fixed` weigh a million times more: they hold.
+ * violators), each entry by its weight: one weighing a million times more holds.
  */
-function isotonic(values, fixed) {
+function isotonic(values, weights) {
   const blocks = [];
   for (const [i, v] of values.entries()) {
-    const w = fixed[i] ? 1e6 : 1;
+    const w = weights[i];
     blocks.push({ sum: v * w, weight: w, count: 1 });
     while (blocks.length > 1) {
       const a = blocks[blocks.length - 2];

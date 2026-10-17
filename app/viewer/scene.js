@@ -740,18 +740,30 @@ export class BookScene {
   }
 
   /**
-   * No page lifts before the one lying on it: of the leaves sent the same way and still on
-   * their pile, each starts no earlier than the one above it (going left, the right pile's
-   * top is the lowest leaf; going right, the left pile's top is the highest).
+   * No page lifts before the one lying on it, nor lands before the one it comes down on: of
+   * the leaves sent the same way and still on their pile, each starts no earlier than the one
+   * above it (going left, the right pile's top is the lowest leaf; going right, the left
+   * pile's top is the highest), and lands no earlier than it. Started no earlier and landing
+   * no earlier, on the same easing, a leaf is never further over than the one before it at
+   * any moment, so the layout (which keeps them in order, see layoutBook) never has to hold
+   * one back. Until 0.17.82 a quick second click sent its page at the fast pace (half the
+   * time) after one going at the normal pace: it caught up, was held on the first, and when
+   * its own time ran out, a quarter second early, it was laid on its pile and the first page,
+   * still in the air above, with it: both snapped down from mid-air (115 mm in one frame).
    */
   #inOrder() {
     for (const dir of [-1, 1]) {
       const order = dir < 0 ? this.leaves : [...this.leaves].reverse();
       let earliest = -Infinity;
+      let lands = -Infinity;
       for (const l of order) {
         if (l.start == null || Math.sign(l.to - l.from) !== dir) continue;
-        if (l.theta === l.from && l.start < earliest) l.start = earliest;
+        if (l.theta === l.from) {
+          if (l.start < earliest) l.start = earliest;
+          if (l.start + l.duration < lands) l.duration = lands - l.start;
+        }
         earliest = Math.max(earliest, l.start);
+        lands = Math.max(lands, l.start + l.duration);
       }
     }
   }
