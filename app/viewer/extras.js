@@ -25,10 +25,12 @@ export function makeExtras(scene) {
     // Its ends at head and foot are the cover's cut edge, in the same shade as the leaves'
     // edges; its face toward the pages shows only in the slit between a cover's root and the
     // signatures' folds (a sewn block's slab stands a fold's depth behind the roots), as the
-    // cover's wrap does there: the cover's colour. (The cover stock's white on both, 0.17.83,
-    // drew a bright line along the spine's corner where the cover met it.)
+    // cover's wrap does there: the cover's colour. Its narrow sides, the spine's corners
+    // where the cover folds round onto the spine, carry the spine's own tone (see
+    // spineSideFrontMat): in the cover's edge colour (to 0.17.84) a white cover on a black
+    // spine drew a white line along the corner, the cover stock's white before that.
     extras.slab = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
-      [scene.backWrapMat, scene.frontWrapMat, scene.frontWrapMat, scene.spineMat, scene.coverEdgeMat, scene.coverEdgeMat]);
+      [scene.spineSideBackMat, scene.spineSideFrontMat, scene.frontWrapMat, scene.spineMat, scene.coverEdgeMat, scene.coverEdgeMat]);
     extras.slab.castShadow = extras.slab.receiveShadow = true;
     group.add(extras.slab);
     if (scene.model.binding === "sewn") {
@@ -76,7 +78,11 @@ export function makeExtras(scene) {
     // back (outside: the spine artwork or colour), and the headbands at head and foot of
     // the block's spine.
     // Inside: the endpaper across the joints (paper; see liningMat).
-    extras.caseSpine = new THREE.Mesh(new THREE.BufferGeometry(), [scene.spineMat, scene.liningMat, scene.spineMat]);
+    // Outside: the spine artwork or colour across the spine and round its corners; the
+    // joints, from the corners to the boards, in each cover's colour at its spine edge (the
+    // artwork's edge columns stretched across them, to 0.17.84, drew its lettering as
+    // streaks up the boards).
+    extras.caseSpine = new THREE.Mesh(new THREE.BufferGeometry(), [scene.spineMat, scene.liningMat, scene.spineMat, scene.frontWrapMat, scene.backWrapMat]);
     extras.caseSpine.castShadow = extras.caseSpine.receiveShadow = true;
     extras.caseSpine.frustumCulled = false;
     group.add(extras.caseSpine);
@@ -833,9 +839,9 @@ function writeSignatureFolds(geo, leaves, book, out) {
  * spine board (as wide as the block and both boards), round the other corner, and across
  * the other joint to the back board. As thick as the boards. Outside: the spine artwork,
  * mapped across the flat spine (u from the front cover's side, v from the head); the
- * joints repeat its edges. pa, pb: the boards; pl, ph: the block's first and last sheets
- * (their roots are the block's spine). Material groups: 0 outside, 1 inside, 2 the cut
- * edges at head and foot.
+ * the joints take the covers' spine-edge colours. pa, pb: the boards; pl, ph: the block's
+ * first and last sheets (their roots are the block's spine). Material groups: 0 outside, 1
+ * inside, 2 the cut edges at head and foot, 3 the front joint's outside, 4 the back's.
  */
 function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const tb = book.thickness[0];
@@ -947,7 +953,8 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const pos = [];
   const nor = [];
   const uv = [];
-  const groups = [[], [], []];
+  const groups = [[], [], [], [], []];
+  // `group`: the material group, or a function of the segment (the outside: joints apart).
   const strip = (group, rowA, rowB, normal, uvs) => {
     const base = pos.length / 3;
     for (let j = 0; j <= SEGS; j++) {
@@ -962,9 +969,11 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
     const flip = cr[0] * normal[0][0] + cr[1] * normal[0][1] + cr[2] * normal[0][2] < 0;
     for (let j = 0; j < SEGS; j++) {
       const v = base + 2 * j;
-      groups[group].push(...(flip ? [v, v + 2, v + 1, v + 2, v + 3, v + 1] : [v, v + 1, v + 2, v + 2, v + 1, v + 3]));
+      groups[typeof group === "function" ? group(j) : group].push(...(flip ? [v, v + 2, v + 1, v + 2, v + 3, v + 1] : [v, v + 1, v + 2, v + 2, v + 1, v + 3]));
     }
   };
+  const JOINT_SEGS = 10; // each joint run is 11 points (see joint)
+  const outsideGroup = (j) => (j < JOINT_SEGS ? 3 : j >= SEGS - JOINT_SEGS ? 4 : 0);
   const outer = [];
   const inner = [];
   const nOut = [];
@@ -993,7 +1002,7 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const u1 = len[panelTo] + (R + tc / 2) * 0.5;
   const uAt = (j) => Math.min(1, Math.max(0, (len[j] - u0) / ((u1 - u0) || 1)));
   const uvOut = len.map((_, j) => [[uAt(j), vHead], [uAt(j), vFoot]]);
-  strip(0, at(outer, -h2), at(outer, h2), nOut, uvOut);
+  strip(outsideGroup, at(outer, -h2), at(outer, h2), nOut, uvOut);
   strip(1, at(inner, h2), at(inner, -h2), nIn);
   strip(2, at(inner, -h2), at(outer, -h2), outer.map(() => [0, 0, -1]));
   strip(2, at(outer, h2), at(inner, h2), outer.map(() => [0, 0, 1]));

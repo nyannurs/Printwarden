@@ -137,8 +137,12 @@ function outputIntentOf(doc) {
       const profile = decodePDFRawStream(stream).decode();
       const info = iccInfo(profile);
       if (info?.colorSpace !== "CMYK") continue;
-      const id = intent.lookup(PDFName.of("OutputConditionIdentifier"));
-      const name = info.name || id?.decodeText?.() || "Output intent";
+      // Named as the PDF names the condition (/Info, what InDesign writes: "Coated FOGRA39
+      // (ISO 12647-2:2004)"), else by the profile's own description, else the identifier.
+      // (The profile's description first, to 0.17.84: pdf.js's compact CGATS profile calls
+      // itself "uCMY".)
+      const text = (key) => intent.lookup(PDFName.of(key))?.decodeText?.()?.trim();
+      const name = text("Info") || info.name || text("OutputConditionIdentifier") || "Output intent";
       return { name, profile };
     }
   } catch {

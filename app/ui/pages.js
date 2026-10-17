@@ -30,7 +30,7 @@ function textureKey(folio) {
   if (!g) return "blank";
   const src = state.analysis.book.pages[folio - 1].source;
   const rect = [g.trim.x0, g.trim.y0, g.trim.x1, g.trim.y1].map((v) => v.toFixed(2));
-  return `${state.colour.choice}|${src.index}|${rect}`;
+  return `${state.colour.choice}|${state.colour.overprint === false ? "op-off" : "op"}|${src.index}|${rect}`;
 }
 
 // Text drawn on the 3D page from its outlines, exact at any zoom (see viewer/vectortext.js):

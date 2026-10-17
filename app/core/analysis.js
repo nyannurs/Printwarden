@@ -150,7 +150,10 @@ export function analyse(doc, partial = {}) {
       // The cover file's four pages round the block: C1, C2 … 1, 2, … C3, C4. The block's
       // own numbering stays (its first page is 1 whether labelled or not).
       const inner = book;
-      const cut = coverPages(doc.cover, page, setup, inner.pages.length + 4);
+      // The spine is calculated for every leaf the block will have: the cover's four pages
+      // and, in a case binding, the four endpaper pages added below (the Book spine panel
+      // counts the same; counted without them, 0.17.84 said 7.7 mm where the panel said 8).
+      const cut = coverPages(doc.cover, page, setup, inner.pages.length + 4 + (input.binding === Binding.HARDCOVER ? 4 : 0));
       const [c1, c2, c3, c4] = cut.pages;
       /** @type {import("./book.js").BookPage[]} */
       const pages = [c1, c2, ...inner.pages.map((p) => p.source), c3, c4].map((source, i) => ({ number: i + 1, source, half: "full", label: null }));

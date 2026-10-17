@@ -219,6 +219,12 @@ export class BookScene {
     this.spineMat = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
     this.frontWrapMat = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
     this.backWrapMat = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
+    // A glued or sewn spine block's narrow sides, where the cover folds round the spine's
+    // corner: the spine's own tone there (its colour, or its artwork's colour along that
+    // edge), as the fold carries the spine's printing round the corner. (The cover's edge
+    // colour until 0.17.84: a white cover on a black spine drew a white line along the corner.)
+    this.spineSideFrontMat = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
+    this.spineSideBackMat = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
     // The same for the sheets' own edges, built on the GPU (the others are used elsewhere
     // too), kept alike by #syncSheetEdges; and the sheets' shape for their shadows.
     this.sheetEdges = new Map([this.edgeMat, this.coverEdgeMat, this.frontWrapMat, this.backWrapMat].map((base) => {
@@ -582,6 +588,9 @@ export class BookScene {
     this.backWrapMat.color.set(backEdge);
     this.#syncSheetEdges();
     const old = this.spineMat.map;
+    const [frontTone, backTone] = artwork ? edgeTones(artwork) : [color, color];
+    this.spineSideFrontMat.color.set(frontTone);
+    this.spineSideBackMat.color.set(backTone);
     if (artwork) {
       // The same artwork as shown (spineFace draws it once per artwork and turn): kept on the GPU.
       if (old?.image !== artwork) {
@@ -1626,3 +1635,15 @@ function isAppleMetal(renderer) {
   return /Apple/.test(name) && /Metal/.test(name);
 }
 
+/**
+ * The mean colour of an artwork's first and last columns (u 0: the front cover's side of a
+ * spine, u 1: the back's), as CSS colours: the spine's tone where it folds round each corner.
+ */
+function edgeTones(artwork) {
+  const c = new OffscreenCanvas(2, 1);
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(artwork, 0, 0, 1, artwork.height, 0, 0, 1, 1);
+  ctx.drawImage(artwork, artwork.width - 1, 0, 1, artwork.height, 1, 0, 1, 1);
+  const d = ctx.getImageData(0, 0, 2, 1).data;
+  return [0, 4].map((k) => `rgb(${d[k]}, ${d[k + 1]}, ${d[k + 2]})`);
+}

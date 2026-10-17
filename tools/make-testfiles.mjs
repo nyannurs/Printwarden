@@ -114,7 +114,7 @@ async function fontsOf(doc) {
 }
 
 async function booklet(pages, name) {
-  const doc = await PDFDocument.create();
+  const doc = await newDoc();
   const fonts = await fontsOf(doc);
   for (let n = 1; n <= pages; n++) {
     const label = n === 1 ? "Front cover (page 1)" : n === pages ? `Back cover (page ${pages})` : null;
@@ -127,7 +127,7 @@ async function booklet(pages, name) {
 }
 
 async function book36() {
-  const doc = await PDFDocument.create();
+  const doc = await newDoc();
   const fonts = await fontsOf(doc);
   const n = 36;
   for (let p = 1; p <= n; p++) {
@@ -152,7 +152,7 @@ async function book36() {
  * beyond), page 2 the inside the same way (or none).
  */
 async function coverFile({ spineMm, flapMm = 0, inside = true, height = H, name, note }) {
-  const doc = await PDFDocument.create();
+  const doc = await newDoc();
   const fonts = await fontsOf(doc);
   const width = 2 * W + spineMm + 2 * flapMm;
   const make = (outside) => {
@@ -193,7 +193,7 @@ async function coverFile({ spineMm, flapMm = 0, inside = true, height = H, name,
 
 /** Spine artwork on its own: the spine's size, an arrow to the head, text reading down. */
 async function spineArt(widthMm, heightMm, name) {
-  const doc = await PDFDocument.create();
+  const doc = await newDoc();
   const fonts = await fontsOf(doc);
   const page = addPage(doc, { width: widthMm, height: heightMm, bleed: 0 });
   box(page, 0, 0, widthMm, heightMm, cmyk(0.8, 0.5, 0, 0.2), { bleed: 0 });
@@ -204,7 +204,7 @@ async function spineArt(widthMm, heightMm, name) {
 
 /** A spot finish: shapes on white, one page for C1 and one for C4 of a book. */
 async function finishCovers() {
-  const doc = await PDFDocument.create();
+  const doc = await newDoc();
   const fonts = await fontsOf(doc);
   for (const which of ["FRONT", "BACK"]) {
     const page = addPage(doc);
@@ -215,9 +215,20 @@ async function finishCovers() {
   return doc.save();
 }
 
+/** A new document with fixed dates: made again, a file is the same bytes (git sees only real changes). */
+async function newDoc() {
+  const doc = await PDFDocument.create();
+  const fixed = new Date("2026-10-17T00:00:00Z");
+  doc.setCreationDate(fixed);
+  doc.setModificationDate(fixed);
+  doc.setProducer("Printwarden test files");
+  doc.setCreator("tools/make-testfiles.mjs");
+  return doc;
+}
+
 /** Overprint: the same objects knocking out (left) and overprinting (right) on a cyan panel. */
 async function overprint() {
-  const doc = await PDFDocument.create();
+  const doc = await newDoc();
   const fonts = await fontsOf(doc);
   const page = addPage(doc);
   const gs = doc.context.register(doc.context.obj({ Type: "ExtGState", OP: true, op: true, OPM: 1 }));
@@ -255,7 +266,7 @@ async function overprint() {
 
 /** Plain CMYK patches (change with the profile), RGB patches (don't), a plain CMYK image. */
 async function colourProfiles({ intent }) {
-  const doc = await PDFDocument.create();
+  const doc = await newDoc();
   const fonts = await fontsOf(doc);
   const patches = [["C", cmyk(1, 0, 0, 0)], ["M", cmyk(0, 1, 0, 0)], ["Y", cmyk(0, 0, 1, 0)], ["K", cmyk(0, 0, 0, 1)],
     ["C+M", cmyk(1, 1, 0, 0)], ["C+Y", cmyk(1, 0, 1, 0)], ["M+Y", cmyk(0, 1, 1, 0)], ["C+M+Y", cmyk(1, 1, 1, 0)],
@@ -322,7 +333,8 @@ async function main() {
   // cover files' spines are for 40 pages; the spine artwork alone goes on the 36-page book.
   const spineArtMm = Math.round(calculatedSpine(36, paper, "perfect").widthMm * 100) / 100;
   const spinePerfect = Math.round(calculatedSpine(40, paper, "perfect").widthMm * 100) / 100;
-  const spineHardcover = Math.round(calculatedSpine(40, paper, "hardcover", BOARD_MM).widthMm * 100) / 100;
+  // A hardcover adds four endpaper pages (E1 to E4) to the 40: 44, of which the cover's four are the boards.
+  const spineHardcover = Math.round(calculatedSpine(44, paper, "hardcover", BOARD_MM).widthMm * 100) / 100;
   const files = {
     "booklet-16.pdf": () => booklet(16, "booklet-16"),
     "booklet-44.pdf": () => booklet(44, "booklet-44"),
