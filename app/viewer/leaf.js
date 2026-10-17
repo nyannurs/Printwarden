@@ -395,6 +395,21 @@ export function freeFlap(scene, mesh) {
 }
 
 /** A sheet face's depth alone (see makeLeaf); `holes`: a coil's, punched as on the page. */
+/**
+ * The faces between the sheets of a stack swung over together: paper colour, unlit, no
+ * image (see layoutLeaves). They can't be seen, so they aren't shaded as pages (that cost
+ * most of a frame on a thick book standing up); they are drawn at all because the edge
+ * faces in front of them drop pixels on some GPUs (the author's Mac, ANGLE over Metal,
+ * no multisampling: a flying stack's edges were dashes of background), and a face behind
+ * fills what an edge drops.
+ */
+export function fillerMaterial(scene) {
+  const m = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  m.onBeforeCompile = (shader) => sheetShader(shader, scene.shared);
+  m.customProgramCacheKey = () => "bookview-sheet-filler";
+  return m;
+}
+
 export function firstMaterial(scene, isFront, holes = false) {
   const m = new THREE.MeshDepthMaterial({ colorWrite: false, map: holes ? scene.white : null });
   m.onBeforeCompile = (shader) => {

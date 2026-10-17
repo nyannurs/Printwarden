@@ -158,10 +158,16 @@ test("turning: a stack swung over together is drawn at its full thickness (no ga
     const moving = scene.leaves.filter((l) => l.start != null);
     eq(moving.length, 10);
     ok(moving.every((l) => l.fill === STACK_FILL), "every sheet of the stack at its full thickness and a hair over");
+    // The faces between its sheets are plain paper (sheetFiller), the stack's outer two its pages.
+    const inner = moving.slice(1, -1);
+    ok(inner.every((l) => l.mesh.material[0] === scene.sheetFiller && l.mesh.material[1] === scene.sheetFiller), "faces between the sheets: filler");
+    ok(moving[0].mesh.material[0] === moving[0].front && moving[0].mesh.material[1] === scene.sheetFiller, "the first sheet: its front a page, its back filler");
+    ok(moving[9].mesh.material[1] === moving[9].back && moving[9].mesh.material[0] === scene.sheetFiller, "the last sheet: its back a page, its front filler");
     ok(scene.leaves.filter((l) => l.start == null).every((l) => l.fill < 1), "the rest thinned");
     scene.clock = 32000;
     scene.debugStep();
     ok(scene.leaves.every((l) => l.start == null && l.fill < 1), "landed: thinned again");
+    ok(scene.leaves.every((l) => l.mesh.material[0] === l.front && l.mesh.material[1] === l.back), "landed: every face a page again");
     // One page turning alone: thinned (it has neighbours' faces under and over it).
     settleAt(scene, 10);
     scene.clock = 40000;

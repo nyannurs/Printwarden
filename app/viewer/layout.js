@@ -126,7 +126,7 @@ export function layoutLeaves(scene) {
   if (rows === 1) for (const leaf of scene.leaves) leaf.bows.fill(leaf.bows[MID]);
   // In a stack turning together, a sheet's face against the next sheet of it can't be seen
   // (they are offset copies, see layoutBook): only the stack's outer faces and every
-  // sheet's edges are drawn. (Seen nearly edge-on, a curved stack is seen from both sides
+  // sheet's edges are shaded as pages; the faces between are plain paper (below). (Seen nearly edge-on, a curved stack is seen from both sides
   // at once, and no order of drawing spares the GPU shading every sheet: 45 ms a frame
   // for half a 240-page book standing up.) Not a coil book's (its pages fan out in the air)
   // nor against a hardcover's board (it overhangs the pages).
@@ -136,8 +136,14 @@ export function layoutLeaves(scene) {
   // a stack's sheets, `app.scene.debugStackFill = 0.9` packs them as a pile at rest is.
   const against = (leaf, j) => !scene.debugInnerFaces && !coil && leaf.group != null && !leaf.board && scene.leaves[j]?.group === leaf.group && !scene.leaves[j].board;
   for (const leaf of scene.leaves) {
-    leaf.front.visible = leaf.first.material[0].visible = !against(leaf, leaf.i - 1); // the front lies on the leaf before
-    leaf.back.visible = leaf.first.material[1].visible = !against(leaf, leaf.i + 1);
+    // A face against the next sheet is drawn as plain paper (sheetFiller: unlit, no image,
+    // see fillerMaterial), not shaded as a page, and left out of the depth pass.
+    const frontHidden = against(leaf, leaf.i - 1); // the front lies on the leaf before
+    const backHidden = against(leaf, leaf.i + 1);
+    leaf.mesh.material[0] = frontHidden ? scene.sheetFiller : leaf.front;
+    leaf.mesh.material[1] = backHidden ? scene.sheetFiller : leaf.back;
+    leaf.first.material[0].visible = !frontHidden;
+    leaf.first.material[1].visible = !backHidden;
   }
   // Only sheets whose shape changed go to the GPU: while one page turns, the rest hold still.
   // Sheets are drawn a little thinner than they are (LEAF_FILL), so neighbours never share a

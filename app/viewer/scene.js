@@ -17,7 +17,7 @@ import { drawOrder, shadows } from "./draw.js";
 import { layoutGround, makeExtras } from "./extras.js";
 import { bindInput, glideZoom } from "./input.js";
 import { layoutLeaves } from "./layout.js";
-import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, pageHit } from "./leaf.js";
+import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, pageHit, fillerMaterial } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
 import { motionReset, motionState, motionStep } from "./motion.js";
 import { MAX_DETAIL, sheetShader } from "./shaders.js";
@@ -240,6 +240,7 @@ export class BookScene {
     this.noDraw = new THREE.MeshBasicMaterial({ visible: false });
     this.depthPass = isAppleMetal(r); // the sheets' depth drawn first (see makeLeaf)
     this.holesFirst = [firstMaterial(this, true, true), firstMaterial(this, false, true)]; // a coil's (see makeLeaf)
+    this.sheetFiller = fillerMaterial(this); // the faces between a flying stack's sheets (see layoutLeaves)
     // Cotton headbands: the bead and its cloth tail (a single sheet: seen from either side).
     this.headbandMat = new THREE.MeshStandardMaterial({ color: 0xece4d2, roughness: 0.85, side: THREE.DoubleSide });
     // A hardcover's case spine inside: what shows of it is the joint, which the endpaper
@@ -425,6 +426,7 @@ export class BookScene {
       apply(leaf.back, flyleaf || (inside && leaf.i === 0) ? endpaper : stock);
     }
     this.edgeMat.color.set(this.paper.color).multiplyScalar(0.9);
+    this.sheetFiller.color.set(this.paper.color);
     this.coverEdgeMat.color.set(this.paper.cover.color).multiplyScalar(0.9);
     this.coverMat.color.set(this.paper.cover.color).multiplyScalar(0.96); // the spine's cut ends
     this.liningMat.color.set(endpaper.color).multiplyScalar(0.95); // the endpaper across a hardcover's joint, in its shade
