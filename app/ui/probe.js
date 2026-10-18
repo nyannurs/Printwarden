@@ -209,7 +209,7 @@ export async function runProbe(scene, onProgress) {
  */
 async function byHand(scene, onProgress, frame, median, gpuNow) {
   const SECONDS_BY_HAND = 4;
-  onProgress?.("now pan the book by hand (space and drag) for 4 seconds");
+  onProgress?.("now move the book by hand (drag it about) for 4 seconds");
   let moves = 0;
   let pressed = false;
   const onMove = (e) => {
@@ -220,7 +220,7 @@ async function byHand(scene, onProgress, frame, median, gpuNow) {
   try {
     const wait = performance.now();
     while (!pressed) {
-      if (performance.now() - wait > 15000) return "Panning by hand: no drag within 15 seconds (skipped)";
+      if (performance.now() - wait > 15000) return "By hand: no drag within 15 seconds (skipped)";
       await frame();
     }
     moves = 0;
@@ -240,7 +240,7 @@ async function byHand(scene, onProgress, frame, median, gpuNow) {
     const seconds = (performance.now() - t0) / 1000;
     const drawn = scene.frameLog.n - n0;
     const parts = [
-      `Panning by hand: mouse ${Math.round(moves / seconds)} moves/s`,
+      `By hand: pointer ${Math.round(moves / seconds)} moves/s`,
       `frames drawn ${Math.round(drawn / seconds)}/s`,
       gpu.length ? `gpu ${median(gpu).toFixed(1)} ms` : null,
       `drawn at ${Math.round(median(scales) * 100)} %`,

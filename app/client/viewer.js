@@ -6,6 +6,7 @@
 
 import { BookScene } from "../viewer/scene.js";
 import { CAMERA_PRESETS } from "../viewer/camera.js";
+import { runProbe } from "../ui/probe.js";
 
 /**
  * @typedef {{
@@ -34,7 +35,7 @@ export async function start(data, root) {
   root.innerHTML = "";
   const view = el("div", "view");
   const bar = el("div", "bar");
-  const title = el("div", "pill label", data.title);
+  const title = el("div", "pill label title", data.title);
   const readout = el("div", "pill label", "");
   const prev = el("button", "pill", "Previous");
   const next = el("button", "pill", "Next");
@@ -42,9 +43,12 @@ export async function start(data, root) {
   const camera = document.createElement("select");
   camera.className = "pill";
   for (const [id, preset] of Object.entries(CAMERA_PRESETS)) camera.append(new Option(preset.label, id));
-  bar.append(prev, next, openClose, camera, readout);
+  // The page numbers between Previous and Next; the bar wraps onto a second row on a phone
+  // (one row, it ran past the screen's edges and over the credit, 0.17.96).
+  bar.append(prev, readout, next, openClose, camera);
   const made = el("div", "pill label made", `Made with Printwarden ${data.version}`);
-  root.append(view, el("div", "top", [title]), bar, made);
+  const top = el("div", "top", [title, made]);
+  root.append(view, top, bar);
 
   const scene = new BookScene(view, {
     onTurnRequest: (delta) => scene.goTo(scene.opening + delta),
@@ -86,9 +90,35 @@ export async function start(data, root) {
     e.preventDefault();
   });
   sync();
+  // The app's performance check (Cmd+Shift+P there), as a button: on a phone or another
+  // computer there is no other way to start it (the author's call: for debugging, always there).
+  addCheck(top, scene);
   await pages.loaded;
   pages.sharpen(); // the view may have come to rest before every page was in
   return scene;
+}
+
+/** A "Performance check" button; its report in a box to copy from. */
+function addCheck(top, scene) {
+  const button = el("button", "pill", "Performance check");
+  top.insertBefore(button, top.lastChild);
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const report = await runProbe(scene, (step) => { button.textContent = step.trim(); });
+      const box = el("div", "report", [
+        el("p", "", "Select all of it and copy (on a phone: tap in it, Select All, Copy)."),
+        Object.assign(document.createElement("textarea"), { value: report, readOnly: true, rows: 24 }),
+        Object.assign(el("button", "pill", "Close"), { onclick: () => box.remove() }),
+      ]);
+      document.getElementById("root").append(box);
+    } catch (err) {
+      button.textContent = `Check failed: ${err.message}`;
+      return;
+    }
+    button.textContent = "Performance check";
+    button.disabled = false;
+  });
 }
 
 /**

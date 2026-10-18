@@ -57,7 +57,7 @@ export async function buildClientHtml(analysis, heightPx, progress = () => {}) {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title}</title>
 <style>${CLIENT_CSS}</style>
 </head>
@@ -168,15 +168,30 @@ html, body { margin: 0; height: 100%; background: #56575b; color: #fff; font: 13
 #root { position: fixed; inset: 0; }
 #root .view { position: absolute; inset: 0; }
 #root .view canvas { display: block; }
-#root .top { position: absolute; top: 12px; left: 12px; display: flex; gap: 8px; }
-#root .bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; }
-#root .made { position: absolute; bottom: 12px; right: 12px; opacity: 0.6; }
+/* The title and the credit along the top, the controls along the bottom: both rows inside the
+   screen's safe area, the bottom one wrapping onto a second row where the screen is narrow. */
+#root .top, #root .bar { position: absolute; left: calc(12px + env(safe-area-inset-left)); right: calc(12px + env(safe-area-inset-right)); display: flex; gap: 8px; align-items: center; pointer-events: none; }
+#root .top > *, #root .bar > * { pointer-events: auto; }
+#root .top { top: calc(12px + env(safe-area-inset-top)); flex-wrap: wrap; }
+#root .bar { bottom: calc(12px + env(safe-area-inset-bottom)); flex-wrap: wrap; justify-content: center; }
+#root .title { display: block; flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 30px; }
+#root .made { margin-left: auto; flex: none; opacity: 0.6; }
 #root .pill { height: 30px; padding: 0 14px; border-radius: 15px; border: 0; background: #000; color: #fff; font: inherit; display: inline-flex; align-items: center; white-space: nowrap; cursor: pointer; }
-#root .pill:hover { background: #fff; color: #000; }
+@media (hover: hover) { #root .pill:hover { background: #fff; color: #000; } }
 #root .pill:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 #root .pill:disabled { opacity: 0.4; cursor: default; }
-#root .pill:disabled:hover { background: #000; color: #fff; }
+@media (hover: hover) { #root .pill:disabled:hover, #root .pill.label:hover { background: #000; color: #fff; } }
 #root .pill.label { cursor: default; }
-#root .pill.label:hover { background: #000; color: #fff; }
 #root select.pill { appearance: none; -webkit-appearance: none; padding-right: 14px; }
+/* Touch: buttons a finger's size, the menu's text at 16 px (smaller, iOS zooms the page in on it). */
+@media (pointer: coarse) {
+  #root .pill { height: 40px; border-radius: 20px; padding: 0 16px; font-size: 15px; }
+  #root .title { line-height: 40px; }
+  #root select.pill { font-size: 16px; }
+  #root .made { height: 28px; padding: 0 10px; font-size: 11px; }
+}
+#root .report { position: absolute; inset: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom)); background: #000; color: #fff; padding: 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 8px; z-index: 2; }
+#root .report p { margin: 0; }
+#root .report textarea { flex: 1; min-height: 0; background: #111; color: #fff; border: 0; font: 11px/1.4 ui-monospace, Menlo, monospace; white-space: pre; }
+#root .report .pill { align-self: flex-end; background: #fff; color: #000; }
 `;

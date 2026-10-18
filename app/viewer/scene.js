@@ -1725,12 +1725,16 @@ export class BookScene {
   }
 }
 
-/** Whether the renderer draws through Metal on an Apple GPU (see makeLeaf). */
+/** Whether the renderer draws on an Apple GPU (through Metal, as every browser there does; see makeLeaf). */
 function isAppleMetal(renderer) {
   const gl = renderer.getContext();
   const info = gl.getExtension("WEBGL_debug_renderer_info");
   const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
-  return /Apple/.test(name) && /Metal/.test(name);
+  // Chromium and the app name the chip ("ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro…)");
+  // Safari, and every browser on an iPhone or iPad (they all run Safari's engine), say only
+  // "Apple GPU". Asking for "Metal" too, the client viewer there drew without the depth pass:
+  // 15 to 20 fps once the open book's sheet stacks were in view (0.17.97).
+  return /Apple/.test(name);
 }
 
 /**

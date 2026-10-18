@@ -140,6 +140,35 @@ function sheetsNote(rule, layout) {
 }
 
 /**
+ * What to export (the Export button): the imposed PDF for the printer, or the client viewer.
+ * Resolves to "imposed", "viewer", or null if cancelled. `canImpose`: false for a file
+ * imported as imposed sheets (it is already imposed).
+ * @param {boolean} canImpose
+ * @returns {Promise<"imposed" | "viewer" | null>}
+ */
+export function exportChoiceDialog(canImpose) {
+  return new Promise((resolve) => {
+    const d = dialog("Export");
+    const imposed = button("Export imposed PDF", () => finish("imposed"), "btn primary");
+    imposed.disabled = !canImpose;
+    const viewer = button("Export as client viewer", () => finish("viewer"), "btn primary");
+    const actions = el("div", "dialog-actions", [button("Cancel", () => finish(null))]);
+    d.body.append(el("div", "export-choices", [imposed, viewer]), actions);
+    function finish(choice) {
+      d.el.close();
+      d.el.remove();
+      resolve(choice);
+    }
+    d.el.addEventListener("cancel", (e) => {
+      e.preventDefault();
+      finish(null);
+    });
+    d.el.showModal();
+    (canImpose ? imposed : viewer).focus();
+  });
+}
+
+/**
  * The client viewer's settings (see ui/client.js): how tall the page images are. Resolves
  * to {heightPx}, or null if cancelled.
  * @param {ReturnType<typeof import("../core/analysis.js").analyse>} analysis
@@ -147,7 +176,7 @@ function sheetsNote(rule, layout) {
  */
 export function clientViewerDialog(analysis) {
   return new Promise((resolve) => {
-    const d = dialog("Export client viewer");
+    const d = dialog("Export as client viewer");
     const n = analysis.book.pages.length;
     const summary = el("p", "dialog-summary", [`${n} pages as images in one HTML file: the book as shown here, to turn and look round in any browser. Nothing else is needed, no PDF goes with it.`]);
     const height = select([["1024", "1024 px tall (sharp on a phone)"], ["1536", "1536 px tall"], ["2048", "2048 px tall (sharp on a large screen)"]], "1536");

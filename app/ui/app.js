@@ -18,7 +18,7 @@ import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js"
 import { buildClientHtml, exportClientViewer } from "./client.js";
 import { colourOptions, profileBytes, setColourProfile, setOverprint } from "./colour.js";
 import { makeCompass } from "./compass.js";
-import { aboutDialog, exportDialog, importDialog } from "./dialogs.js";
+import { aboutDialog, exportChoiceDialog, exportDialog, importDialog } from "./dialogs.js";
 import { $, addScrollbar, fitPill, showLoad, snapToPixels, toast } from "./dom.js";
 import { Filmstrip } from "./filmstrip.js";
 import { importFinish, openFinishDialog } from "./finish.js";
@@ -246,7 +246,15 @@ async function adoptCover() {
 
 // --- export ------------------------------------------------------------------------
 
+/** The Export button: the imposed PDF or the client viewer (one button for both, the author's call). */
 async function startExport() {
+  if (!state.analysis) return;
+  const choice = await exportChoiceDialog(!state.analysis.imposed);
+  if (choice === "imposed") await exportImposed();
+  else if (choice === "viewer") await exportClientViewer();
+}
+
+async function exportImposed() {
   const a = state.analysis;
   if (!a) return;
   const opts = await exportDialog(a, state.exportOptions, async (sheetPages) => {
@@ -317,8 +325,7 @@ function reanalyse(opening = scene.opening) {
     filmstrip.render(analysis, size);
   }
   inspector.render(analysis, state.name, state.colour);
-  /** @type {HTMLButtonElement} */ ($("export-btn")).disabled = analysis.imposed;
-  /** @type {HTMLButtonElement} */ ($("viewer-btn")).disabled = false;
+  /** @type {HTMLButtonElement} */ ($("export-btn")).disabled = false; // an imposed file: the viewer only (exportChoiceDialog)
   scene.goTo(Math.min(opening, book.pages.length >> 1), { animate: false });
   onOpeningChanged();
   loadAllTextures();
@@ -381,7 +388,6 @@ function showFocus() {
 $("import-btn").addEventListener("click", () => startImport());
 $("empty-import").addEventListener("click", () => startImport());
 $("export-btn").addEventListener("click", startExport);
-$("viewer-btn").addEventListener("click", () => exportClientViewer());
 $("sample-btn").addEventListener("click", async () => {
   openDocument({ file: { name: "sample.pdf", bytes: await makeSamplePdf() }, source: "pages" });
 });

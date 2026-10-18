@@ -575,6 +575,9 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .dialog-errors:empty { display: none; }
 .dialog-errors-line { margin: 0; color: var(--error); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+/* The Export button's two choices, one under the other, as wide as the dialog. */
+.export-choices { display: flex; flex-direction: column; gap: 8px; }
+.export-choices .btn { width: 100%; }
 
 /* A dialog that doesn't block the window (the book spine panel): dragged by its title. */
 .dialog.floating { position: fixed; margin: 0; z-index: 30; width: min(460px, calc(100vw - 32px)); }
