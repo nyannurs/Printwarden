@@ -545,7 +545,7 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
       const span = L.phi[k] - R.phi[k];
       f[k] = Math.abs(span) > 1e-3 ? e + (cu * (sv[k] / W) ** 2) / span : e;
     }
-    if (style.spine === "fold") {
+    if (style.spine === "fold" && c > 0) {
       // A stapled sheet peels off its pile: over its first PEEL_MM it runs along the pile it
       // is nearer, the far pile's way only past halfway, turning to its own angle beyond.
       // Its fold at the spine is drawn from the way it leaves its root (see
@@ -556,9 +556,16 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
       // cover opening or closing the book stands upright as the book is fully open, where
       // both piles leave the spine the same way; a page turning in an open book likewise.
       // (Mixing in the far pile's way by its turn, cubed, still left 12 % of it a third of
-      // the way over: 5 degrees, 0.09 mm out with 80 pages.)
+      // the way over: 5 degrees, 0.09 mm out with 80 pages.) Only while the book opens or
+      // closes, fading out as it is fully open: a page turning in an open booklet needs none
+      // (its folds stayed nested before) and keeps its gentle bend at the gutter (peeled,
+      // its first few millimetres bent 60 degrees one way, then the other).
       const eRoot = smooth((e - 0.45) / 0.1);
-      for (let k = 0; k < sv.length && sv[k] < PEEL_MM; k++) f[k] = eRoot + (f[k] - eRoot) * smooth(sv[k] / PEEL_MM);
+      const w = smooth(c / 0.02); // the last hair before fully open (from 0.1, the cover's fold came 0.05 mm out with 80 pages)
+      for (let k = 0; k < sv.length && sv[k] < PEEL_MM; k++) {
+        const peeled = eRoot + (f[k] - eRoot) * smooth(sv[k] / PEEL_MM);
+        f[k] += (peeled - f[k]) * w;
+      }
     }
     info.push({ i, e, still: false, R, L, f, cu });
   }

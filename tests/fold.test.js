@@ -127,3 +127,42 @@ for (const thickness of [0.075, 0.15, 0.3]) {
     }
   });
 }
+
+// The fix above (a sheet peeling off its pile, model.js) is for opening and closing only: a
+// page turning in an open booklet keeps its gentle bend at the gutter. Peeled there too
+// (0.17.99), its first few millimetres bent 60 degrees one way, then the other, mid-turn: a
+// kink the author saw flipping through booklet-16. Unpeeled, 17 to 34 degrees.
+test("stapled page turns: no kink at the gutter mid-turn (the first 6 mm bend under 40 degrees)", () => {
+  const { scene, box } = makeScene();
+  try {
+    const bad = [];
+    for (const [pageCount, thickness] of [[16, 0.15], [44, 0.15], [80, 0.3]]) {
+      scene.setBook({ pageCount, pageSize: { width: 148, height: 210 }, binding: "saddle", paper: stock(thickness) });
+      const m = scene.model.leafCount / 2;
+      for (const from of [2, m - 1]) {
+        scene.goTo(from, { animate: false });
+        scene.debugStep();
+        scene.lastRequest = -Infinity;
+        const t0 = 50000;
+        scene.clock = t0;
+        scene.debugStep();
+        scene.goTo(from + 1);
+        const leaf = scene.leaves[from];
+        const near = Array.from(leaf.s).map((v, k) => (v <= 6 ? k : -1)).filter((k) => k >= 0);
+        let most = 0;
+        for (let t = FRAME; t <= 1400; t += FRAME) {
+          scene.clock = t0 + t;
+          scene.debugStep();
+          const e = Math.min(1, Math.max(0, (90 - leaf.theta) / 180));
+          const p = leaf.profile;
+          if (e > 0.3 && e < 0.7) most = Math.max(most, Math.abs(p.phi[near[near.length - 1]] - p.phi[0]) * (180 / Math.PI));
+        }
+        if (most >= 40) bad.push(`${pageCount} pages, ${thickness} mm, turning ${from} to ${from + 1}: ${most.toFixed(1)} degrees`);
+      }
+    }
+    ok(bad.length === 0, bad.join("; "));
+  } finally {
+    scene.clock = null;
+    box.remove();
+  }
+});
