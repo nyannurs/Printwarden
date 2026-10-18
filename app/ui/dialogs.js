@@ -149,9 +149,9 @@ function sheetsNote(rule, layout) {
 export function exportChoiceDialog(canImpose) {
   return new Promise((resolve) => {
     const d = dialog("Export");
-    const imposed = button("Export imposed PDF", () => finish("imposed"), "btn primary");
+    const imposed = button("Export imposed PDF", () => finish("imposed"));
     imposed.disabled = !canImpose;
-    const viewer = button("Export as client viewer", () => finish("viewer"), "btn primary");
+    const viewer = button("Export as HTML file", () => finish("viewer"));
     const actions = el("div", "dialog-actions", [button("Cancel", () => finish(null))]);
     d.body.append(el("div", "export-choices", [imposed, viewer]), actions);
     function finish(choice) {
@@ -176,7 +176,7 @@ export function exportChoiceDialog(canImpose) {
  */
 export function clientViewerDialog(analysis) {
   return new Promise((resolve) => {
-    const d = dialog("Export as client viewer");
+    const d = dialog("Export as HTML file");
     const n = analysis.book.pages.length;
     const summary = el("p", "dialog-summary", [`${n} pages as images in one HTML file: the book as shown here, to turn and look round in any browser. Nothing else is needed, no PDF goes with it.`]);
     const height = select([["1024", "1024 px tall (sharp on a phone)"], ["1536", "1536 px tall"], ["2048", "2048 px tall (sharp on a large screen)"]], "1536");

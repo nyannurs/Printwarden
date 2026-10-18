@@ -481,6 +481,8 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 /* The interface's own words (labels, headings, captions) can't be selected: only what is about
    the document is, its details and Preflight's notes, to copy. Fields are typed in as ever. */
 .app { user-select: none; }
+/* Dialogs sit outside .app (on the body): their labels and buttons aren't text to select either. */
+.dialog { user-select: none; -webkit-user-select: none; }
 .facts dd, .finding p { user-select: text; }
 
 .field { display: grid; grid-template-columns: minmax(round(up, 8em, 1px), auto) 1fr; align-items: center; gap: 10px; margin-bottom: 7px; }
