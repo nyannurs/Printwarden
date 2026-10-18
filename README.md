@@ -67,6 +67,10 @@ Printwarden comes with ISO Coated v2 (ECI) and uses it by default, so colors loo
 
 I have not been able to conceive a clean method to implement things like gatefold/foldout pages, concertina folds, non-standard formats, special features, or anything related to special-format pages. Feel free to PR.
 
+## Documentation
+
+Everything Printwarden does, and how it works inside, is described in [`docs/`](docs/README.md): a user guide covering every panel and dialog, and chapters on the print arithmetic, the PDF handling, the 3D book, the interface, the client viewer, the desktop app and the tests.
+
 ## Credits
 
 All the projects Printwarden uses code from are listed in [`CREDITS.md`](CREDITS.md). You can also find their licenses in the app under About > Licenses.
