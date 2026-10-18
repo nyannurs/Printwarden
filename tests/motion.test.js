@@ -6,11 +6,11 @@ import { eq, ok, test } from "./harness.js";
 const HZ120 = 1000 / 120;
 
 /** Rounds of 30 frames whose cost follows the drawn area: `full` ms at full size, plus `fixed`. */
-function run(state, rounds, full, { fixed = 0, refresh = HZ120, timed = true } = {}) {
+function run(state, rounds, full, { fixed = 0, refresh = HZ120, timed = true, late = () => 0 } = {}) {
   const scales = [];
   let scale = MOTION_SCALES[state.k];
   for (let i = 0; i < rounds; i++) {
-    scale = motionStep(state, fixed + full * scale * scale, refresh, timed);
+    scale = motionStep(state, fixed + full * scale * scale, refresh, timed, late(scale));
     scales.push(scale);
   }
   return scales;
@@ -46,13 +46,20 @@ test("motion: screens faster than 120 Hz aren't chased with a smaller picture", 
   eq(run(motionState(), 1, 9, { refresh: 1000 / 165 }), [0.85]);
 });
 
-test("motion: the drawing leaves the browser room in a frame (the author's M4 Pro: 7 ms of 8.3 at 70 % was too much)", () => {
+test("motion: frames reaching the screen late count, though the card's drawing looks in time (the author's M4 Pro, 0.17.93)", () => {
+  // 7 ms of drawing at 70 % on a 130 Hz screen; every other frame late above 50 %, none at 50 %.
   const s = motionState();
   s.k = MOTION_SCALES.indexOf(0.7);
-  const full = 7 / (0.7 * 0.7); // 7 ms at 70 %
-  const scales = run(s, 6, full, { refresh: 1000 / 128 });
-  ok(scales[scales.length - 1] < 0.7, `settled at ${scales[scales.length - 1]}`);
-  ok(full * scales[scales.length - 1] ** 2 <= HZ120 * 0.7, "within 70 % of a frame");
+  const full = 7 / (0.7 * 0.7);
+  const scales = run(s, 10, full, { refresh: 1000 / 130, late: (scale) => (scale > 0.5 ? 0.5 : 0) });
+  eq(scales.slice(-4), [0.5, 0.5, 0.5, 0.5], `settled at 50 %: ${scales.join(" ")}`);
+});
+
+test("motion: a step down that leaves frames as late as before is taken back", () => {
+  const s = motionState();
+  const scales = run(s, 4, 0, { fixed: 3, late: () => 0.4 }); // late, whatever the size: not the drawing
+  eq(scales.slice(0, 2), [0.85, 1]);
+  eq(scales.slice(2), [1, 1]);
 });
 
 test("motion: without the graphics card's timing, frames that come late count", () => {

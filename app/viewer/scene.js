@@ -176,7 +176,7 @@ export class BookScene {
     this.motionComposer.addPass(new RenderPass(this.scene, this.camera));
     this.motionComposer.addPass(output());
     this.motion = {
-      scale: 1, step: motionState(), refresh: [], frames: [], lastFrame: 0, rendered: false, low: false,
+      scale: 1, step: motionState(), refresh: [], frames: [], intervals: [], lastFrame: 0, rendered: false, low: false,
       // How long the graphics card takes to draw a frame, where it can be timed.
       timer: r.getContext().getExtension("EXT_disjoint_timer_query_webgl2"), queries: [], gpu: 0, gpuAt: -Infinity,
     };
@@ -287,6 +287,13 @@ export class BookScene {
     this.uploads = new Map(); // folio -> image waiting for GPU upload
     this.detailQueue = new Map(); // folio -> detail strips being prepared
     this.fading = new Set(); // page uniforms whose strips are fading in (uDetailFade < 1)
+    // The zoom shown is the camera's distance to its pivot against the preset's framing; the
+    // pivot moves onto the paper under the view's middle when panning (input.js
+    // pivotOnPaper) without the camera moving, which changes that distance: this factor takes
+    // such changes out, so only deliberate zooming moves the number (it wandered 95 to 105 %
+    // while panning, 0.17.93).
+    this.zoomBias = 1;
+    this.shownPercent = null;
     this.debugInnerFaces = false; // see layoutLeaves: diagnosis switches, off
     this.debugStackFill = null;
     this.debugFillerInk = true;
@@ -1232,6 +1239,7 @@ export class BookScene {
 
   resetView() {
     this.zoomGlide = null;
+    this.zoomBias = 1;
     this.rig.resetView();
   }
 
@@ -1246,7 +1254,7 @@ export class BookScene {
 
   /** Zoom as a percentage of the camera preset's framing (100 = as framed). */
   get zoomPercent() {
-    return 100 / this.rig.zoom;
+    return (100 * this.zoomBias) / this.rig.zoom;
   }
 
   /**
@@ -1254,6 +1262,7 @@ export class BookScene {
    * plus a zoom step always frames the book the same way (for mockups).
    */
   setZoomPercent(percent) {
+    this.zoomBias = 1;
     const goal = this.rig.clampZoom(100 / percent);
     this.zoomGlide = { anchor: null, goal, floor: 0, lastInput: performance.now(), lastTime: null, keepPivot: true };
     this.rig.resetting = null;
@@ -1276,6 +1285,7 @@ export class BookScene {
     this.ground.visible = this.contact.visible = !this.float; // the table (its shadow) only under a resting book
     this.#frameCamera();
     this.zoomGlide = null;
+    this.zoomBias = 1;
     this.#updateHome();
     this.rig.resetView();
     this.dirty = true;
@@ -1535,13 +1545,17 @@ export class BookScene {
       if (m.refresh.length > 120) m.refresh.shift();
       return;
     }
-    if (!m.timer && drawingInMotion && wasDrawing) m.frames.push(dt);
+    if (drawingInMotion && wasDrawing) {
+      if (!m.timer) m.frames.push(dt);
+      m.intervals.push(dt); // as the screen got them: a refresh or more late counts (motionStep)
+    }
     if (m.frames.length < 30 || m.refresh.length < 10) return;
-    // The slow frames decide (a frame late is what shows), not the average.
-    const sorted = m.frames.slice().sort((x, y) => x - y);
-    const slowFrames = sorted[Math.floor(sorted.length * 0.9)];
+    const refresh = Math.min(...m.refresh);
+    const mean = m.frames.reduce((x, y) => x + y, 0) / m.frames.length;
+    const late = m.intervals.length ? m.intervals.filter((d) => d > refresh * 1.5).length / m.intervals.length : 0;
     m.frames.length = 0;
-    const scale = motionStep(m.step, slowFrames, Math.min(...m.refresh), !!m.timer);
+    m.intervals.length = 0;
+    const scale = motionStep(m.step, mean, refresh, !!m.timer, late);
     if (scale === m.scale) return;
     m.scale = scale;
     this.motionComposer.setPixelRatio(this.renderer.getPixelRatio() * m.scale);
@@ -1662,8 +1676,8 @@ export class BookScene {
     glideZoom(this, this.#own, time);
     const moving = this.rig.update(time) || this.cameraChanged;
     this.cameraChanged = false;
-    if (this.rig.zoom !== this.shownZoom) {
-      this.shownZoom = this.rig.zoom;
+    if (this.zoomPercent !== this.shownPercent) {
+      this.shownPercent = this.zoomPercent;
       this.callbacks.onZoom?.(this.zoomPercent);
     }
     if (animating || moving) {

@@ -135,7 +135,9 @@ function pivotOnPaper(scene, own) {
   p.z += hit.point.z - target.z;
   // Where the paper rises toward the camera (pages slope up to the spine), back off: to
   // 8 mm from it, and never closer than the zoom range allows (800 %).
+  const was = scene.rig.zoom;
   scene.rig.zoom = scene.rig.clampZoom(onPaper);
+  scene.zoomBias *= scene.rig.zoom / was; // the camera hasn't moved: neither does the zoom shown
 }
 
 /**
