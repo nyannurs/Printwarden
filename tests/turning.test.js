@@ -158,11 +158,12 @@ test("turning: a stack swung over together is drawn at its full thickness (no ga
     const moving = scene.leaves.filter((l) => l.start != null);
     eq(moving.length, 10);
     ok(moving.every((l) => l.fill === STACK_FILL), "every sheet of the stack at its full thickness and a hair over");
-    // The faces between its sheets are plain paper (sheetFiller), the stack's outer two its pages.
+    // The faces between its sheets are filler (their pages' images, unlit), the stack's outer two its pages.
     const inner = moving.slice(1, -1);
-    ok(inner.every((l) => l.mesh.material[0] === scene.sheetFiller && l.mesh.material[1] === scene.sheetFiller), "faces between the sheets: filler");
-    ok(moving[0].mesh.material[0] === moving[0].front && moving[0].mesh.material[1] === scene.sheetFiller, "the first sheet: its front a page, its back filler");
-    ok(moving[9].mesh.material[1] === moving[9].back && moving[9].mesh.material[0] === scene.sheetFiller, "the last sheet: its back a page, its front filler");
+    ok(inner.every((l) => l.mesh.material[0] === l.fillers[0] && l.mesh.material[1] === l.fillers[1]), "faces between the sheets: filler");
+    ok(moving[0].mesh.material[0] === moving[0].front && moving[0].mesh.material[1] === moving[0].fillers[1], "the first sheet: its front a page, its back filler");
+    ok(moving[9].mesh.material[1] === moving[9].back && moving[9].mesh.material[0] === moving[9].fillers[0], "the last sheet: its back a page, its front filler");
+    ok(inner.every((l) => l.fillers[0].userData.fillerOf === l.front && l.fillers[1].userData.fillerOf === l.back), "each filler shows its own page");
     ok(scene.leaves.filter((l) => l.start == null).every((l) => l.fill < 1), "the rest thinned");
     scene.clock = 32000;
     scene.debugStep();

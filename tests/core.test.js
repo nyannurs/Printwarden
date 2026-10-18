@@ -421,6 +421,11 @@ test("paper: the cover's color and finish start as their own: the pages' don't c
   eq([cover.color, cover.finish], ["#ffffff", "uncoated"]);
 });
 
+test("paper: the endpapers' colour starts as its own: the pages' colour doesn't change it", () => {
+  const paper = { ...defaultPaper(), color: "#f4efe2" };
+  eq(paper.endpaperColor, "#ffffff");
+});
+
 test("paper: the cover weight starts as its own; a null one (older setups) is the pages'", () => {
   const paper = { ...defaultPaper(), gsm: 150 };
   eq(coverOf(paper).gsm, 120, "its own");

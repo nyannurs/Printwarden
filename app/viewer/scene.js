@@ -286,6 +286,7 @@ export class BookScene {
     this.fading = new Set(); // page uniforms whose strips are fading in (uDetailFade < 1)
     this.debugInnerFaces = false; // see layoutLeaves: diagnosis switches, off
     this.debugStackFill = null;
+    this.debugFillerInk = true;
     this.lastFadeTime = null;
     this.dirty = true;
     this.geometryDirty = false;
@@ -427,6 +428,7 @@ export class BookScene {
     }
     this.edgeMat.color.set(this.paper.color).multiplyScalar(0.9);
     this.sheetFiller.color.set(this.paper.color);
+    for (const leaf of this.leaves ?? []) for (const f of leaf.fillers ?? []) f.color.copy(this.sheetFiller.color).multiplyScalar(0.9);
     this.coverEdgeMat.color.set(this.paper.cover.color).multiplyScalar(0.9);
     this.coverMat.color.set(this.paper.cover.color).multiplyScalar(0.96); // the spine's cut ends
     this.liningMat.color.set(endpaper.color).multiplyScalar(0.95); // the endpaper across a hardcover's joint, in its shade

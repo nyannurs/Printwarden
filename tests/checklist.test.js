@@ -84,7 +84,9 @@ test("hardcover: the boards' thickness sets the spine and the 3D block; the head
               for (const [rx, ry] of roots) d = Math.min(d, Math.hypot(px - rx, py - ry));
               far = Math.max(far, d);
             }
-            ok(far < m.foldDepth + 2.4, `${label}: a point of the headband ${far.toFixed(1)} mm from the nearest root (floating)`);
+            // Within the hollow (its depth, 1.7 mm) and its reach into the case's corners (up to
+            // 1 mm past the block's outer sheets): farther is floating.
+            ok(far < m.foldDepth + 3.2, `${label}: a point of the headband ${far.toFixed(1)} mm from the nearest root (floating)`);
             // The bead touches the folds: its nearest point to the roots is a fold's depth away, not more.
             let nearest = Infinity;
             for (let k = 0; k < pos.count; k += 3) {

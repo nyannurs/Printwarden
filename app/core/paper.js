@@ -30,13 +30,16 @@ export const PAPER_FINISHES = {
  *            coverColor: string | null, coverGsm: number | null, coverFinish: keyof typeof PAPER_FINISHES | null,
  *            coverVolume?: number | null, endpaperColor?: string | null}} Paper
  *   endpaperColor: a hardcover's endpapers (the pastedowns inside the boards and the lining
- *   across the joints), hex; null = the pages' colour
+ *   across the joints), hex: its own from the start, as the cover's is (the author: no
+ *   swatches linked; to 0.17.91 it followed the pages' colour until chosen); null (older
+ *   setups) = the pages' colour
  */
 
 /** @returns {Paper} */
 export const defaultPaper = () => ({
   color: "#ffffff", gsm: 120, finish: "uncoated", volume: null,
   coverColor: "#ffffff", coverGsm: 120, coverFinish: "uncoated", coverVolume: null,
+  endpaperColor: "#ffffff",
 });
 
 /** The cover's stock, with the pages' values where it has none of its own. */

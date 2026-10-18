@@ -136,12 +136,14 @@ export function layoutLeaves(scene) {
   // a stack's sheets, `app.scene.debugStackFill = 0.9` packs them as a pile at rest is.
   const against = (leaf, j) => !scene.debugInnerFaces && !coil && leaf.group != null && !leaf.board && scene.leaves[j]?.group === leaf.group && !scene.leaves[j].board;
   for (const leaf of scene.leaves) {
-    // A face against the next sheet is drawn as plain paper (sheetFiller: unlit, no image,
-    // see fillerMaterial), not shaded as a page, and left out of the depth pass.
+    // A face against the next sheet is drawn unlit (its page's image: inkFiller), not shaded
+    // as a page, and left out of the depth pass.
     const frontHidden = against(leaf, leaf.i - 1); // the front lies on the leaf before
     const backHidden = against(leaf, leaf.i + 1);
-    leaf.mesh.material[0] = frontHidden ? scene.sheetFiller : leaf.front;
-    leaf.mesh.material[1] = backHidden ? scene.sheetFiller : leaf.back;
+    // Each its page's image, unlit (inkFiller); `app.scene.debugFillerInk = false` plain paper.
+    const plain = scene.debugFillerInk === false;
+    leaf.mesh.material[0] = frontHidden ? (plain ? scene.sheetFiller : leaf.fillers[0]) : leaf.front;
+    leaf.mesh.material[1] = backHidden ? (plain ? scene.sheetFiller : leaf.fillers[1]) : leaf.back;
     leaf.first.material[0].visible = !frontHidden;
     leaf.first.material[1].visible = !backHidden;
   }

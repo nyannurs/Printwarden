@@ -339,6 +339,19 @@ export function layoutExtras(scene) {
     const at = (p, off) => new THREE.Vector2(p.x[0] - Math.sin(p.phi[0]) * off, p.y[0] - Math.cos(p.phi[0]) * off);
     const beadPath = picks.map((p) => at(p, m.foldDepth + HEADBAND.beadRadius * HEADBAND.beadOut));
     const tailPath = picks.map((p) => at(p, m.foldDepth + HEADBAND.tailLift));
+    // The bead fills the hollow's mouth: as thick as the hollow is deep (it touches the
+    // folds and the case), and carried on past the block's outer sheets into the case's
+    // corners, so the tunnel between block and case is closed at head and foot. (Spanning
+    // the block's spine alone, to 0.17.91, it left the case's corners open beside it: from
+    // the end the bead read as afloat in a dark slot, and the far headband showed through.)
+    if (beadPath.length >= 2 && ex.caseSpine) {
+      const a = beadPath[beadPath.length - 1].clone().sub(beadPath[0]).normalize();
+      // Into the corner, no further than a millimetre: with thick boards the case's corners
+      // stand well beyond the block, and a headband wider than the block would read as one.
+      const reach = (t) => Math.min(1, Math.max(0, t / 2 + m.thickness[0] - CASE_COVER_MM - HEADBAND.beadRadius));
+      beadPath.unshift(beadPath[0].clone().addScaledVector(a, -reach(m.thickness[1] ?? 0)));
+      beadPath.push(beadPath[beadPath.length - 1].clone().addScaledVector(a, reach(m.thickness[m.leafCount - 2] ?? 0)));
+    }
     // Rebuilt only when the spine moved (a page turning over the block leaves it as it is).
     const along = beadPath.flatMap((q) => [q.x, q.y]);
     for (const band of ex.headbands) {
@@ -707,9 +720,11 @@ function writeFoldGeometry(geo, leaves, book) {
  * centre was half a radius past the folds and a fifth of a radius beyond the cut: it hung in
  * the hollow, clear of the block.)
  */
-const HEADBAND = { beadRadius: 0.75, beadDrop: 0.3, beadOut: 1, tailLength: 12, tailLift: 0.06 };
-/** From the signatures' folds to the inside of the case's spine (mm): the hollow, which the bead fits. */
+/** From the signatures' folds to the inside of the case's spine (mm): the hollow, which the bead fills. */
 const CASE_HOLLOW = 1.7;
+/** The covering over a case's thin spine board (mm), flush with the boards' outsides. */
+const CASE_COVER_MM = 1.2;
+const HEADBAND = { beadRadius: CASE_HOLLOW / 2 - 0.02, beadDrop: 0.3, beadOut: 1, tailLength: 12, tailLift: 0.06 };
 
 /** The headband's tail: a strip along `path` (the spine's width) from z0 to z1. */
 function tailGeometry(path, z0, z1) {
@@ -854,7 +869,7 @@ function writeSignatureFolds(geo, leaves, book, out) {
  */
 function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const tb = book.thickness[0];
-  const tc = 1.2; // the covering over a thin spine board, flush with the boards' outsides;
+  const tc = CASE_COVER_MM; // the covering over a thin spine board, flush with the boards' outsides;
   // between it and the block's spine, the hollow.
   const n = book.leafCount;
   // The block's spine: along the line of the roots, outward away from the pages.

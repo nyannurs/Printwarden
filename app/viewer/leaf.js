@@ -143,6 +143,8 @@ export function makeLeaf(scene, i) {
   mesh.onBeforeRender = (renderer, scene, camera, geometry, material) => {
     const base = material.userData.twinOf;
     if (base) twin(material, base);
+    const page = material.userData.fillerOf;
+    if (page) /** @type {THREE.MeshBasicMaterial} */ (material).map = page.map ?? page.userData.white; // the page's image, as it is now
     if (material.userData.edgeOf) inkEdges(material);
   };
   mesh.castShadow = true;
@@ -166,7 +168,10 @@ export function makeLeaf(scene, i) {
   // Paper never lines up perfectly: each leaf a fixed hair off at the fore-edge and along
   // the spine (tenths of a millimetre).
   const jitter = { fore: (hash(i * 2 + 1) - 0.5) * 0.16, along: (hash(i * 2 + 2) - 0.5) * 0.1 };
-  const leaf = { i, mesh, first, geo, front, back, profile, jitter, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
+  // The faces between a flying stack's sheets (see layoutLeaves): each its page's image,
+  // unlit (see inkFiller).
+  const fillers = [inkFiller(scene, front), inkFiller(scene, back)];
+  const leaf = { i, mesh, first, geo, front, back, fillers, profile, jitter, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
@@ -403,6 +408,23 @@ export function freeFlap(scene, mesh) {
  * no multisampling: a flying stack's edges were dashes of background), and a face behind
  * fills what an edge drops.
  */
+/**
+ * A face between a flying stack's sheets, as its page: the page's image, unlit, in the
+ * shade of the sheets' edges (see fillerMaterial). Where an edge face in front drops pixels
+ * (the author's Mac), what shows through near the edge is the page's own print, as at rest,
+ * where the pages behind the edges are drawn in full: the "ink" along a stack's edges. (Plain
+ * paper, 0.17.90, showed the edges blank while the stack flew, the ink there on landing.)
+ */
+function inkFiller(scene, page) {
+  const m = new THREE.MeshBasicMaterial({ map: page.map ?? scene.white, side: THREE.DoubleSide });
+  m.color.copy(scene.sheetFiller.color).multiplyScalar(0.9);
+  m.userData.fillerOf = page;
+  page.userData.white = scene.white;
+  m.onBeforeCompile = (shader) => sheetShader(shader, scene.shared);
+  m.customProgramCacheKey = () => "bookview-sheet-ink-filler";
+  return m;
+}
+
 export function fillerMaterial(scene) {
   const m = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   m.onBeforeCompile = (shader) => sheetShader(shader, scene.shared);
