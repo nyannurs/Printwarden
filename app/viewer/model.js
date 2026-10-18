@@ -297,6 +297,9 @@ export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 
  *   turning, in the air even while still lying on their pile (waiting to go, or about to
  *   land), so a page in the air under one can carry it (with `only`, those are turning)
  */
+/** How far a stapled sheet peels off its pile before running at its own angle (mm; see layoutBook). */
+const PEEL_MM = 5;
+
 export function layoutBook(book, leaves, { closed, side }, { cache = null, only = null, turning = null } = {}) {
   const { style, cum, thickness, total, ground, leafCount: n } = book;
   if (style.spine === "coil") {
@@ -541,6 +544,21 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
     for (let k = 0; k < sv.length; k++) {
       const span = L.phi[k] - R.phi[k];
       f[k] = Math.abs(span) > 1e-3 ? e + (cu * (sv[k] / W) ** 2) / span : e;
+    }
+    if (style.spine === "fold") {
+      // A stapled sheet peels off its pile: over its first PEEL_MM it runs along the pile it
+      // is nearer, the far pile's way only past halfway, turning to its own angle beyond.
+      // Its fold at the spine is drawn from the way it leaves its root (see
+      // writeFoldGeometry), and the folds inside it from their own roots: leaving at its
+      // turned angle at once, a lifting cover's fold dived across the first sheet's, whose
+      // white showed outside it at the spine (the author's recording; 0.26 mm out with 44
+      // pages of 0.15 mm paper, 0.52 with 0.3 mm, 0.17.98). The switch costs nothing: a
+      // cover opening or closing the book stands upright as the book is fully open, where
+      // both piles leave the spine the same way; a page turning in an open book likewise.
+      // (Mixing in the far pile's way by its turn, cubed, still left 12 % of it a third of
+      // the way over: 5 degrees, 0.09 mm out with 80 pages.)
+      const eRoot = smooth((e - 0.45) / 0.1);
+      for (let k = 0; k < sv.length && sv[k] < PEEL_MM; k++) f[k] = eRoot + (f[k] - eRoot) * smooth(sv[k] / PEEL_MM);
     }
     info.push({ i, e, still: false, R, L, f, cu });
   }

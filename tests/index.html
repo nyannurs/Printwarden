@@ -31,7 +31,10 @@
     import "./bundle.test.js";
     import "./panel.test.js";
     import "./fixtures.test.js";
-    run(document.getElementById("out"));
+    import "./fold.test.js";
+    // ?only=words: just the tests whose names hold them (the whole suite takes minutes).
+    const only = new URLSearchParams(location.search).get("only");
+    run(document.getElementById("out"), only ? (name) => name.includes(only) : null);
   </script>
 </body>
 </html>
