@@ -198,12 +198,16 @@ export function clientViewerDialog(analysis) {
 }
 
 /**
- * Imposition settings. Resolves to ExportOptions, or null if cancelled. `onSheetPages`:
- * the pages a sheet holds is part of the setup (the timeline's press sheets show it): set
- * through it, it gives the analysis made with it.
+ * Imposition settings. Resolves to {options, analysis}, or null if cancelled: `analysis` the
+ * one the sheets are planned from, as the dialog ends (the sheet layout chosen in it makes a
+ * new one; exported from the analysis it opened with, the PDF was imposed in the old layout
+ * until the dialog was opened a second time, 1.0.0). `onSheetPages`: the pages a sheet holds
+ * is part of the setup (the timeline's press sheets show it): set through it, it gives the
+ * analysis made with it.
  * @param {ReturnType<typeof import("../core/analysis.js").analyse>} analysis
  * @param {import("../core/sheets.js").ExportOptions | null} [remembered]
  * @param {((sheetPages: number) => Promise<ReturnType<typeof import("../core/analysis.js").analyse>>) | null} [onSheetPages]
+ * @returns {Promise<{options: import("../core/sheets.js").ExportOptions, analysis: ReturnType<typeof import("../core/analysis.js").analyse>} | null>}
  */
 export function exportDialog(analysis, remembered = null, onSheetPages = null) {
   return new Promise((resolve) => {
@@ -214,10 +218,19 @@ export function exportDialog(analysis, remembered = null, onSheetPages = null) {
     // The sheets: spreads, or a folding scheme (see core/folding.js).
     const layoutChoices = [["2", "Spreads: 2 pages a side"], ["8", "8 pages a sheet, 2 folds"], ["16", "16 pages a sheet, 3 folds"]];
     const sheetLayout = select(layoutChoices, String(analysis.setup.sheetPages ?? 2));
-    sheetLayout.addEventListener("change", async () => {
+    // The analysis for the layout chosen last: Export waits for it (a choice made just before
+    // pressing it may still be in the making).
+    let pending = Promise.resolve();
+    sheetLayout.addEventListener("change", () => {
       if (!onSheetPages) return;
-      analysis = await onSheetPages(Number(sheetLayout.value));
-      sync();
+      const chosen = Number(sheetLayout.value);
+      pending = pending.then(async () => {
+        const next = await onSheetPages(chosen);
+        if (Number(sheetLayout.value) === chosen) {
+          analysis = next;
+          sync();
+        }
+      });
     });
 
     const sheetChoices = [["auto", "Automatic (fits pages, bleed and marks)"],
@@ -271,11 +284,15 @@ export function exportDialog(analysis, remembered = null, onSheetPages = null) {
     d.body.addEventListener("input", sync);
     d.body.addEventListener("change", sync);
 
-    function finish(ok) {
+    async function finish(ok) {
+      if (ok) {
+        exportBtn.disabled = true;
+        await pending;
+        read();
+      }
       d.el.close();
       d.el.remove();
-      if (ok) read();
-      resolve(ok ? opts : null);
+      resolve(ok ? { options: opts, analysis } : null);
     }
     d.el.addEventListener("cancel", (e) => {
       e.preventDefault();

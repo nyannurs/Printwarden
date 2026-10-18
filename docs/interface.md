@@ -83,7 +83,7 @@ The bookkeeping between the PDF and the 3D pages:
 
 ## Dialogs (`dialogs.js`)
 
-Each dialog is a function that returns a promise of the choices, or null if canceled. That keeps the callers simple: `const opts = await exportDialog(...)`.
+Each dialog is a function that returns a promise of the choices, or null if canceled. That keeps the callers simple: `const chosen = await exportDialog(...)`. The imposed export's dialog also returns the analysis it ended on: choosing a sheet layout in it makes a new analysis, and the export is planned from that one. Export waits for a layout chosen just before it was pressed.
 - Dialogs remember their last settings for the session.
 - Their labels can't be selected as text.
 - Escape cancels.

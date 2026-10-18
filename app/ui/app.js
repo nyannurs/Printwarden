@@ -255,13 +255,14 @@ async function startExport() {
 }
 
 async function exportImposed() {
-  const a = state.analysis;
-  if (!a) return;
-  const opts = await exportDialog(a, state.exportOptions, async (sheetPages) => {
+  if (!state.analysis) return;
+  const chosen = await exportDialog(state.analysis, state.exportOptions, async (sheetPages) => {
     await updateSetup({ sheetPages });
     return state.analysis;
   });
-  if (!opts) return;
+  if (!chosen) return;
+  // The analysis the dialog ended on: a sheet layout chosen in it made a new one.
+  const { options: opts, analysis: a } = chosen;
   state.exportOptions = opts;
   try {
     const plan = planSheets(a, opts);
