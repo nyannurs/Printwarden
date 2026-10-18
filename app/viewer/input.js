@@ -87,6 +87,13 @@ export function bindInput(scene, own) {
   }, { passive: false });
 }
 
+/** A pan as the space bar and a drag make it (for the performance check, probe.js). */
+export function panBy(scene, own, dx, dy) {
+  scene.rig.enterFree();
+  pan(scene, own, dx, dy);
+  scene.dirty = true;
+}
+
 function pan(scene, own, dx, dy) {
   const lowest = scene.float ? -Infinity : (scene.model?.ground ?? -Infinity) + 2;
   const wasAbove = scene.camera.position.y >= lowest - 1e-3;
@@ -116,6 +123,7 @@ function pan(scene, own, dx, dy) {
  * seem to vanish.
  */
 function pivotOnPaper(scene, own) {
+  if (scene.debugNoPivot) return; // the performance check's "no re-pivot" run
   const { azimuth, elevation, zoom } = scene.rig;
   const d = scene.fitDistance * zoom;
   const toCamera = new THREE.Vector3(

@@ -15,7 +15,7 @@ import { CAMERA_PRESETS, CameraRig, presetHome } from "./camera.js";
 import * as capture from "./capture.js";
 import { drawOrder, shadows } from "./draw.js";
 import { layoutGround, makeExtras } from "./extras.js";
-import { bindInput, glideZoom } from "./input.js";
+import { bindInput, glideZoom, panBy } from "./input.js";
 import { layoutLeaves } from "./layout.js";
 import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, pageHit, fillerMaterial } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
@@ -297,6 +297,7 @@ export class BookScene {
     this.debugInnerFaces = false; // see layoutLeaves: diagnosis switches, off
     this.debugStackFill = null;
     this.debugFillerInk = true;
+    this.debugNoPivot = false; // the performance check's "no re-pivot" run (input.js)
     this.lastFadeTime = null;
     this.dirty = true;
     this.geometryDirty = false;
@@ -1212,6 +1213,11 @@ export class BookScene {
       for (const m of leaf.mesh.material) if (m.userData.uniforms) m.depthWrite = !on; // the faces'
     }
     this.dirty = true;
+  }
+
+  /** For the performance check: a pan by (dx, dy) screen pixels, as the space bar and a drag make it. */
+  debugPan(dx, dy) {
+    panBy(this, this.#own, dx, dy);
   }
 
   /** For tests: advance the animations to the set clock and lay the book out, without drawing. */

@@ -1,8 +1,11 @@
 // A performance check of this computer, for reports from machines the developer can't run
-// (Cmd/Ctrl+Shift+P with a document open). Drags the camera round the book for two seconds
-// at a time, with one part of the image switched off each time, then turns pages quickly;
-// times every frame as the screen shows it. The parts that change the result most are what
-// limits this computer. About 25 seconds; everything is put back as it was.
+// (Cmd/Ctrl+Shift+P with a document open). Pans the view where it is, as the space bar and
+// a drag do, then drags the camera round the book, two seconds at a time, with one part of
+// the image switched off each time, then turns pages quickly; times every frame as the
+// screen shows it. The parts that change the result most are what limits this computer.
+// Last, it asks for a few seconds of panning by hand and measures the mouse's own rate and
+// what was drawn: a frame can only be drawn when the mouse reports a move. About 35 seconds
+// and the hand panning; everything is put back as it was.
 
 const SECONDS = 2.2; // each run; the first 0.4 s isn't counted (shaders compiling)
 
@@ -33,18 +36,22 @@ export async function runProbe(scene, onProgress) {
   const refresh = Math.min(...idle.slice(5));
   lines.push(`Refresh: ${(1000 / refresh).toFixed(0)} Hz (${refresh.toFixed(1)} ms)`, "");
 
-  const stats = (ivals, cpu) => {
+  const median = (a) => a.slice().sort((x, y) => x - y)[a.length >> 1];
+  const stats = (ivals, cpu, gpu) => {
     const s = ivals.slice().sort((a, b) => a - b);
     const q = (p) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
-    const c = cpu.slice().sort((a, b) => a - b);
-    return `${(1000 / q(0.5)).toFixed(0).padStart(4)} fps   p95 ${q(0.95).toFixed(1).padStart(5)} ms   worst ${s[s.length - 1].toFixed(1).padStart(5)} ms   main thread ${c[c.length >> 1].toFixed(1)} ms`;
+    const g = gpu.length ? `   gpu ${median(gpu).toFixed(1)} ms` : "";
+    return `${(1000 / q(0.5)).toFixed(0).padStart(4)} fps   p95 ${q(0.95).toFixed(1).padStart(5)} ms   worst ${s[s.length - 1].toFixed(1).padStart(5)} ms   main thread ${median(cpu).toFixed(1)} ms${g}`;
   };
+  // The graphics card's time for the frames of a run, where it can be timed (see #adaptResolution).
+  const gpuNow = (since) => (scene.motion.timer && scene.motion.gpuAt > since ? scene.motion.gpu : null);
   // One run: `step` moves something every frame; frames and main-thread time measured.
   const run = async (label, step) => {
     onProgress?.(label);
     const log = scene.frameLog;
     const ivals = [];
     const cpu = [];
+    const gpu = [];
     const t0 = performance.now();
     let prev = null;
     let n0 = log.n;
@@ -56,12 +63,14 @@ export async function runProbe(scene, onProgress) {
       if (k > 0.4) {
         if (prev != null) ivals.push(t - prev);
         prev = t;
+        const g = gpuNow(t - 100);
+        if (g != null) gpu.push(g);
       } else {
         n0 = log.n;
       }
     }
     for (let k = n0; k < log.n; k++) cpu.push(log.cpu[k % log.time.length]);
-    lines.push(`${label.padEnd(28)} ${ivals.length ? stats(ivals, cpu.length ? cpu : [0]) : "no frames"}`);
+    lines.push(`${label.padEnd(28)} ${ivals.length ? stats(ivals, cpu.length ? cpu : [0], gpu) : "no frames"}`);
   };
   const orbit = (k) => scene.rig.drag(Math.cos(k * 2.1) * 7, Math.sin(k * 1.4) * 5);
   const dragging = async (label, apply, undo) => {
@@ -90,7 +99,46 @@ export async function runProbe(scene, onProgress) {
   const scale = scene.motion.scale;
   scene.motion.frozen = true;
   scene.motion.scale = 1;
+  const rig = scene.rig;
+  const here = { pan: { ...rig.pan }, zoom: rig.zoom, azimuth: rig.azimuth, elevation: rig.elevation, free: rig.free, bias: scene.zoomBias };
+  const putBack = () => {
+    rig.pan = { ...here.pan };
+    rig.zoom = here.zoom;
+    rig.azimuth = here.azimuth;
+    rig.elevation = here.elevation;
+    rig.free = here.free;
+    scene.zoomBias = here.bias;
+    scene.dirty = true;
+  };
   try {
+    // Panning where the view is now (the page, the zoom), as the space bar and a drag pan:
+    // through the same steps, re-pivoting onto the paper included.
+    lines.push(`Panning here, at ${Math.round(scene.zoomPercent)} %`);
+    const sway = (k) => scene.debugPan(Math.cos(k * 2.1) * 8, Math.sin(k * 1.4) * 5);
+    const panning = async (label, apply, undo) => {
+      apply?.();
+      scene.dirty = true;
+      try {
+        await run(label, sway);
+      } finally {
+        undo?.();
+        putBack();
+      }
+    };
+    await panning("Panning, as is");
+    await panning("  half the pixels", () => {
+      r.setPixelRatio(ratio / 2);
+      scene.composer.setPixelRatio(ratio / 2);
+    }, () => {
+      r.setPixelRatio(ratio);
+      scene.composer.setPixelRatio(ratio);
+    });
+    const vecHere = pages().map((m) => m.userData.uniforms.uVecOn.value);
+    await panning("  no vector text", () => {
+      for (const m of pages()) m.userData.uniforms.uVecOn.value = 0;
+    }, () => pages().forEach((m, i) => { m.userData.uniforms.uVecOn.value = vecHere[i]; }));
+    await panning("  no re-pivot onto the paper", () => { scene.debugNoPivot = true; }, () => { scene.debugNoPivot = false; });
+    lines.push("");
     scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
     await dragging("Dragging round, as is");
     await dragging("  half the pixels", () => {
@@ -144,8 +192,62 @@ export async function runProbe(scene, onProgress) {
   } finally {
     scene.motion.scale = scale;
     scene.motion.frozen = false;
+    scene.debugNoPivot = false;
     scene.goTo(opening, { animate: false });
     if (closed) scene.setClosed(true, { animate: false });
+    putBack();
   }
+  lines.push("", await byHand(scene, onProgress, frame, median, gpuNow));
   return lines.join("\n");
+}
+
+/**
+ * Panning by hand, as the app is used (the resolution adapting as it does): how often the
+ * mouse reports a move while its button is held, how many frames were drawn, the graphics
+ * card's time. A frame is only drawn when a move arrives, so a mouse reporting 60 times a
+ * second gives 60 frames however fast the card. Waits up to 15 s for the drag to start.
+ */
+async function byHand(scene, onProgress, frame, median, gpuNow) {
+  const SECONDS_BY_HAND = 4;
+  onProgress?.("now pan the book by hand (space and drag) for 4 seconds");
+  let moves = 0;
+  let pressed = false;
+  const onMove = (e) => {
+    pressed = (e.buttons & 1) === 1;
+    if (pressed) moves += e.getCoalescedEvents?.().length || 1;
+  };
+  window.addEventListener("pointermove", onMove, { capture: true, passive: true });
+  try {
+    const wait = performance.now();
+    while (!pressed) {
+      if (performance.now() - wait > 15000) return "Panning by hand: no drag within 15 seconds (skipped)";
+      await frame();
+    }
+    moves = 0;
+    const n0 = scene.frameLog.n;
+    const t0 = performance.now();
+    const gpu = [];
+    const scales = [];
+    let held = 0;
+    for (;;) {
+      const t = await frame();
+      if (t - t0 > SECONDS_BY_HAND * 1000) break;
+      if (pressed) held++;
+      const g = gpuNow(t - 100);
+      if (g != null) gpu.push(g);
+      scales.push(scene.motion.scale);
+    }
+    const seconds = (performance.now() - t0) / 1000;
+    const drawn = scene.frameLog.n - n0;
+    const parts = [
+      `Panning by hand: mouse ${Math.round(moves / seconds)} moves/s`,
+      `frames drawn ${Math.round(drawn / seconds)}/s`,
+      gpu.length ? `gpu ${median(gpu).toFixed(1)} ms` : null,
+      `drawn at ${Math.round(median(scales) * 100)} %`,
+      held < 0.8 * scales.length ? "(the button wasn't held the whole time)" : null,
+    ];
+    return parts.filter(Boolean).join("   ");
+  } finally {
+    window.removeEventListener("pointermove", onMove, { capture: true });
+  }
 }

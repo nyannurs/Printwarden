@@ -2,6 +2,6 @@
   "name": "Printwarden",
   "appId": "app.printwarden.desktop",
   "description": "Preview print documents as bound books, check page pairing, and impose them for print.",
-  "version": "0.17.94",
+  "version": "0.17.95",
   "repository": "nyannurs/Printwarden"
 }
