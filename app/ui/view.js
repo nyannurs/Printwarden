@@ -56,8 +56,33 @@ function toggleViewMenu(open = viewMenu.hidden) {
 function typeOver(hex) {
   const linear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   const [r, g, b] = [1, 3, 5].map((i) => linear(parseInt(hex.slice(i, i + 2), 16) / 255));
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return (lum + 0.05) / 0.05 > 1.05 / (lum + 0.05) ? "#000" : "#fff";
+  return typeOn(0.2126 * r + 0.7152 * g + 0.0722 * b);
+}
+
+/** Black or white type on a surface of linear luminance `lum` (the larger contrast ratio). */
+const typeOn = (lum) => ((lum + 0.05) / 0.05 > 1.05 / (lum + 0.05) ? "#000" : "#fff");
+
+/**
+ * The frame counter and the zoom value take black or white for what is under each of them
+ * now (a page, the backdrop), not the backdrop alone: zoomed onto a white page, white type
+ * vanished (the author, 0.17.92). The picture under them is read back from the GPU after a
+ * drawn frame (scene.sampleUnder: a few kilobytes, no stall); nothing is read while nothing
+ * is drawn, and the last reading stands.
+ */
+const overLabels = [$("fps-hud"), $("zoom-value")];
+function sampleLabels() {
+  const canvas = scene.renderer.domElement;
+  const c = canvas.getBoundingClientRect();
+  if (!c.width) return;
+  const sx = canvas.width / c.width;
+  const sy = canvas.height / c.height;
+  const shown = overLabels.filter((el) => el.textContent && el.offsetParent);
+  if (!shown.length) return;
+  const rects = shown.map((el) => {
+    const r = el.getBoundingClientRect();
+    return { x: (r.left - c.left) * sx, y: (r.top - c.top) * sy, w: r.width * sx, h: r.height * sy };
+  });
+  scene.sampleUnder(rects, (lums) => lums.forEach((lum, k) => shown[k].style.setProperty("--over", typeOn(lum))));
 }
 
 /** Backdrop colour: live while picking, remembered once chosen. */
@@ -191,4 +216,5 @@ export function initView() {
   });
 
   setInterval(showFrameStats, 250);
+  setInterval(sampleLabels, 250);
 }

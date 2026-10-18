@@ -20,7 +20,7 @@ test("motion: a graphics card too slow for the screen draws motion smaller until
   const s = motionState();
   const scales = run(s, 8, 16); // 16 ms a frame at full size, a 120 Hz screen
   const last = scales[scales.length - 1];
-  ok(last < 1 && 16 * last * last <= HZ120 * 0.85, `settled at ${last}`);
+  ok(last < 1 && 16 * last * last <= HZ120 * 0.7, `settled at ${last}`);
   eq(new Set(scales.slice(-3)).size, 1, "and stays there");
 });
 
@@ -42,8 +42,17 @@ test("motion: keeping up easily, back to full size, a step at a time", () => {
 });
 
 test("motion: screens faster than 120 Hz aren't chased with a smaller picture", () => {
-  eq(run(motionState(), 4, 7, { refresh: 1000 / 165 }), [1, 1, 1, 1]);
+  eq(run(motionState(), 4, 5.5, { refresh: 1000 / 165 }), [1, 1, 1, 1]);
   eq(run(motionState(), 1, 9, { refresh: 1000 / 165 }), [0.85]);
+});
+
+test("motion: the drawing leaves the browser room in a frame (the author's M4 Pro: 7 ms of 8.3 at 70 % was too much)", () => {
+  const s = motionState();
+  s.k = MOTION_SCALES.indexOf(0.7);
+  const full = 7 / (0.7 * 0.7); // 7 ms at 70 %
+  const scales = run(s, 6, full, { refresh: 1000 / 128 });
+  ok(scales[scales.length - 1] < 0.7, `settled at ${scales[scales.length - 1]}`);
+  ok(full * scales[scales.length - 1] ** 2 <= HZ120 * 0.7, "within 70 % of a frame");
 });
 
 test("motion: without the graphics card's timing, frames that come late count", () => {

@@ -70,6 +70,9 @@ export class BookScene {
    * The scene's own steps that the parts in other files call (input.js, capture.js).
    * @type {SceneSteps}
    */
+  /** The picture under the plain type over the view, being read back (see sampleUnder). */
+  #under = { request: null, busy: false, buffer: null, size: 0 };
+
   #own = {
     wake: () => this.#wake(),
     currentTarget: () => this.#currentTarget(),
@@ -1125,6 +1128,71 @@ export class BookScene {
     return capture.recordVideo(this, this.#own, options);
   }
 
+  /**
+   * How light the picture is under a few places on screen (the frame counter and the zoom
+   * value over the view, see view.js): each rect's mean luminance, 0 to 1, linear. `rects` in
+   * the canvas's pixels from its top left. Read back without stalling: copied into a buffer
+   * on the GPU right after the next frame drawn, collected once the GPU is through with it
+   * (a fence, polled). `done(luminances)`; a newer request replaces one not yet copied.
+   * @param {{x: number, y: number, w: number, h: number}[]} rects
+   * @param {(luminances: number[]) => void} done
+   */
+  sampleUnder(rects, done) {
+    this.#under.request = { rects, done };
+  }
+
+  /** @param {WebGL2RenderingContext} gl */
+  #copyUnder(gl) {
+    const u = this.#under;
+    if (!u.request || u.busy || !rects0(u.request.rects)) return;
+    const { rects, done } = u.request;
+    u.request = null;
+    const W = gl.drawingBufferWidth;
+    const H = gl.drawingBufferHeight;
+    const boxes = rects.map((r) => {
+      const x = Math.max(0, Math.min(W - 1, Math.round(r.x)));
+      const y = Math.max(0, Math.min(H - 1, Math.round(r.y)));
+      const w = Math.max(1, Math.min(W - x, Math.round(r.w)));
+      const h = Math.max(1, Math.min(H - y, Math.round(r.h)));
+      return { x, y: H - y - h, w, h }; // GL counts rows from the bottom
+    });
+    const size = boxes.reduce((sum, b) => sum + 4 * b.w * b.h, 0);
+    u.buffer ??= gl.createBuffer();
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, u.buffer);
+    if (u.size < size) {
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, size, gl.STREAM_READ);
+      u.size = size;
+    }
+    let at = 0;
+    for (const b of boxes) {
+      gl.readPixels(b.x, b.y, b.w, b.h, gl.RGBA, gl.UNSIGNED_BYTE, at);
+      at += 4 * b.w * b.h;
+    }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    u.busy = true;
+    // Polled by the fence's status (clientWaitSync with no wait kept answering "not yet" in
+    // Chromium long after the fence had signalled).
+    const collect = () => {
+      if (gl.isContextLost()) return void (u.busy = false);
+      if (gl.getSyncParameter(sync, gl.SYNC_STATUS) !== gl.SIGNALED) return void setTimeout(collect, 8);
+      gl.deleteSync(sync);
+      u.busy = false;
+      const px = new Uint8Array(size);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, u.buffer);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, px);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      let k = 0;
+      done(boxes.map((b) => {
+        let sum = 0;
+        for (let i = 0; i < b.w * b.h; i++, k += 4) sum += 0.2126 * SRGB_TO_LINEAR[px[k]] + 0.7152 * SRGB_TO_LINEAR[px[k + 1]] + 0.0722 * SRGB_TO_LINEAR[px[k + 2]];
+        return sum / (b.w * b.h);
+      }));
+    };
+    setTimeout(collect, 0);
+  }
+
   /** Whether the sheets' depth is drawn first (see makeLeaf). */
   get depthFirst() {
     return this.depthPass;
@@ -1394,6 +1462,7 @@ export class BookScene {
       gl.endQuery(m.timer.TIME_ELAPSED_EXT);
       m.queries.push(query);
     }
+    this.#copyUnder(gl);
     m.low = low;
     const log = this.frameLog;
     log.time[log.n % log.time.length] = started;
@@ -1468,9 +1537,11 @@ export class BookScene {
     }
     if (!m.timer && drawingInMotion && wasDrawing) m.frames.push(dt);
     if (m.frames.length < 30 || m.refresh.length < 10) return;
-    const mean = m.frames.reduce((x, y) => x + y, 0) / m.frames.length;
+    // The slow frames decide (a frame late is what shows), not the average.
+    const sorted = m.frames.slice().sort((x, y) => x - y);
+    const slowFrames = sorted[Math.floor(sorted.length * 0.9)];
     m.frames.length = 0;
-    const scale = motionStep(m.step, mean, Math.min(...m.refresh), !!m.timer);
+    const scale = motionStep(m.step, slowFrames, Math.min(...m.refresh), !!m.timer);
     if (scale === m.scale) return;
     m.scale = scale;
     this.motionComposer.setPixelRatio(this.renderer.getPixelRatio() * m.scale);
@@ -1654,3 +1725,12 @@ function edgeTones(artwork) {
   const d = ctx.getImageData(0, 0, 2, 1).data;
   return [0, 4].map((k) => `rgb(${d[k]}, ${d[k + 1]}, ${d[k + 2]})`);
 }
+
+/** An 8-bit sRGB value's linear light (see sampleUnder). */
+const SRGB_TO_LINEAR = Float32Array.from({ length: 256 }, (_, i) => {
+  const c = i / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+});
+
+/** At least one rect with an area. */
+const rects0 = (rects) => rects.some((r) => r.w >= 1 && r.h >= 1);
