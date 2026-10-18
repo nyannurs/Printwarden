@@ -87,6 +87,21 @@ export function bindInput(scene, own) {
   }, { passive: false });
 }
 
+/**
+ * The sheets that can be the paper nearest a camera looking at the book: each pile's top
+ * sheet (the open spread's two pages), the covers (seen from below, or the book shut), and
+ * every page in the air. A ray into a pile meets its top first. Testing every sheet in full
+ * was most of a pan step at 400 % (a ray down into a pile is inside every sheet's bounds):
+ * the author's mouse reported 116 moves a second, each re-pivoting through 120 sheets, and
+ * 43 frames a second were drawn on an M4 Pro while the drawing itself took 8.7 ms (0.17.95).
+ */
+function surfaceSheets(scene) {
+  const n = scene.leaves.length;
+  const keep = new Set([0, n - 1, scene.opening - 1, scene.opening].filter((i) => i >= 0 && i < n));
+  for (const l of scene.leaves) if (l.start != null) keep.add(l.i);
+  return [...keep].map((i) => scene.leaves[i].mesh);
+}
+
 /** A pan as the space bar and a drag make it (for the performance check, probe.js). */
 export function panBy(scene, own, dx, dy) {
   scene.rig.enterFree();
@@ -131,7 +146,7 @@ function pivotOnPaper(scene, own) {
   const target = own.currentTarget();
   const camera = target.clone().addScaledVector(toCamera, d);
   const ray = new THREE.Raycaster(camera, toCamera.clone().negate(), 0, d + scene.fitDistance);
-  const hit = ray.intersectObjects(scene.leaves.map((l) => l.mesh), false)[0];
+  const hit = ray.intersectObjects(surfaceSheets(scene), false)[0];
   if (!hit) return; // off the book: nothing to stay above
   const onPaper = Math.max(MIN_SURFACE_DISTANCE, hit.distance) / scene.fitDistance;
   // Farther than the zoom range allows (zoomed out over low paper): the pivot stays where
@@ -164,7 +179,7 @@ function zoomAt(scene, own, e) {
     const ray = new THREE.Raycaster();
     ray.setFromCamera(new THREE.Vector2(0, 0), scene.camera);
     const target = own.currentTarget();
-    const onPage = ray.intersectObjects(scene.leaves.map((l) => l.mesh), false)[0];
+    const onPage = ray.intersectObjects(surfaceSheets(scene), false)[0];
     let anchor = onPage?.point ?? null;
     if (!anchor) {
       const facing = new THREE.Vector3();
