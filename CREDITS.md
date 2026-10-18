@@ -6,12 +6,14 @@ Every outside project Printwarden includes code from, with its license. The lice
 
 | Project | License | What it's used for | Where |
 | --- | --- | --- | --- |
+| [Electron](https://www.electronjs.org) 44, with [Chromium](https://www.chromium.org) | MIT; Chromium BSD 3-Clause and others | The desktop app: its window, and the browser engine the app runs in (desktop builds only; the client viewer runs in the viewer's own browser) | `_build/` (main.cjs, preload.cjs); notice `vendor/licenses/electron.txt`; Chromium's licenses ship with each build as `LICENSES.chromium.html` |
 | [three.js](https://github.com/mrdoob/three.js) r170 | MIT | 3D rendering, plus addons (RoomEnvironment, EffectComposer, OutputPass) | `vendor/three.module.js`, `vendor/three-addons/` |
-| [pdf.js](https://github.com/mozilla/pdf.js) | Apache-2.0 | Reading and rendering PDFs; its WebAssembly decoders (JBIG2, OpenJPEG) and qcms colour management. `tools/patch-pdfjs.py` changes three lines: in `pdf.worker.mjs` its JPEG decoder asks ours first (below) and the overprint keys set a blend mode; in `pdf.mjs` enlarged images are drawn without smoothing, as a RIP draws them | `vendor/pdf.mjs`, `vendor/pdf.worker.mjs`, `vendor/pdf-wasm/`, `vendor/pdf-cmaps/`, `vendor/pdf-standard-fonts/`, `vendor/pdf-iccs/` |
+| [pdf.js](https://github.com/mozilla/pdf.js) 6.3.289 | Apache-2.0 | Reading and rendering PDFs; its WebAssembly decoders (JBIG2, OpenJPEG) and qcms colour management. `tools/patch-pdfjs.py` changes five lines: in `pdf.worker.mjs` its JPEG decoder asks ours first (below) and the overprint keys set a blend mode; in `pdf.mjs` enlarged images are drawn without smoothing, as a RIP draws them; in both, a transform's scale is never taken from the square root of a hair below zero (which made some enlarged images count as unscaled, and smoothed) | `vendor/pdf.mjs`, `vendor/pdf.worker.mjs`, `vendor/pdf-wasm/`, `vendor/pdf-cmaps/`, `vendor/pdf-standard-fonts/`, `vendor/pdf-iccs/` |
+| Files that ship with pdf.js: the Foxit fonts, Liberation Sans, Adobe's CMaps, the CGATS001Compat profile | BSD 3-Clause; GPL 2 with the font exception; BSD 3-Clause; CC0 1.0 | Standard fonts for PDFs that don't embed theirs, character maps for CJK text, pdf.js's compact CMYK profile | `vendor/pdf-standard-fonts/`, `vendor/pdf-cmaps/`, `vendor/pdf-iccs/`, each with its license |
 | [jpeg-decoder](https://github.com/image-rs/jpeg-decoder) 0.3.2 (image-rs) | MIT (or Apache-2.0) | Decoding the JPEGs pdf.js would decode in JavaScript (CMYK photos), compiled to WebAssembly from `tools/jpegwasm` by `tools/build-jpeg-wasm.sh` | `vendor/jpeg-decoder.wasm`, notice `vendor/licenses/jpeg-decoder.txt` |
 | [qcms](https://github.com/FirefoxGraphics/qcms) (via pdf.js) | MIT | ICC colour conversion (embedded profiles, plain CMYK) | `vendor/pdf-wasm/qcms_bg.wasm` |
-| [pdf-lib](https://github.com/Hopding/pdf-lib), with @pdf-lib/standard-fonts, UPNG.js and pako bundled in | MIT | Writing the imposed PDF | `vendor/pdf-lib.esm.js` (notices in `vendor/licenses/pdf-lib.txt`), `app/impose/writer.js` |
-| [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) | MIT | Writing MP4 video | `vendor/mp4-muxer/` |
+| [pdf-lib](https://github.com/Hopding/pdf-lib) 1.17.1, with @pdf-lib/standard-fonts, UPNG.js and pako bundled in | MIT | Writing the imposed PDF | `vendor/pdf-lib.esm.js` (notices in `vendor/licenses/pdf-lib.txt`), `app/impose/writer.js` |
+| [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) 5.2.2 | MIT | Writing MP4 video | `vendor/mp4-muxer/` |
 | [FFmpeg](https://ffmpeg.org) 9.0.2 | LGPL 2.1 or later (built with nothing under the GPL) | ProRes .mov export | built by `tools/build-ffmpeg.sh` into `_build/ffmpeg-lgpl/` with its license and a NOTICE of how |
 | [w64devkit](https://github.com/skeeto/w64devkit), [Zig](https://ziglang.org), [NASM](https://www.nasm.us) | Unlicense; MIT; BSD-2 | Tools that build FFmpeg (not shipped; w64devkit's GCC runtime is in the Windows ffmpeg.exe: GCC Runtime Library Exception, mingw-w64 runtime) | `tools/build-ffmpeg.sh` |
 | [Space Grotesk](https://github.com/floriankarsten/space-grotesk) 2.0 (Florian Karsten) | SIL Open Font License 1.1 | The interface's typeface, Medium (variable font) | `vendor/fonts/SpaceGrotesk-Variable.woff2`, license `vendor/fonts/OFL-SpaceGrotesk.txt` |
@@ -25,6 +27,7 @@ Installed with `npm install` in the project folder, for `npm run check` (2026-10
 
 | Project | License | What it's used for |
 | --- | --- | --- |
+| [electron-builder](https://www.electron.build) 26 | MIT | Packages the desktop builds (`_build/build.mjs`); not part of the built app |
 | [ESLint](https://eslint.org), [@eslint/js](https://github.com/eslint/eslint), [globals](https://github.com/sindresorhus/globals) | MIT | The linter (`eslint.config.mjs`) |
 | [TypeScript](https://www.typescriptlang.org) 7 | Apache-2.0 | The type check of the JavaScript (`jsconfig.json`, `jsconfig.workers.json`) |
 | [@types/three](https://github.com/DefinitelyTyped/DefinitelyTyped) 0.170.0 | MIT | three.js r170's types |

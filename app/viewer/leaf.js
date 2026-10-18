@@ -399,15 +399,6 @@ export function freeFlap(scene, mesh) {
   mesh.material.dispose();
 }
 
-/** A sheet face's depth alone (see makeLeaf); `holes`: a coil's, punched as on the page. */
-/**
- * The faces between the sheets of a stack swung over together: paper colour, unlit, no
- * image (see layoutLeaves). They can't be seen, so they aren't shaded as pages (that cost
- * most of a frame on a thick book standing up); they are drawn at all because the edge
- * faces in front of them drop pixels on some GPUs (the author's Mac, ANGLE over Metal,
- * no multisampling: a flying stack's edges were dashes of background), and a face behind
- * fills what an edge drops.
- */
 /**
  * A face between a flying stack's sheets, as its page: the page's image, unlit, in the
  * shade of the sheets' edges (see fillerMaterial). Where an edge face in front drops pixels
@@ -425,6 +416,15 @@ function inkFiller(scene, page) {
   return m;
 }
 
+/**
+ * The faces between the sheets of a stack swung over together, as plain paper: its colour,
+ * unlit, no image (see layoutLeaves; shown only with `app.scene.debugFillerInk = false`, the
+ * pages' own images, inkFiller, otherwise). They can't be seen, so they aren't shaded as
+ * pages (that cost most of a frame on a thick book standing up); they are drawn at all
+ * because the edge faces in front of them drop pixels on some GPUs (the author's Mac, ANGLE
+ * over Metal, no multisampling: a flying stack's edges were dashes of background), and a
+ * face behind fills what an edge drops.
+ */
 export function fillerMaterial(scene) {
   const m = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   m.onBeforeCompile = (shader) => sheetShader(shader, scene.shared);
@@ -432,6 +432,7 @@ export function fillerMaterial(scene) {
   return m;
 }
 
+/** A sheet face's depth alone (see makeLeaf); `holes`: a coil's, punched as on the page. */
 export function firstMaterial(scene, isFront, holes = false) {
   const m = new THREE.MeshDepthMaterial({ colorWrite: false, map: holes ? scene.white : null });
   m.onBeforeCompile = (shader) => {

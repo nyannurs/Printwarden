@@ -9,7 +9,7 @@
 // resolved from the app's own files (see client/bundle.js).
 
 import { bundleModules, CLIENT_ENTRY } from "../client/bundle.js";
-import { hasWire, WIRE_COLORS } from "../core/binding.js";
+import { hasWire, sideGlueMm, wireIsMetal } from "../core/binding.js";
 import { label } from "../core/book.js";
 import { baseHeight } from "../pdf/render.js";
 import { APP_VERSION, chooseSaveLocation } from "../platform.js";
@@ -20,7 +20,7 @@ import { pageImage } from "./pages.js";
 
 const JPEG_QUALITY = 0.86;
 
-/** Ask, build and save the viewer (the Viewer button). */
+/** Ask, build and save the viewer (Export, then Export as HTML file). */
 export async function exportClientViewer() {
   const a = state.analysis;
   if (!a) return;
@@ -97,7 +97,7 @@ async function clientBook(analysis, heightPx, progress) {
   const n = book.pages.length;
   const hex = (c) => `#${c.getHexString()}`;
   const spineImage = scene.spineMat.map?.image;
-  const glued = (setup.binding === "perfect" || setup.binding === "sewn") && n >= 6 ? setup.glueMm ?? 0 : 0;
+  const glued = sideGlueMm(setup.binding, setup.glueMm, n);
   const pages = [];
   for (let folio = 1; folio <= n; folio++) {
     progress(folio - 1, n);
@@ -137,7 +137,7 @@ async function clientBook(analysis, heightPx, progress) {
       frontEdge: hex(scene.frontWrapMat.color),
       backEdge: hex(scene.backWrapMat.color),
     },
-    wire: hasWire(setup.binding) ? { hex: setup.wire, metal: WIRE_COLORS.find((w) => w.hex === setup.wire.toLowerCase())?.metal ?? false } : null,
+    wire: hasWire(setup.binding) ? { hex: setup.wire, metal: wireIsMetal(setup.wire) } : null,
     headband: setup.binding === "hardcover" ? setup.headband : null,
     glue: { folios: glued ? [2, 3, n - 2, n - 1] : [], mm: glued },
     score: { folios: glued ? [1, n] : [], mm: glued },

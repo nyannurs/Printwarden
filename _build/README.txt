@@ -17,8 +17,8 @@ Install Node.js (the "LTS" version) from https://nodejs.org
   macOS:   download the macOS installer from nodejs.org and run it.
 
 That's all. The first start or build downloads the rest by itself (a few hundred
-MB, once). A build also fetches FFmpeg for its system, once (used for transparent
-videos; see "FFMPEG" below).
+MB, once). FFmpeg, for transparent videos, is already in this folder (see "FFMPEG"
+below): nothing to fetch for it.
 
 
 RUN IT WITHOUT BUILDING (quickest way to try changes)
@@ -112,13 +112,16 @@ If the app can't write there (a read-only drive, run from inside a zip) it says 
 and quits instead of writing anywhere else.
 
 Outside that folder the app only:
-  - reads a PDF you choose (Import, or dropped on the window)
-  - writes the files you choose to save (imposed PDF, screenshot); it refuses to
-    overwrite the PDF you imported
-  - reads CMYK printing profiles in the system's color folders, to offer them in
-    the Color menu (read only, never written)
-It uses no network (every request to the internet is blocked) and asks for no
-permissions (camera, microphone, location, notifications: all refused).
+  - reads a PDF you choose (Import, or dropped on the window), and the cover, spine
+    and spot finish PDFs you choose
+  - writes the files you choose to save (imposed PDF, HTML viewer, screenshot,
+    video); it refuses to overwrite the PDF you imported
+  - reads CMYK printing profiles in the system's color folders, to offer them under
+    Color > CMYK profile (read only, never written)
+Its only request to the internet: once a start, it asks GitHub for the latest
+release's version number, to say when a newer one is out (nothing is sent but the
+request itself, nothing is downloaded). Every other request is blocked, and it asks
+for no permissions (camera, microphone, location, notifications: all refused).
 
 What the operating system itself records about any program you run is outside
 the app's control: e.g. recent files and folders in the open/save dialogs, and

@@ -32,6 +32,19 @@ export const WIRE_COLORS = [
   { id: "gold", label: "Gold", hex: "#c8a24e", metal: true },
 ];
 
+/** Whether a wire colour is bare metal (the presets' own finish); custom colours are coated. */
+export const wireIsMetal = (hex) => WIRE_COLORS.find((w) => w.hex === hex.toLowerCase())?.metal ?? false;
+
+/**
+ * Side glue (mm from the spine, 0 none): perfect and sewn books of 6 pages or more glue the
+ * first and last page to the cover. One rule for the 3D view, the client viewer and Preflight.
+ * @param {string} binding
+ * @param {number | null | undefined} glueMm the setup's
+ * @param {number} pageCount
+ */
+export const sideGlueMm = (binding, glueMm, pageCount) =>
+  (binding === Binding.PERFECT || binding === Binding.SEWN) && pageCount >= 6 && glueMm > 0 ? glueMm : 0;
+
 /**
  * A hardcover's headbands: the cotton bands at head and foot of the spine, by colour. Four,
  * as every swatch row has, and the colour picker for any other (seven pushed the picker off

@@ -3,7 +3,7 @@
 // background threads; this file only coordinates.
 
 import { analyse, defaultSetup } from "../core/analysis.js";
-import { WIRE_COLORS } from "../core/binding.js";
+import { sideGlueMm, wireIsMetal } from "../core/binding.js";
 import { COVER_BASE } from "../core/document.js";
 import { coverOf, PAPER_FINISHES, paperThicknessMm, showThrough } from "../core/paper.js";
 import { openingOf } from "../core/pairing.js";
@@ -189,7 +189,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
  */
 function applyCoverExtras(a) {
   const n = a.book.pages.length;
-  const glued = (a.setup.binding === "perfect" || a.setup.binding === "sewn") && n >= 6 ? a.setup.glueMm ?? 0 : 0;
+  const glued = sideGlueMm(a.setup.binding, a.setup.glueMm, n);
   for (const f of [2, 3, n - 2, n - 1]) scene.setPageGlue(f, glued);
   for (const f of [1, n]) scene.setCoverScore(f, glued);
   const flap = a.coverFile && a.coverFile.flapMm > 0.5 && a.coverFile.frontFlapRect ? a.coverFile : null;
@@ -333,7 +333,7 @@ function reanalyse(opening = scene.opening) {
 
 /** Wire colour in the 3D view: the presets' own finish, coated for custom colours. */
 function setWire(hex) {
-  scene.setWire(hex, { metal: WIRE_COLORS.find((w) => w.hex === hex.toLowerCase())?.metal ?? false });
+  scene.setWire(hex, { metal: wireIsMetal(hex) });
 }
 
 /**

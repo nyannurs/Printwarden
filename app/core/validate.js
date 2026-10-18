@@ -1,7 +1,7 @@
 // Rule checks. Every error says what to change in the document (pages are added or removed
 // in InDesign, never here).
 
-import { Binding, BINDING_LABELS, foldedPages, pagesToAdd } from "./binding.js";
+import { Binding, BINDING_LABELS, foldedPages, pagesToAdd, sideGlueMm } from "./binding.js";
 import { isRecto, label } from "./book.js";
 import { mediaSize } from "./document.js";
 import { SpreadMode, SpreadPattern } from "./detect.js";
@@ -233,7 +233,7 @@ function* checkBindingHints({ book, rule, setup }) {
   if (rule.innerEdgeLossMm) {
     yield finding("info", "punch", `The punch for ${name} takes ~${rule.innerEdgeLossMm} mm of the inner edge.`);
   }
-  if ((rule.binding === Binding.PERFECT || rule.binding === Binding.SEWN) && setup.glueMm > 0 && n >= 6) {
+  if (sideGlueMm(rule.binding, setup.glueMm, n) > 0) {
     // Side glue: the cover is glued to the first and last page along the spine, so they can't
     // open there, and what is printed in that strip faces the cover.
     yield finding("info", "side-glue",

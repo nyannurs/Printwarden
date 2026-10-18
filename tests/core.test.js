@@ -1,5 +1,5 @@
 import { analyse } from "../app/core/analysis.js";
-import { Binding, pagesToAdd, ruleFor } from "../app/core/binding.js";
+import { Binding, pagesToAdd, ruleFor, sideGlueMm, wireIsMetal } from "../app/core/binding.js";
 import { buildBook, isRecto, label } from "../app/core/book.js";
 import { detectSpreads, SpreadMode, SpreadPattern } from "../app/core/detect.js";
 import { scheme } from "../app/core/folding.js";
@@ -442,4 +442,16 @@ test("paper: a set volume (a printer's caliper) sets the thickness, and the spin
   const thin = calculatedSpine(44, { ...defaultPaper(), volume: 1.0, coverVolume: 1.0 });
   const bulky = calculatedSpine(44, { ...defaultPaper(), volume: 2.0, coverVolume: 2.0 });
   near(bulky.widthMm / thin.widthMm, 2, 1e-9, "twice the volume: twice the spine");
+});
+
+// One rule for the 3D view, the client viewer and Preflight (each had its own copy to 0.17.101).
+test("side glue: perfect and sewn books of 6 pages or more only; wire: the metal presets only", () => {
+  eq(sideGlueMm(Binding.PERFECT, 6, 40), 6);
+  eq(sideGlueMm(Binding.SEWN, 4, 6), 4);
+  eq(sideGlueMm(Binding.PERFECT, 6, 4), 0);
+  eq(sideGlueMm(Binding.SADDLE, 6, 40), 0);
+  eq(sideGlueMm(Binding.HARDCOVER, 6, 40), 0);
+  eq(sideGlueMm(Binding.PERFECT, null, 40), 0);
+  eq(sideGlueMm(Binding.PERFECT, 0, 40), 0);
+  eq([wireIsMetal("#C9CBD0"), wireIsMetal("#c8a24e"), wireIsMetal("#1f2023"), wireIsMetal("#123456")], [true, true, false, false]);
 });

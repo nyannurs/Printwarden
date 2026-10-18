@@ -66,13 +66,13 @@ const lerp = (a, b, t) => a + (b - a) * t;
  */
 
 export class BookScene {
+  /** The picture under the plain type over the view, being read back (see sampleUnder). */
+  #under = { request: null, busy: false, buffer: null, size: 0 };
+
   /**
    * The scene's own steps that the parts in other files call (input.js, capture.js).
    * @type {SceneSteps}
    */
-  /** The picture under the plain type over the view, being read back (see sampleUnder). */
-  #under = { request: null, busy: false, buffer: null, size: 0 };
-
   #own = {
     wake: () => this.#wake(),
     currentTarget: () => this.#currentTarget(),
@@ -1554,6 +1554,7 @@ export class BookScene {
     if (drawingInMotion && wasDrawing) {
       if (!m.timer) m.frames.push(dt);
       m.intervals.push(dt); // as the screen got them: a refresh or more late counts (motionStep)
+      if (m.intervals.length > 240) m.intervals.shift();
     }
     if (m.frames.length < 30 || m.refresh.length < 10) return;
     const refresh = Math.min(...m.refresh);

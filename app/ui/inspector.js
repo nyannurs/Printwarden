@@ -1,5 +1,6 @@
-// The side panel: what was detected, the InDesign-style document setup, binding
-// options, and findings with one-click fixes.
+// The side panel: what was detected, the InDesign-style document setup, binding and paper
+// options, the backdrop and color settings, and Preflight's findings (each says what to
+// change in InDesign: pages are never added or removed here).
 
 import { BINDING_LABELS, hasWire, HEADBAND_COLORS, WIRE_COLORS } from "../core/binding.js";
 import { label } from "../core/book.js";
