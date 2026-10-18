@@ -301,6 +301,12 @@ export function layoutExtras(scene) {
         ny /= nl;
         st.inner.position.set(mx, my, st.inner.position.z);
         st.inner.rotation.z = Math.atan2(ny, nx) - Math.PI / 2;
+        // Only where the crease is open wider than the wire: closed (every spread but the
+        // centre one, the centre pages lying on each other) the legs have no room, and showed
+        // through the page lying on them as a grey line in the gutter (the author, booklet-16
+        // at 6 | 7). As on paper: they show once the centre spread opens.
+        const gap = Math.hypot(pa.x[k] - pb.x[k], pa.y[k] - pb.y[k]) - (m.thickness[c - 1] + m.thickness[c]) / 2;
+        st.inner.visible = gap > STAPLE.thickness * ex.stapleSquash;
       } else {
         st.inner.position.set(innerApex.x + innerApex.nx * legUp, innerApex.y + innerApex.ny * legUp, st.inner.position.z);
         st.inner.rotation.z = Math.atan2(innerApex.ny, innerApex.nx) - Math.PI / 2;

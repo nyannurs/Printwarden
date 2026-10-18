@@ -166,3 +166,24 @@ test("stapled page turns: no kink at the gutter mid-turn (the first 6 mm bend un
     box.remove();
   }
 });
+
+// The staples' legs lie in the crease of the centre spread: shown only there, where it opens.
+// Elsewhere the centre pages lie on each other, and the legs showed through the page on them
+// as a grey line in the gutter (the author, booklet-16 at 6 | 7, 0.17.100).
+test("staples: their legs show at the centre spread only, where the crease opens", () => {
+  const { scene, box } = makeScene();
+  try {
+    for (const pageCount of [16, 44]) {
+      scene.setBook({ pageCount, pageSize: { width: 148, height: 210 }, binding: "saddle", paper: stock(0.15) });
+      const m = scene.model.leafCount / 2;
+      for (let opening = 0; opening <= 2 * m; opening++) {
+        scene.goTo(opening, { animate: false });
+        scene.debugStep();
+        const shown = scene.extras.staples.map((st) => st.inner.visible);
+        ok(shown.every((v) => v === (opening === m)), `${pageCount} pages at opening ${opening}: legs ${shown.join(", ")}`);
+      }
+    }
+  } finally {
+    box.remove();
+  }
+});
