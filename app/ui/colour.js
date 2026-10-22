@@ -1,11 +1,11 @@
-// Colour management: which CMYK profile the pages are rendered with (see pdf/icc.js). The one
-// last chosen, for every file until another is; until one is, the PDF's output intent if it has
-// one, else the one included.
+// Colour management: which CMYK profile the pages are shown with (the ink table the 3D view and
+// the timeline read their inks through, see viewer/inklut.js; the renderer's, for sRGB images),
+// and which plates print. The profile last chosen, for every file until another is; until one
+// is, the PDF's output intent if it has one, else the one included.
 
-import { pageSizeOf } from "../core/analysis.js";
 import { listCmykProfiles, readProfile } from "../platform.js";
-import { filmstrip, inspector, scene, startRenderers, state } from "./app.js";
-import { forgetThumbnails, loadAllTextures } from "./pages.js";
+import { naiveLut } from "../viewer/inklut.js";
+import { filmstrip, inkView, inspector, scene, state } from "./app.js";
 import { applySpine, renderSpineArt } from "./spine-panel.js";
 
 const PROFILE_PREF = "cmykProfile"; // remembered choice (localStorage)
@@ -41,21 +41,6 @@ export async function colourOptions(outputIntent) {
   return { options, choice, inks: [true, true, true, true] };
 }
 
-/**
- * Which plates print (the Separations window, ui/plates.js): by plate, Cyan, Magenta, Yellow,
- * Black, then a page's spots; false leaves one out. Every page is drawn again without them
- * (MuPDF leaves a plate's ink out of the page, raster images included), the open spread
- * first; what shows stays until its replacement arrives. (Pages drawn as inks, switched in the
- * shader at once, are to come: see CONTEXT.md, Decisions.)
- * @param {boolean[]} inkOn
- */
-export function setPlates(inkOn) {
-  if (!state.bytes || !state.renderer) return;
-  state.colour = { ...state.colour, inks: inkOn.slice(0, 4) };
-  state.renderer.setInks(inkOn);
-  refresh();
-}
-
 export async function profileBytes(colour, id) {
   const o = colour.options.find((x) => x.id === id);
   if (!o) return null;
@@ -69,7 +54,10 @@ export async function profileBytes(colour, id) {
   return null;
 }
 
-/** Switch profile: restart the renderer and re-render every page (old images stay until then). */
+/**
+ * Switch profile. Nothing is drawn again: the pages are their inks, and the profile is the ink
+ * table they are shown through (applyProfile).
+ */
 export async function setColourProfile(id) {
   if (!state.bytes || id === state.colour.choice) return;
   state.colour = { ...state.colour, choice: id };
@@ -78,34 +66,29 @@ export async function setColourProfile(id) {
   } catch {
     // no storage: fine
   }
-  rerender();
+  await applyProfile();
 }
 
-/** Restart the renderer with the colour settings and re-render every page. */
-function rerender() {
-  const old = state.renderer;
-  const rendererReady = startRenderers({ bytes: state.bytes, cover: state.cover }, profileBytes(state.colour, state.colour.choice));
-  state.rendererReady = rendererReady;
-  state.renderer = null;
-  rendererReady.then((r) => {
-    if (state.rendererReady === rendererReady) {
-      state.renderer = r;
-      r.setInks([...state.colour.inks, true, true, true, true]); // the plates as switched
-    } else r.destroy();
-    old?.destroy();
-  });
-  refresh();
-}
-
-/** Every page image made again (the renderer draws differently now), the old ones shown until then. */
-function refresh() {
-  for (const folio of [...state.details.keys()]) scene.setPageDetails(folio, []);
-  state.details.clear();
+/**
+ * The chosen profile applied: as the ink table (viewer/inklut.js, made by MuPDF), to the 3D
+ * view, the timeline and the cover's edge colour, which show every page's inks through it from
+ * the next frame; to the renderer, for the sRGB images it draws (the client viewer's pages, the
+ * spine artwork). Called once the renderer is ready, and on every change of profile.
+ */
+export async function applyProfile() {
+  const renderer = state.renderer;
+  if (!renderer) return;
+  const bytes = await profileBytes(state.colour, state.colour.choice);
+  renderer.setProfile(bytes);
+  const lut = (await renderer.inkLut(bytes)) ?? naiveLut();
+  if (state.renderer !== renderer) return; // another document since
+  state.inkLut = lut;
+  scene.setInkLut(lut);
+  inkView.setLut(lut);
+  filmstrip.refreshInk();
   inspector.render(state.analysis, state.name, state.colour);
-  state.generation++;
-  state.stripKey = ""; // timeline thumbnails re-render in the new colours
-  forgetThumbnails();
-  // Spine artwork is rendered with the profile too.
+  applySpine(); // the covers' edge colours come through the table
+  // Spine artwork is an sRGB image, drawn through the profile.
   const art = state.spineArt;
   if (art) {
     renderSpineArt(art).then((image) => {
@@ -115,7 +98,23 @@ function refresh() {
       applySpine();
     }, (err) => console.error(err));
   }
-  filmstrip.render(state.analysis, pageSizeOf(state.analysis) ?? { width: 148, height: 210 });
-  filmstrip.setActive(scene.opening);
-  loadAllTextures();
+}
+
+/**
+ * Which plates print (the Separations window, ui/plates.js): by plate, Cyan, Magenta, Yellow,
+ * Black, then a page's spots; false leaves one out. A process plate is switched where the inks
+ * are shown (the 3D view's shaders, the timeline's converter, the cover's edge colour), from
+ * the next frame, on every page at once: nothing is drawn again. (A spot left out would be: the
+ * window has the process plates only, spots always print.)
+ * @param {boolean[]} inkOn
+ */
+export function setPlates(inkOn) {
+  if (!state.bytes) return;
+  const process = inkOn.slice(0, 4);
+  state.colour = { ...state.colour, inks: process };
+  scene.setInksOn(process);
+  inkView.setInksOn(process);
+  filmstrip.refreshInk();
+  applySpine();
+  if (inkOn.slice(4).includes(false)) state.renderer?.setInks(inkOn); // a spot left out: drawn again without it
 }

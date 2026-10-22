@@ -13,14 +13,18 @@ export class Filmstrip {
   /**
    * @param {HTMLElement} el
    * @param {{onSelect: (opening: number) => void,
-   *          thumbnail: (folio: number) => Promise<ImageBitmap | null>,
-   *          toggleHost: HTMLElement}} deps `toggleHost`: where Reading order / Press sheets go
+   *          thumbnail: (folio: number) => Promise<{width: number, height: number, data: Uint8Array} | null>,
+   *          ink: import("./inkview.js").InkView,
+   *          toggleHost: HTMLElement}} deps `thumbnail`: a page's inks, small; `ink`: draws them
+   *   as the colour they print; `toggleHost`: where Reading order / Press sheets go
    */
   constructor(el, deps) {
     this.el = el;
     this.deps = deps;
     this.mode = "reading";
     this.cells = [];
+    /** @type {Map<HTMLElement, {width: number, height: number, data: Uint8Array}>} a page's cell -> its inks, for drawing again */
+    this.thumbs = new Map();
 
     this.toggle = document.createElement("div");
     this.toggle.className = "pill-row";
@@ -77,6 +81,7 @@ export class Filmstrip {
     this.pageSize = pageSize;
     this.observer.disconnect();
     this.strip.replaceChildren();
+    this.thumbs.clear();
     const { book, pairs, layout, findings, imposed } = analysis;
     const flagged = new Set(findings.filter((f) => f.severity === "error").flatMap((f) => f.folios));
 
@@ -170,15 +175,34 @@ export class Filmstrip {
       if (!entry.isIntersecting) continue;
       this.observer.unobserve(entry.target);
       for (const div of entry.target.querySelectorAll(".page:not(.blank)")) {
-        this.deps.thumbnail(Number(div.dataset.folio)).then((src) => {
-          if (!src || !div.isConnected) return; // a page that rendered blank, or gone
-          const c = document.createElement("canvas");
-          c.width = src.width;
-          c.height = src.height;
-          c.getContext("2d").drawImage(src, 0, 0);
-          div.replaceChildren(c);
+        this.deps.thumbnail(Number(div.dataset.folio)).then((ink) => {
+          if (!ink || !div.isConnected) return; // a page that rendered blank, or gone
+          this.thumbs.set(div, ink);
+          this.#draw(div, ink);
         }).catch(() => {});
       }
+    }
+  }
+
+  /** A thumbnail from its inks, through the converter (the profile and the plates as now). */
+  #draw(div, ink) {
+    const bitmap = this.deps.ink.draw(ink);
+    if (!bitmap) return; // no table yet: drawn when it comes (refreshInk)
+    let c = div.firstChild;
+    if (!(c instanceof HTMLCanvasElement)) {
+      c = document.createElement("canvas");
+      div.replaceChildren(c);
+    }
+    c.width = bitmap.width;
+    c.height = bitmap.height;
+    c.getContext("bitmaprenderer").transferFromImageBitmap(bitmap);
+  }
+
+  /** Every thumbnail drawn again from its inks: the profile or the plates changed. */
+  refreshInk() {
+    for (const [div, ink] of this.thumbs) {
+      if (div.isConnected) this.#draw(div, ink);
+      else this.thumbs.delete(div);
     }
   }
 }

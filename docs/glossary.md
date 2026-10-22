@@ -47,7 +47,8 @@
 | Base image | The one image of a page every page has, sized so the whole book fits in memory. |
 | Cross-section, profile | A leaf's shape seen from its head: a curve from the spine to the fore-edge, the same along the spine except during a corner-led turn. |
 | Frame | One picture the graphics card draws: as many a second as the screen shows (60 to 120) while things move, none at rest. |
-| Texture key | The identity of a page's image (`textureKey` in ui/pages.js): the color profile, the plates that print, the source page and its trim. When it is unchanged, the image is reused. |
+| Texture key | The identity of a page's image (`textureKey` in ui/pages.js): the source page and its trim. When it is unchanged, the image is reused. |
+| Ink table | The chosen CMYK profile as a grid, 17 steps per ink, made by MuPDF: what the 3D view and the timeline turn a page's inks into screen color through. A switch of profile or plates changes the table or a switch, never the pages. |
 | GPU | The graphics card. |
 | Leaf | One sheet in the book: two pages. |
 | Main thread | The thread that runs the window. Work that would freeze it runs in background threads (workers). |

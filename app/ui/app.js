@@ -16,7 +16,8 @@ import { APP_NAME, APP_VERSION, canQuit, latestRelease, onMenuCommand, openRelea
 import { BookScene } from "../viewer/scene.js";
 import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js";
 import { buildClientHtml, exportClientViewer } from "./client.js";
-import { colourOptions, profileBytes, setColourProfile } from "./colour.js";
+import { applyProfile, colourOptions, profileBytes, setColourProfile, setPlates } from "./colour.js";
+import { InkView } from "./inkview.js";
 import { makeCompass } from "./compass.js";
 import { aboutDialog, exportChoiceDialog, exportDialog, importDialog } from "./dialogs.js";
 import { $, addScrollbar, fitPill, showLoad, snapToPixels, toast } from "./dom.js";
@@ -50,6 +51,7 @@ export const state = {
   textures: new Map(),
   details: new Map(), // folio -> strips on screen: [{region, pxPerMm}]
   colour: { options: [], choice: "builtin", inks: [true, true, true, true] }, // CMYK profile options for this document, the plates that print
+  inkLut: null, // the chosen profile as the ink table (viewer/inklut.js), once the renderer made it
   flapKey: "", // which flap images the 3D covers show (see applyCoverExtras)
   background: "#56575b", // 3D backdrop colour, remembered between launches
   bookKey: "",
@@ -70,9 +72,12 @@ export const scene = new BookScene($("viewport"), {
   onCamera: (camera) => updateCompass(camera),
 });
 
+/** The timeline's thumbnails from their inks (the profile and the plates as the 3D view has them). */
+export const inkView = new InkView();
 export const filmstrip = new Filmstrip($("filmstrip"), {
   onSelect: (opening) => scene.goTo(opening),
   thumbnail: (folio) => thumbnail(folio),
+  ink: inkView,
   toggleHost: $("view-toggle"),
 });
 addScrollbar($("inspector"));
@@ -142,6 +147,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
       if (state.rendererReady !== rendererReady) return r.destroy();
       state.renderer = r;
       refreshPlates(); // the Separations window's rows: usable now
+      applyProfile().catch((err) => console.error(err)); // the ink table for the 3D view and the timeline
     });
     state.bytes = file.bytes;
     state.pages = pages;
@@ -203,8 +209,8 @@ function applyCoverExtras(a) {
   const reach = flap.flapMm;
   state.rendererReady.then(async (r) => {
     const [front, back] = await Promise.all([
-      r.render(COVER_BASE, flap.frontFlapRect, 1600, 50, { cache: false }),
-      r.render(COVER_BASE, flap.backFlapRect, 1600, 50, { cache: false }),
+      r.render(COVER_BASE, flap.frontFlapRect, 1600, 50, { mode: "ink", cache: false }),
+      r.render(COVER_BASE, flap.backFlapRect, 1600, 50, { mode: "ink", cache: false }),
     ]);
     if (state.flapKey !== key) { // another book since
       front?.close?.();
@@ -433,11 +439,12 @@ onMenuCommand((command) => {
 
 initView();
 initPlates();
+scene.setPageKind("ink"); // the pages' textures are their inks (pdf/mupdf-render.js), before any book
 
 // Load the render workers while the app sits idle: the first import starts instantly.
 prepareSpareWorkers(300);
 
 // For debugging from the developer console.
 window.app = {
-  state, scene, openDocument, updateSetup, sharpen, setColourProfile, prepareCaptureTile, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
+  state, scene, openDocument, updateSetup, sharpen, setColourProfile, setPlates, prepareCaptureTile, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
 };

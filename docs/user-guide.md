@@ -53,7 +53,7 @@ The buttons over the view:
 - **Left page / Spread / Right page** centers the view on one page or the whole spread. Each press shows the next choice. It has nothing to do while one page shows, closed or at a cover.
 - **Close / Open** closes the book, turning back to the front cover first, or opens it.
 - **Screenshot** and **Video** open their dialogs (see Exports).
-- **Separations** opens a small window beside it, as Acrobat's Output Preview has them: a row per plate (Process plates, Cyan, Magenta, Yellow, Black) with its ink's circle. Click a row to leave that plate out or print it again; Process plates switches the four at once. Every page is drawn again without the plates left out, the open spread first; what shows stays until its replacement arrives. Overprint shows this way: a black set to overprint leaves the color under it when the black plate is off, a knockout leaves paper.
+- **Separations** opens a small window beside it, as Acrobat's Output Preview has them: a row per plate (Process plates, Cyan, Magenta, Yellow, Black) with its ink's circle. Click a row to leave that plate out or print it again; Process plates switches the four at once. The switch is instant, on every page of the book and in the timeline. Overprint shows this way: a black set to overprint leaves the color under it when the black plate is off, a knockout leaves paper.
 
 Below them:
 - **The zoom slider** steps through 50, 75, 100, 125, 150, 200, 300, 400, 600 and 800 %. 100 % is the preset's framing. A preset and a zoom step always frame the book the same way, so mockups are comparable. The wheel zooms freely in between.
@@ -147,6 +147,7 @@ The backdrop color behind the book, flat, exactly as chosen. It is remembered.
   - A PDF with an output intent (PDF/X) can be shown **From PDF**, as Acrobat does.
   - Every CMYK profile installed on the computer is offered too, from the system's color folders and Adobe's.
   - The profile last chosen sticks for every file until you choose another.
+  - A switch of profile is instant: every page and thumbnail shows through the new one at once.
 
 ### Preflight
 

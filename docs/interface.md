@@ -17,8 +17,9 @@ What it adds is the window, the controls, and the bookkeeping of which page has 
 | `dialogs.js` | Every dialog: import, export choice, imposed export, HTML export, screenshot, video, spot finish, book spine, About and Licenses, reports. |
 | `capture.js` | Screenshots and videos: the pages at the output's resolution, the MP4 encoder, ProRes through FFmpeg. |
 | `client.js` | The client viewer export (see [The client viewer](client-viewer.md)). |
-| `colour.js` | The CMYK profile choice, and the plates that print. |
+| `colour.js` | The CMYK profile choice, and the plates that print: both switches of the ink table, instant. |
 | `plates.js` | The Separations button and window: which plates print (`setPlates` in colour.js); muted until the document's renderer is ready. |
+| `inkview.js` | The timeline's thumbnails from their inks: a small WebGL program with the ink table and the plates as the 3D view has them. |
 | `spine-panel.js` | The spine's color or artwork and the Book spine panel. |
 | `finish.js` | Spot finishes. |
 | `compass.js` | The view's compass. |
@@ -68,12 +69,12 @@ The flow:
 - **Reading order** shows facing pairs.
 - **Press sheets** shows sheet sides, from the layout.
 
-Thumbnails are the small images, 200 px tall. A click asks app.js to turn the book there. `setActive` highlights the open spread.
+Thumbnails are the pages' inks, 200 px tall, drawn as the color they print by `inkview.js` with the profile and the plates as the 3D view has them; the inks are kept, and a switch draws every thumbnail again from them (`refreshInk`), no render. A click asks app.js to turn the book there. `setActive` highlights the open spread.
 
 ## Page images (`pages.js`)
 
 The bookkeeping between the PDF and the 3D pages:
-- **`loadAllTextures`** renders every page's base image, nearest the open spread first. A page's key names the color profile, the plates that print, the source page and its trim. A page whose key hasn't changed keeps its image, so a settings change redraws only what it affects.
+- **`loadAllTextures`** renders every page's base image, nearest the open spread first, as its inks. A page's key names the source page and its trim (the profile and the plates don't change the image). A page whose key hasn't changed keeps its image, so a settings change redraws only what it affects.
 - **`sharpen`**, at rest:
   - It plans strips for every page in view (viewer/detail.js) at 1.25 image pixels per screen pixel.
   - It keeps strips already on screen that are within reach of the new plan (`sufficient`).
@@ -103,8 +104,8 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 
 - `colourOptions` lists the profiles: the included ISO Coated v2 (ECI), "From PDF" where the file has an output intent, and every installed CMYK profile.
 - The last choice is remembered.
-- `setColourProfile` restarts the renderer and redraws every page. The old images stay until the new ones arrive.
-- `setPlates` (the Separations window) tells the renderer which plates print and redraws every page the same way, the open spread first.
+- `setColourProfile` has MuPDF make the ink table for the profile (about 60 ms, in a render thread) and swaps it in the 3D view, the timeline and the cover's edge color (`applyProfile`); the renderer takes the profile for the sRGB images it draws from then on. No page is drawn again.
+- `setPlates` (the Separations window) switches the plates in the 3D view's shaders and the timeline's converter: from the next frame, on every page, no render.
 
 ## The spine (`spine-panel.js`)
 

@@ -46,25 +46,31 @@ The scheduler (`Scheduler`, `pump`) decides what goes where:
 
 | Image | Size | Used for |
 |---|---|---|
-| Base image | 700 to 1600 px tall: as large as a 480 MB budget allows for the whole book | Every page in 3D; scaled down, its timeline thumbnail |
+| Base image | 700 to 1600 px tall: as large as a 480 MB budget allows for the whole book | Every page in 3D |
 | Sharp strips | Exactly what the screen needs, up to 8192 px a side | The part of a page on screen, at rest |
+| Thumbnail | 200 px tall | The timeline |
 | Capture images | What a screenshot tile or a video frame needs | Exports |
 
-Results come back as ImageBitmaps, handed over without copying. A second kind, a page's inks (`mode: "ink"`: a byte a channel, Cyan, Magenta, Yellow, Black, then the page's spot colors), is for drawing pages with the plates switched in the shader, which is to come.
+All of these come back as the page's inks (`mode: "ink"`): a byte a channel, Cyan, Magenta, Yellow, Black, the page's spot colors composited in, device CMYK, exact. The 3D view and the timeline turn them into the color they print through the ink table (below), so the profile and the plates change every page at once and nothing is drawn twice. The other kind, an sRGB ImageBitmap (`mode: "rgb"`, handed over without copying), is for what leaves the app or is drawn as a picture: the client viewer's pages, the spine artwork, finish masks.
 
 ### How a page is drawn (`mupdf-render.js`)
 
 - **Coordinates.** A request names a rectangle of the page in PDF user space (millimeters, y up, as the structure gives trim boxes). MuPDF draws in page space (points, y down, the page's rotation applied), which the page's transform maps user space to. The rectangle's top left becomes the origin, and the height asked for sets the scale.
-- **Separations.** A page's spot colors are read once (its separations). A pixmap made with them is drawn with overprint honored: an overprinting object leaves the inks it doesn't set as they are, as the press does. For an sRGB image the spots are composited into the process colors; for inks each spot is a channel of its own.
-- **Color.** An sRGB image is drawn with the chosen CMYK profile as the default for plain CMYK and as the output intent, so plain CMYK is converted through it and RGB content too, as Acrobat's Output Preview shows a file. Inks are drawn in device CMYK, exact (sent through the profile at both ends, MuPDF went by way of Lab and made a four-color black of K); the profile applies where they are shown.
-- **Plates.** Which plates print (`setInks`): a process plate left out has its channel cleared, a spot left out is not drawn at all (MuPDF's "disabled" separation).
+- **Separations.** A page's spot colors are read once (its separations). A pixmap made with them is drawn with overprint honored: an overprinting object leaves the inks it doesn't set as they are, as the press does. The spots are composited into the process colors, for inks and sRGB images alike.
+- **Color.** An sRGB image is drawn with the chosen CMYK profile as the default for plain CMYK and as the output intent, so plain CMYK is converted through it and RGB content too, as Acrobat's Output Preview shows a file. Inks are drawn in device CMYK, exact (sent through the profile at both ends, MuPDF went by way of Lab and made a four-color black of K); the profile applies where they are shown, as the ink table. RGB content in inks is converted by MuPDF's own CMYK, close to a coated profile's.
+- **Plates.** Which plates print (`setInks`): the process plates are switched where the inks are shown, so every ink image carries all four; a spot left out is not drawn at all (MuPDF's "disabled" separation).
+- **The ink table** (`lut`): the chosen profile as a grid, every entry converted to sRGB by MuPDF (about 60 ms); see below.
 - **A page's facts** (`info`): its spot colors, each with its CMYK equivalent at full tint, and whether it uses overprint.
 
 ## Color management
 
 ### CMYK
 
-Plain CMYK (DeviceCMYK) is converted with the profile you choose. The default is ISO Coated v2 (ECI), shipped with the app. The alternatives are the PDF's output intent or any profile installed on the computer (ui/colour.js). Profiles embedded in the PDF (ICCBased colors) are always honored, through LittleCMS inside MuPDF. RGB content is converted through the chosen profile too, so it shows as it prints. Changing the profile restarts the renderer and redraws every page; the old images stay on screen until the new ones arrive.
+Plain CMYK (DeviceCMYK) is converted with the profile you choose. The default is ISO Coated v2 (ECI), shipped with the app. The alternatives are the PDF's output intent or any profile installed on the computer (ui/colour.js). Profiles embedded in the PDF (ICCBased colors) are always honored, through LittleCMS inside MuPDF. RGB content is converted to CMYK too, so it shows as it prints. Changing the profile changes the ink table: every page and thumbnail shows through the new one from the next frame, and nothing is drawn again (the renderer takes the profile for the sRGB images it draws from then on).
+
+### The ink table
+
+The chosen profile, for the pages' inks, is a grid (`viewer/inklut.js`): 17 steps per ink, Cyan, Magenta, Yellow and Black, 83,521 entries, each converted to sRGB by MuPDF through the profile (`lut` in mupdf-render.js, in a render thread), paper (no ink) brought to white. The 3D view reads it as a 3D texture, 17 by 17 by 289 (`INK_GLSL` in viewer/shaders.js): Cyan and Magenta across its width and height, Yellow within a Black slice along its depth, Black by the two slices either side mixed in the shader; the plates that print are a switch there, a plate left out being ink that isn't there. The timeline's thumbnails go through the same program on a small canvas (`ui/inkview.js`), and the cover's edge color through the table on the CPU (`inkToRgb`). A switch of profile or plates changes the table or the switch: every page, thumbnail and edge follows from the next frame.
 
 ### Overprint
 

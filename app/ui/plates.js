@@ -2,9 +2,10 @@
 // switched on and off live, to check overprint and what each ink carries. A button under Video
 // opens a small window to its left, in the manner of a dropdown's open list: a row per plate with
 // its ink's circle and name; a click prints the plate or leaves it out. Process plates switches
-// the four at once. The drawing is MuPDF's (setPlates in colour.js): every page drawn again
-// without the plates left out, raster images included. The rows are muted until a document's
-// renderer is ready. Every plate prints again with a new file.
+// the four at once. The switch is where the inks are shown (setPlates in colour.js): every page
+// is its inks, and a plate left out is ink that isn't there, from the next frame, raster images
+// included. The rows are muted until a document's renderer is ready. Every plate prints again
+// with a new file.
 
 import { state } from "./app.js";
 import { setPlates } from "./colour.js";

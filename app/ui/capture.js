@@ -76,7 +76,7 @@ export async function prepareCaptureTile(visible) {
     const images = await Promise.all(plan.map(({ region, heightPx }) => pageRegionImage(folio, {
       x0: tr.x0 + region.u0 * pageMm.width, x1: tr.x0 + region.u1 * pageMm.width,
       y0: tr.y1 - region.v1 * pageMm.height, y1: tr.y1 - region.v0 * pageMm.height,
-    }, heightPx, CAPTURE_PRIORITY, { cache: false, flex: true })));
+    }, heightPx, CAPTURE_PRIORITY, { mode: "ink", cache: false, flex: true })));
     scene.setPageDetails(folio, images.map((image, i) => ({ image, region: plan[i].region })), { immediate: true });
     // Known, so the capture's strips go with the others once it ends (until 0.17.79 the strips
     // of a page that had none before stayed on it after a screenshot, at the capture's size).
@@ -188,7 +188,7 @@ export async function sharpenForVideo(sharp, need) {
     const have = sharp.get(folio);
     const height = videoImageHeight(px, g.trim.y1 - g.trim.y0, have?.height ?? null, maxHeight);
     if (height == null) return;
-    const image = await pageImage(folio, height, CAPTURE_PRIORITY, { cache: false });
+    const image = await pageImage(folio, height, CAPTURE_PRIORITY, { mode: "ink", cache: false });
     if (!image) return;
     scene.showPageImage(folio, image);
     have?.image.close();

@@ -1,6 +1,7 @@
 // The book's spine: its colour (a preset, a cover's edge, or any) or artwork from a PDF, and
 // the panel where they are chosen, with the spine's width.
 
+import { inkToRgb, naiveLut } from "../viewer/inklut.js";
 import { coverOf } from "../core/paper.js";
 import { calculatedSpine, coverMmFor, hasSpine, paperForSpine, spineTakesArtwork } from "../core/spine.js";
 import { openPdf } from "../pdf/load.js";
@@ -22,9 +23,10 @@ function spinePresets() {
 }
 
 /**
- * The colour along a cover's spine edge (its image, as printed on the paper colour), or
- * null until the page is rendered. The front cover's spine edge is its left; the back
- * cover's (the back of the last leaf) its right. An odd page count has a blank back cover.
+ * The colour along a cover's spine edge (its inks there, through the ink table with the plates
+ * that print, on the paper colour), or null until the page is rendered. The front cover's spine
+ * edge is its left; the back cover's (the back of the last leaf) its right. An odd page count
+ * has a blank back cover.
  */
 function coverEdge(which) {
   const n = state.analysis?.book.pages.length ?? 0;
@@ -34,22 +36,33 @@ function coverEdge(which) {
   const t = state.textures.get(folio);
   if (!t) return null;
   if (!t.edge) return paper; // a blank cover
+  const on = state.colour.inks ?? [true, true, true, true];
+  const [c, m, y, k] = t.edge.map((v, i) => (on[i] === false ? 0 : v));
+  const rgb = inkToRgb(state.inkLut ?? naiveLut(), c, m, y, k);
   const p = [1, 3, 5].map((i) => parseInt(paper.slice(i, i + 2), 16) / 255);
-  return "#" + t.edge.map((v, k) => Math.round(v * p[k]).toString(16).padStart(2, "0")).join("");
+  return "#" + rgb.map((v, i) => Math.round(v * p[i]).toString(16).padStart(2, "0")).join("");
 }
 
-/** The average colour (0-255) of a page image along its left or right edge. */
+/**
+ * The average inks (Cyan, Magenta, Yellow, Black, 0..1) of a page along its left or right edge
+ * (an ink image, see pdf/mupdf-render.js).
+ */
 export function averageEdge(image, left) {
-  const h = 64;
-  const w = Math.max(8, Math.round((image.width * h) / image.height));
-  const canvas = new OffscreenCanvas(w, h);
-  const g = canvas.getContext("2d", { willReadFrequently: true });
-  g.drawImage(image, 0, 0, w, h);
+  const { width: w, height: h, data } = image;
   const cols = Math.max(1, Math.round(w * 0.03));
-  const d = g.getImageData(left ? 0 : w - cols, Math.round(h * 0.08), cols, Math.round(h * 0.84)).data;
-  const sum = [0, 0, 0];
-  for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) sum[k] += d[i + k];
-  return sum.map((v) => v / (d.length / 4));
+  const x0 = left ? 0 : w - cols;
+  const y0 = Math.round(h * 0.08);
+  const y1 = Math.round(h * 0.92);
+  const sum = [0, 0, 0, 0];
+  let n = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x0 + cols; x++) {
+      const o = (y * w + x) * 4;
+      for (let k = 0; k < 4; k++) sum[k] += data[o + k];
+      n++;
+    }
+  }
+  return sum.map((v) => v / Math.max(1, n) / 255);
 }
 
 /** The colour the spine shows (without artwork). */

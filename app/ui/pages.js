@@ -1,6 +1,8 @@
 // Page images for the 3D view: every page of the document, nearest first, at a size the
 // whole book fits in memory with; then, once the view stops, the part of each page on
-// screen again from the PDF's vectors, as sharp as the screen needs (see sharpen).
+// screen again from the PDF's vectors, as sharp as the screen needs (see sharpen). All of them
+// as the page's inks (pdf/mupdf-render.js, mode "ink"): the 3D view and the timeline turn them
+// into colour through the ink table, so the profile and the plates change them at once.
 
 import { pageSizeOf } from "../core/analysis.js";
 import { baseHeight, THUMB_HEIGHT } from "../pdf/render.js";
@@ -29,7 +31,7 @@ function textureKey(folio) {
   if (!g) return "blank";
   const src = state.analysis.book.pages[folio - 1].source;
   const rect = [g.trim.x0, g.trim.y0, g.trim.x1, g.trim.y1].map((v) => v.toFixed(2));
-  return `${state.colour.choice}|${(state.colour.inks ?? []).map(Number).join("")}|${src.index}|${rect}`;
+  return `${src.index}|${rect}`; // inks: the profile and the plates don't change the image
 }
 
 /** A rendered image (ImageBitmap) of a finished page, or null for a blank. */
@@ -48,20 +50,12 @@ export async function pageRegionImage(folio, rect, height, priority, options = {
   return r.render(page.source.index, rect, height, priority, options);
 }
 
-/** The page's base image (the 3D view's, one render for both), for its timeline thumbnail. */
-function smallImage(folio, priority) {
-  const size = pageSizeOf(state.analysis) ?? { width: 1, height: 1 };
-  return pageImage(folio, baseHeight(state.analysis.book.pages.length, size.width / size.height), priority);
-}
+const thumbs = new Map(); // key -> Promise of the page's inks, THUMB_HEIGHT tall
 
-const thumbs = new Map(); // key -> Promise<ImageBitmap>
-
-/** Timeline thumbnail. */
+/** Timeline thumbnail: the page's inks, small (the timeline draws them through the ink table, see ui/inkview.js). */
 export function thumbnail(folio) {
   const key = textureKey(folio);
-  if (!thumbs.has(key)) {
-    thumbs.set(key, smallImage(folio, 100 + folio).then((img) => img && createImageBitmap(img, { resizeHeight: THUMB_HEIGHT, resizeQuality: "high" })));
-  }
+  if (!thumbs.has(key)) thumbs.set(key, pageImage(folio, THUMB_HEIGHT, 100 + folio, { mode: "ink" }));
   return thumbs.get(key);
 }
 
@@ -90,7 +84,7 @@ export function loadAllTextures() {
       // request may have handed it on.)
       const cur = state.textures.get(folio);
       if (gen !== state.generation || !image || (cur?.key === key && cur.height >= h)) return;
-      // Kept here: what the page is, and a cover's colour along the spine (see coverEdge).
+      // Kept here: what the page is, and a cover's inks along the spine (see coverEdge).
       // The image goes to the 3D view, which frees it once it is on the GPU.
       const edge = folio === 1 || folio === n ? averageEdge(image, folio % 2 === 1) : null;
       state.textures.set(folio, { key, height: h, edge });
@@ -99,7 +93,7 @@ export function loadAllTextures() {
     };
     // Per page: its image, nearest first.
     pending++;
-    pageImage(folio, height, 100 + distance, { cache: "pending" })
+    pageImage(folio, height, 100 + distance, { mode: "ink", cache: "pending" })
       .then(apply(height))
       .catch(() => {})
       .finally(() => {
@@ -188,7 +182,7 @@ function renderStrips(folio, g, pageMm, seen, plan, pass, outdated) {
       x0: tr.x0 + region.u0 * pageMm.width, x1: tr.x0 + region.u1 * pageMm.width,
       y0: tr.y1 - region.v1 * pageMm.height, y1: tr.y1 - region.v0 * pageMm.height,
     };
-    return pageRegionImage(folio, rect, heightPx, pass.priority, { cache: false, flex: true });
+    return pageRegionImage(folio, rect, heightPx, pass.priority, { mode: "ink", cache: false, flex: true });
   });
   return Promise.all(renders).then((images) => {
     const stale = outdated() || !scene.visiblePages().some((v) => v.folio === folio)

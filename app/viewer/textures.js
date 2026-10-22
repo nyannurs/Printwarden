@@ -1,7 +1,51 @@
 // Textures the scene makes for itself: placeholders (white paper, no finish), the paper's
-// grain, the contact shadow's soft footprint, and handling for page images once on the GPU.
+// grain, the contact shadow's soft footprint, the pages' inks and the ink table, and handling
+// for page images once on the GPU.
 
 import * as THREE from "three";
+import { LUT_DEPTH, LUT_HEIGHT, LUT_WIDTH } from "./inklut.js";
+
+/**
+ * A page's inks as a texture: C, M, Y, K a byte each in the four channels (pdf/mupdf-render.js,
+ * mode "ink"), read raw (no colour space), mipmapped and filtered as the page images were. The
+ * shader turns them into colour through the ink table (INK_GLSL). The image's bytes are its own
+ * until it is on the GPU (freeImage).
+ * @param {{width: number, height: number, data: Uint8Array}} image
+ */
+export function makeInkTexture(image, anisotropy) {
+  const t = new THREE.DataTexture(/** @type {any} */ (image.data), image.width, image.height, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.flipY = false;
+  t.colorSpace = THREE.NoColorSpace;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.anisotropy = anisotropy;
+  t.needsUpdate = true;
+  t.userData.ink = true;
+  return t;
+}
+
+/** The ink table (inklut.js: RGBA bytes in lutIndex order) as the 3D texture the shaders read. */
+export function makeInkLut(data) {
+  const t = new THREE.Data3DTexture(data, LUT_WIDTH, LUT_HEIGHT, LUT_DEPTH);
+  t.format = THREE.RGBAFormat;
+  t.type = THREE.UnsignedByteType;
+  t.minFilter = t.magFilter = THREE.LinearFilter;
+  t.wrapS = t.wrapT = t.wrapR = THREE.ClampToEdgeWrapping;
+  t.generateMipmaps = false;
+  t.colorSpace = THREE.NoColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** A page's placeholder as inks: none, so paper. */
+export function makeInkPaper() {
+  const t = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1);
+  t.colorSpace = THREE.NoColorSpace;
+  t.needsUpdate = true;
+  t.userData.ink = true;
+  return t;
+}
 
 /** One pixel to draw textures into once (see #warm). */
 export function makeWarmer() {
@@ -30,7 +74,12 @@ void main() { gl_FragColor = vec4( texture( uTex, vec2( 0.5 ) ) ); }`,
  */
 export function freeImage(tex) {
   const { image } = tex;
-  if (!image?.close) return;
+  if (!image) return;
+  if (image.data) { // an ink image: its bytes go, the size stays
+    tex.image = { width: image.width, height: image.height, data: null };
+    return;
+  }
+  if (!image.close) return;
   tex.image = { width: image.width, height: image.height };
   image.close();
 }

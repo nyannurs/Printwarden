@@ -5,7 +5,7 @@
 
 import * as THREE from "three";
 import { CASE_COVER_MM, CASE_HOLLOW, coilCentre, leafShape, signatureSheets } from "./model.js";
-import { EDGE_INK_SHARE, EDGE_INSET_MM, LEAF_FILL, patchShader } from "./shaders.js";
+import { EDGE_INK_SHARE, EDGE_INSET_MM, INK_GLSL, inkUniforms, LEAF_FILL, patchShader } from "./shaders.js";
 
 // Booklet stitching wire (mm): crown width, clinched leg length, flattened cross-section.
 const STAPLE = { crown: 12.7, leg: 5.2, width: 0.62, thickness: 0.42 };
@@ -568,8 +568,8 @@ function foldSheetMaterial(scene, a, b) {
   const W = scene.model.width;
   const H = scene.model.height;
   m.userData.uniforms = {
-    uFoldFrontA: { value: scene.white }, uFoldBackA: { value: scene.white },
-    uFoldFrontB: { value: scene.white }, uFoldBackB: { value: scene.white },
+    uFoldFrontA: { value: scene.blank }, uFoldBackA: { value: scene.blank },
+    uFoldFrontB: { value: scene.blank }, uFoldBackB: { value: scene.blank },
     uFoldEdge: { value: new THREE.Color() },
     uFoldInset: { value: new THREE.Vector2(EDGE_INSET_MM / W, EDGE_INSET_MM / H) },
     uFoldInk: { value: EDGE_INK_SHARE },
@@ -577,6 +577,7 @@ function foldSheetMaterial(scene, a, b) {
   m.userData.fold = { a, b };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, m.userData.uniforms);
+    inkUniforms(shader, scene.shared);
     shader.vertexShader = patchShader(shader.vertexShader, [
       ["void main() {", "attribute vec3 fold;\nvarying vec3 vFold;\nvoid main() {\n  vFold = fold;"],
     ]);
@@ -594,6 +595,7 @@ function foldSheetMaterial(scene, a, b) {
 }
 
 const FOLD_FRAGMENT_HEADER = /* glsl */ `
+${INK_GLSL}
 uniform sampler2D uFoldFrontA;
 uniform sampler2D uFoldBackA;
 uniform sampler2D uFoldFrontB;
@@ -609,10 +611,10 @@ const FOLD_INK = /* glsl */ `
     bool first = vFold.x < 0.0;
     vec2 at = clamp( vec2( abs( vFold.x ), vFold.y ), uFoldInset, 1.0 - uFoldInset );
     vec2 mirrored = vec2( 1.0 - at.x, at.y );
-    vec4 frontA = sRGBTransferEOTF( texture2D( uFoldFrontA, at ) );
-    vec4 backA = sRGBTransferEOTF( texture2D( uFoldBackA, mirrored ) );
-    vec4 frontB = sRGBTransferEOTF( texture2D( uFoldFrontB, at ) );
-    vec4 backB = sRGBTransferEOTF( texture2D( uFoldBackB, mirrored ) );
+    vec4 frontA = sRGBTransferEOTF( pvPageColor( texture2D( uFoldFrontA, at ) ) );
+    vec4 backA = sRGBTransferEOTF( pvPageColor( texture2D( uFoldBackA, mirrored ) ) );
+    vec4 frontB = sRGBTransferEOTF( pvPageColor( texture2D( uFoldFrontB, at ) ) );
+    vec4 backB = sRGBTransferEOTF( pvPageColor( texture2D( uFoldBackB, mirrored ) ) );
     if ( vFold.z > 1.5 ) {
       vec3 ink = 0.5 * ( first ? frontA.rgb + backA.rgb : frontB.rgb + backB.rgb );
       diffuseColor.rgb = uFoldEdge * mix( vec3( 1.0 ), ink, uFoldInk );
@@ -630,10 +632,10 @@ function syncFoldSheet(m, scene) {
   const B = scene.leaves[b];
   if (!A || !B) return;
   const u = m.userData.uniforms;
-  u.uFoldFrontA.value = A.front.map ?? scene.white;
-  u.uFoldBackA.value = A.back.map ?? scene.white;
-  u.uFoldFrontB.value = B.front.map ?? scene.white;
-  u.uFoldBackB.value = B.back.map ?? scene.white;
+  u.uFoldFrontA.value = A.front.map ?? scene.blank;
+  u.uFoldBackA.value = A.back.map ?? scene.blank;
+  u.uFoldFrontB.value = B.front.map ?? scene.blank;
+  u.uFoldBackB.value = B.back.map ?? scene.blank;
   u.uFoldEdge.value.copy((a === 0 ? scene.coverEdgeMat : scene.edgeMat).color);
   const stock = A.front;
   m.color.copy(stock.color);

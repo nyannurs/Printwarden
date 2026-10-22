@@ -4,10 +4,11 @@
 // Output Preview shows a file. Used in the render threads (mupdf-worker.js) and, where threads
 // can't start, on the main thread (render.js).
 //
-// Two kinds of image. `rgb`: the page as an ImageBitmap in sRGB, white paper, what the 3D view
-// and the timeline draw today. `ink`: the page's inks, a byte a channel (Cyan, Magenta, Yellow,
-// Black, then its spot colours), in the chosen profile's CMYK, for drawing on the sheets with the
-// profile applied there (plates switched in the shader): see CONTEXT.md, Decisions.
+// Two kinds of image. `ink`: the page's inks, a byte a channel (Cyan, Magenta, Yellow, Black;
+// its spot colours composited into them), device CMYK, what the 3D view and the timeline draw
+// through the ink table (`lut`: the chosen profile as a grid, see viewer/inklut.js) with the
+// plates switched there. `rgb`: the page as an ImageBitmap in sRGB through the profile, white
+// paper, for what leaves the app (the client viewer's pages) and for anything drawn as an image.
 //
 // Coordinates: a request names a rectangle of the page in PDF user space (mm, y up, as the
 // structure gives trim boxes); MuPDF draws in page space (points, y down, the page's rotation
@@ -15,6 +16,7 @@
 
 import * as mupdf from "../../vendor/mupdf/mupdf.js";
 import { libmupdfModule as libmupdf } from "../../vendor/mupdf/mupdf.js";
+import { LUT_DEPTH, LUT_ENTRIES, lutInks } from "../viewer/inklut.js";
 
 const PT_PER_MM = 72 / 25.4;
 const { ColorSpace, DrawDevice, Pixmap } = mupdf;
@@ -22,7 +24,6 @@ const { ColorSpace, DrawDevice, Pixmap } = mupdf;
 // Separation behaviours (fz_separation_behavior): composited into the process colours, a
 // channel of its own, left out.
 const SEP_COMPOSITE = 0;
-const SEP_SPOT = 1;
 const SEP_DISABLED = 2;
 
 // Scratch memory in MuPDF's heap for a rectangle handed to its glue (4 floats).
@@ -71,7 +72,11 @@ export class InkDocument {
     this.forget();
   }
 
-  /** Which plates print: by plate (Cyan, Magenta, Yellow, Black, then spots); false leaves one out. */
+  /**
+   * Which plates print: by plate (Cyan, Magenta, Yellow, Black, then spots); false leaves one
+   * out. The spots: a spot left out isn't drawn. The process plates are the viewer's (switched
+   * in the shaders, see viewer/shaders.js INK_GLSL): the drawings carry all four.
+   */
   setInks(inkOn) {
     this.inkOn = inkOn;
   }
@@ -132,6 +137,34 @@ export class InkDocument {
   }
 
   /**
+   * The ink table for a CMYK profile (ICC bytes, or null for MuPDF's own): every grid entry
+   * (viewer/inklut.js) converted to sRGB by MuPDF, RGBA bytes in lutIndex order, paper white
+   * (ink 0) brought to 255 so white paper stays white.
+   */
+  lut(bytes) {
+    const cs = bytes ? new ColorSpace(bytes, "ink table") : ColorSpace.DeviceCMYK;
+    const pix = new Pixmap(cs, [0, 0, LUT_DEPTH, LUT_DEPTH], false); // LUT_ENTRIES pixels, 4 bytes each, rows packed
+    let rgb = null;
+    try {
+      pix.getPixels().set(lutInks());
+      rgb = pix.convertToColorSpace(ColorSpace.DeviceRGB);
+      const src = rgb.getPixels();
+      const n = rgb.getNumberOfComponents();
+      const out = new Uint8Array(LUT_ENTRIES * 4);
+      const white = [src[0], src[1], src[2]].map((v) => Math.max(1, v));
+      for (let i = 0; i < LUT_ENTRIES; i++) {
+        for (let c = 0; c < 3; c++) out[4 * i + c] = Math.min(255, Math.round((src[n * i + c] * 255) / white[c]));
+        out[4 * i + 3] = 255;
+      }
+      return out;
+    } finally {
+      rgb?.destroy();
+      pix.destroy();
+      if (bytes) cs.destroy();
+    }
+  }
+
+  /**
    * The device matrix and pixel size for `rect` (mm, PDF user space) of page `index` at `height`
    * pixels tall: page space (points) scaled and shifted so the rectangle's top left is the origin.
    */
@@ -151,7 +184,7 @@ export class InkDocument {
   /**
    * Draw `rect` (mm, PDF user space) of page `index` at `height` pixels, with the inks that print.
    * `mode` "rgb": {width, height, data: Uint8ClampedArray RGBA, sRGB, opaque}; "ink": {width,
-   * height, n, data: Uint8Array, n bytes a pixel: C, M, Y, K, then the page's spots}.
+   * height, n: 4, data: Uint8Array, 4 bytes a pixel: C, M, Y, K, the spots composited in}.
    */
   draw(index, rect, height, mode = "rgb") {
     const p = this.page(index);
@@ -160,7 +193,7 @@ export class InkDocument {
     const spotCount = p.spots.length;
     for (let i = 0; i < spotCount; i++) {
       const on = this.inkOn[4 + i] !== false;
-      libmupdf._wasm_pw_set_separation_behavior(p.seps, i, !on ? SEP_DISABLED : ink ? SEP_SPOT : SEP_COMPOSITE);
+      libmupdf._wasm_pw_set_separation_behavior(p.seps, i, on ? SEP_COMPOSITE : SEP_DISABLED);
     }
     const cs = ink ? ColorSpace.DeviceCMYK : ColorSpace.DeviceRGB;
     const bbox = rectIn(0, 0, width, hPx);
@@ -170,8 +203,8 @@ export class InkDocument {
       if (ink) {
         // All in MuPDF: a device CMYK pixmap (plain CMYK keeps its values exactly; through the
         // profile, even as both ends, MuPDF went by way of Lab and made a four-colour black of
-        // K), its spots as channels. The profile applies where the inks are shown (the shader);
-        // RGB content is converted by MuPDF's own CMYK profile, close to a coated one's.
+        // K), its spots composited in. The profile applies where the inks are shown (the ink
+        // table); RGB content is converted by MuPDF's own CMYK profile, close to a coated one's.
         pix = new Pixmap(libmupdf._wasm_pw_new_pixmap_from_page(p.page.pointer, matrixIn(ctm), bbox, cs.pointer, p.seps, 0, 0, 0, 0));
       } else {
         // An opaque RGBA pixmap (an alpha channel, cleared to white) for an ImageBitmap's layout.
@@ -186,10 +219,7 @@ export class InkDocument {
       const data = (ink ? new Uint8Array(width * hPx * n) : new Uint8ClampedArray(width * hPx * 4));
       data.set(pix.getPixels()); // a view into MuPDF's heap: copied out before anything else moves it
       if (!ink) return { width, height: hPx, data, overprint: p.overprint };
-      // Process plates left out: their channels cleared (a spot left out never got drawn).
-      for (let c = 0; c < 4; c++) {
-        if (this.inkOn[c] === false) for (let k = c; k < data.length; k += n) data[k] = 0;
-      }
+      // (The process plates are switched where the inks are shown: every ink image carries all four.)
       return { width, height: hPx, n, data, spots: p.spots, overprint: p.overprint };
     } finally {
       dev?.destroy();

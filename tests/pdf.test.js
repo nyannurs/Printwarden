@@ -7,6 +7,7 @@ import { writeImposedPdf } from "../app/impose/writer.js";
 import { openPdf, writeImposed } from "../app/pdf/load.js";
 import { InkDocument } from "../app/pdf/mupdf-render.js";
 import { createRenderer, MainThreadRenderer } from "../app/pdf/render.js";
+import { LUT_ENTRIES, lutIndex } from "../app/viewer/inklut.js";
 import { makeSamplePdf } from "../app/pdf/sample.js";
 import { readStructure } from "../app/pdf/structure.js";
 import { eq, near, ok, test } from "./harness.js";
@@ -54,6 +55,29 @@ test("background threads: render workers start and draw a page", async () => {
   ok(r.workers?.length >= 2, "worker pool");
   const img = await r.render(0, { x0: 9, y0: 9, x1: 157, y1: 219 }, 300);
   eq([img.width, img.height], [211, 300]);
+  r.destroy();
+});
+
+test("INKS: a page drawn as its inks, C M Y K a byte each; the ink table from a profile, paper white", async () => {
+  const bytes = await makeSamplePdf({ pages: 2 });
+  const r = await createRenderer(bytes, () => { throw new Error("fell back to the main thread"); });
+  const ink = await r.render(0, { x0: 9, y0: 9, x1: 157, y1: 219 }, 300, 10, { mode: "ink", cache: false });
+  eq([ink.width, ink.height, ink.n, ink.data.length], [211, 300, 4, 211 * 300 * 4]);
+  ok(ink.data instanceof Uint8Array && !(ink.data instanceof Uint8ClampedArray), "raw bytes");
+  let total = 0;
+  for (let i = 0; i < ink.data.length; i++) total += ink.data[i];
+  ok(total > 0, "ink on the page");
+  const profile = new Uint8Array(await (await fetch("../vendor/icc/ISOcoated_v2_eci.icc")).arrayBuffer());
+  const lut = await r.inkLut(profile);
+  eq(lut.length, LUT_ENTRIES * 4);
+  eq([...lut.slice(0, 4)], [255, 255, 255, 255]); // no ink: paper, white
+  const at = (c, m, y, k) => [...lut.subarray(4 * lutIndex(c, m, y, k), 4 * lutIndex(c, m, y, k) + 3)];
+  const solidC = at(16, 0, 0, 0);
+  ok(solidC[0] < 40 && solidC[2] > 200, `solid Cyan through ISO Coated v2: ${solidC}`);
+  const solidK = at(0, 0, 0, 16);
+  ok(solidK.every((v) => v < 60), `solid Black: ${solidK}`);
+  const own = await r.inkLut(null); // MuPDF's own CMYK
+  eq([...own.slice(0, 4)], [255, 255, 255, 255]);
   r.destroy();
 });
 

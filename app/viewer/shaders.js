@@ -80,7 +80,38 @@ float pvSoftShadow( sampler2D map, vec2 mapSize, vec4 sc ) {
 export const EDGE_INSET_MM = 0.3;
 export const EDGE_INK_SHARE = 0.85;
 
+// A page's inks to the colour they print, through the ink table (viewer/inklut.js): C, M, Y
+// read by the card's trilinear filter within a Black slice, Black by two slices mixed here. The
+// plates switched here (uInkOn): a plate left out is ink that isn't there, at once, on every
+// page. uInkPages: 1 when the pages' textures are inks (the app), 0 when they are sRGB images
+// (the client viewer): pvPageColor takes a sampled page either way, giving sRGB as stored.
+export const INK_GLSL = /* glsl */ `
+uniform highp sampler3D uInkLut;
+uniform vec4 uInkOn;
+uniform float uInkPages;
+vec3 pvInkToRgb( vec4 ink ) {
+  ink = clamp( ink * uInkOn, 0.0, 1.0 );
+  float k = ink.a * 16.0;
+  float k0 = min( floor( k ), 15.0 );
+  vec2 cm = ( ink.rg * 16.0 + 0.5 ) / 17.0;
+  float ya = ( k0 * 17.0 + ink.b * 16.0 + 0.5 ) / 289.0;
+  float yb = ( ( k0 + 1.0 ) * 17.0 + ink.b * 16.0 + 0.5 ) / 289.0;
+  return mix( texture( uInkLut, vec3( cm, ya ) ).rgb, texture( uInkLut, vec3( cm, yb ) ).rgb, k - k0 );
+}
+vec4 pvPageColor( vec4 sampled ) {
+  return uInkPages > 0.5 ? vec4( pvInkToRgb( sampled ), 1.0 ) : sampled;
+}
+`;
+
+/** The ink conversion's uniforms (the scene's shared ones) on a shader that samples pages. */
+export function inkUniforms(shader, shared) {
+  shader.uniforms.uInkLut = shared.uInkLut;
+  shader.uniforms.uInkOn = shared.uInkOn;
+  shader.uniforms.uInkPages = shared.uInkPages;
+}
+
 export const EDGE_FRAGMENT_HEADER = /* glsl */ `
+${INK_GLSL}
 uniform sampler2D uEdgeFront;
 uniform sampler2D uEdgeBack;
 uniform vec2 uEdgeInset;
@@ -90,8 +121,8 @@ varying vec2 vEdgeUv;
 export const EDGE_INK = /* glsl */ `
   {
     vec2 at = clamp( vEdgeUv, uEdgeInset, 1.0 - uEdgeInset );
-    vec3 inkFront = sRGBTransferEOTF( texture( uEdgeFront, at, 1.0 ) ).rgb;
-    vec3 inkBack = sRGBTransferEOTF( texture( uEdgeBack, vec2( 1.0 - at.x, at.y ), 1.0 ) ).rgb;
+    vec3 inkFront = sRGBTransferEOTF( pvPageColor( texture( uEdgeFront, at, 1.0 ) ) ).rgb;
+    vec3 inkBack = sRGBTransferEOTF( pvPageColor( texture( uEdgeBack, vec2( 1.0 - at.x, at.y ), 1.0 ) ) ).rgb;
     diffuseColor.rgb *= mix( vec3( 1.0 ), 0.5 * ( inkFront + inkBack ), uEdgeInk );
   }
 `;
@@ -217,6 +248,7 @@ vec3 sheetNormal() {
 `;
 
 export const PAGE_FRAGMENT_HEADER = /* glsl */ `
+${INK_GLSL}
 // Side glue (perfect, sewn): the first and last page are glued to the cover this far from
 // the spine (mm): nothing printed there can be seen, and the paper creases at its edge.
 uniform float uGlue;
@@ -273,8 +305,9 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
   else if ( uDetailFade < 1.0 ) sampledDiffuseColor = mix( pageSample( map, vMapUv, detailDx, detailDy ), sampledDiffuseColor, uDetailFade );
   // The strip glued to the cover: paper, whatever was printed there (it faces the cover).
   float glueFrom = ( uSpineAtU0 > 0.5 ? vMapUv.x : 1.0 - vMapUv.x ) * uPageSize.x;
-  if ( uGlue > 0.0 && glueFrom < uGlue ) sampledDiffuseColor = vec4( 1.0 );
-  sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor ); // filtered as stored, see PAGE_COLOR_SPACE
+  if ( uGlue > 0.0 && glueFrom < uGlue ) sampledDiffuseColor = uInkPages > 0.5 ? vec4( 0.0 ) : vec4( 1.0 );
+  // Inks to the colour they print (ink pages), then to light: filtered as stored, see PAGE_COLOR_SPACE.
+  sampledDiffuseColor = sRGBTransferEOTF( pvPageColor( sampledDiffuseColor ) );
   diffuseColor *= sampledDiffuseColor;
   if ( uTurnIn.a > 0.5 && ( vMapUv.y < 0.0 || vMapUv.y > 1.0 || ( uSpineAtU0 > 0.5 ? vMapUv.x > 1.0 : vMapUv.x < 0.0 ) ) ) {
     diffuseColor.rgb = uTurnIn.rgb;
@@ -373,8 +406,7 @@ export const HOLE_DISCARD = /* glsl */ `
 // The other side of the leaf, faintly, mirrored and softened: ink showing through paper.
 export const SHOW_THROUGH = /* glsl */ `
   {
-    vec3 behind = texture(uBack, vec2(1.0 - vMapUv.x, vMapUv.y), 2.5).rgb;
-    behind = sRGBTransferEOTF( vec4( behind, 1.0 ) ).rgb;
+    vec3 behind = sRGBTransferEOTF( pvPageColor( texture( uBack, vec2( 1.0 - vMapUv.x, vMapUv.y ), 2.5 ) ) ).rgb;
     diffuseColor.rgb *= mix(vec3(1.0), behind, uShow);
   }
 `;

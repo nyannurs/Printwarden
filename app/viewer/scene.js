@@ -21,7 +21,8 @@ import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, pageH
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
 import { motionReset, motionState, motionStep } from "./motion.js";
 import { MAX_DETAIL, sheetShader } from "./shaders.js";
-import { disposeTexture, freeImage, makeContactMap, makeGrain, makeWarmer, makeWhite } from "./textures.js";
+import { naiveLut } from "./inklut.js";
+import { disposeTexture, freeImage, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeInkTexture, makeWarmer, makeWhite } from "./textures.js";
 
 const TURN_MS = 720;
 const FAST_TURN_MS = 360; // for requests in quick succession (rapid clicks, scrubbing)
@@ -190,6 +191,11 @@ export class BookScene {
 
     this.white = makeWhite();
     this.none = makeWhite(); // a finish mask without ink
+    // The pages' placeholder, by their kind (setPageKind): as inks, none (paper); as sRGB
+    // images, white. And the ink table the shaders read the inks through (setInkLut).
+    this.noInk = makeInkPaper();
+    this.blank = this.white;
+    this.inkLut = makeInkLut(naiveLut());
     /** @type {Map<number, THREE.Mesh>} folio -> a flap lying on that page (see setPageFlap) */
     this.flaps = new Map();
     // folio -> the page's image, on the GPU only (see setPageTexture); kept through rebuilds.
@@ -208,6 +214,11 @@ export class BookScene {
       // Where no shadow caster comes near (see nearestCasters).
       uCasterMap: { value: null },
       uCasterMapOn: { value: 0 },
+      // The pages' inks to colour (INK_GLSL): the table, the plates that print, whether the
+      // pages are inks at all (see setPageKind).
+      uInkLut: { value: this.inkLut },
+      uInkOn: { value: new THREE.Vector4(1, 1, 1, 1) },
+      uInkPages: { value: 0 },
     };
     this.edgeMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide });
     this.coverEdgeMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide }); // the covers' cut edges
@@ -347,6 +358,32 @@ export class BookScene {
     this.frameRequest = null;
     this.#frame(time);
     if (this.idleFrames <= 3) this.frameRequest ??= requestAnimationFrame((t) => this.#tick(t));
+  }
+
+  /**
+   * What the pages' textures hold: "ink" (C, M, Y, K a byte each, shown through the ink table:
+   * the app, see pdf/mupdf-render.js) or "rgb" (sRGB images: the client viewer, the tests).
+   * Before the book is built: the placeholders are chosen by it.
+   */
+  setPageKind(kind) {
+    this.shared.uInkPages.value = kind === "ink" ? 1 : 0;
+    this.blank = kind === "ink" ? this.noInk : this.white;
+    this.dirty = true;
+  }
+
+  /** The ink table (viewer/inklut.js: the chosen profile): every page changes with it, at once. */
+  setInkLut(data) {
+    const old = this.inkLut;
+    this.inkLut = makeInkLut(data);
+    this.shared.uInkLut.value = this.inkLut;
+    old?.dispose();
+    this.dirty = true;
+  }
+
+  /** The plates that print (Cyan, Magenta, Yellow, Black): a plate left out is gone from every page at once. */
+  setInksOn(on) {
+    this.shared.uInkOn.value.set(on[0] ? 1 : 0, on[1] ? 1 : 0, on[2] ? 1 : 0, on[3] ? 1 : 0);
+    this.dirty = true;
   }
 
   /**
@@ -911,7 +948,7 @@ export class BookScene {
    * again (null). Not taken: the caller frees it, after.
    */
   showPageImage(folio, image) {
-    disposeTexture(this.overrides.get(folio), this.white);
+    disposeTexture(this.overrides.get(folio), this.blank);
     if (image) this.overrides.set(folio, this.#pageTexture(image));
     else this.overrides.delete(folio);
     this.#showPage(folio);
@@ -919,6 +956,7 @@ export class BookScene {
   }
 
   #pageTexture(image) {
+    if (image.data) return makeInkTexture(image, this.renderer.capabilities.getMaxAnisotropy()); // a page's inks
     const tex = new THREE.Texture(image);
     tex.flipY = false;
     tex.colorSpace = PAGE_COLOR_SPACE;
@@ -932,7 +970,7 @@ export class BookScene {
     const leaf = this.leaves[Math.ceil(folio / 2) - 1];
     if (!leaf) return;
     const [mat, other] = folio % 2 ? [leaf.front, leaf.back] : [leaf.back, leaf.front];
-    mat.map = this.overrides.get(folio) ?? this.pageTextures.get(folio) ?? this.white;
+    mat.map = this.overrides.get(folio) ?? this.pageTextures.get(folio) ?? this.blank;
     other.userData.uniforms.uBack.value = mat.map; // show-through from this side
   }
 
@@ -1043,7 +1081,7 @@ export class BookScene {
     // Replaces any set still being prepared for this page.
     const pending = this.detailQueue.get(folio);
     if (pending) {
-      for (const tex of pending.textures) disposeTexture(tex, this.white);
+      for (const tex of pending.textures) disposeTexture(tex, this.blank);
       for (const s of pending.strips.slice(pending.textures.length)) s.image.close?.();
     }
     this.detailQueue.set(folio, { strips: strips.slice(0, MAX_DETAIL), textures: [] });
@@ -1079,8 +1117,8 @@ export class BookScene {
       const u = (folio % 2 ? leaf.front : leaf.back).userData.uniforms;
       const had = u.uDetailCount.value > 0;
       for (let i = 0; i < MAX_DETAIL; i++) {
-        disposeTexture(u[`uDetail${i}`].value, this.white);
-        u[`uDetail${i}`].value = job.textures[i] ?? this.white;
+        disposeTexture(u[`uDetail${i}`].value, this.blank);
+        u[`uDetail${i}`].value = job.textures[i] ?? this.blank;
         const r = job.strips[i]?.region;
         if (r) u[`uDetailRect${i}`].value.set(r.u0, r.v0, r.u1, r.v1);
       }
@@ -1279,7 +1317,7 @@ export class BookScene {
       leaf.geo.dispose();
       leaf.pick.geometry.dispose();
       for (const m of [leaf.front, leaf.back]) { // (their page images are kept: see setPageTexture)
-        for (let i = 0; i < MAX_DETAIL; i++) disposeTexture(m.userData.uniforms[`uDetail${i}`].value, this.white);
+        for (let i = 0; i < MAX_DETAIL; i++) disposeTexture(m.userData.uniforms[`uDetail${i}`].value, this.blank);
         m.dispose();
       }
       for (const m of leaf.mesh.material.slice(3)) m.dispose(); // a coil page's twins (their textures are the page's)
@@ -1293,7 +1331,7 @@ export class BookScene {
     this.flaps.clear();
     // Sharp strips still on their way to the GPU were for the old book's leaves.
     for (const job of this.detailQueue.values()) {
-      for (const tex of job.textures) disposeTexture(tex, this.white);
+      for (const tex of job.textures) disposeTexture(tex, this.blank);
       for (const s of job.strips.slice(job.textures.length)) s.image.close?.();
     }
     this.detailQueue.clear();

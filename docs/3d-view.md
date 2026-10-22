@@ -106,7 +106,7 @@ In a stack turning together, a sheet's face against the next sheet can't be seen
 
 Pages are shaded as ink on paper (shaders.js):
 - **Lighting**: a studio environment (three.js's RoomEnvironment) and a key light, with no tone mapping. All light is scaled so white paper peaks just under the screen's white, about 247 to 250 of 255. It shades instead of clipping flat. Where a page faces the light more squarely, the extra light rolls off into the few levels left (`PAPER_ROLLOFF`).
-- **The page image multiplies the paper's color**, as ink on stock. Images are filtered as stored (sRGB) and only then turned into light, so type keeps its weight, as browsers and Acrobat antialias it.
+- **The page's inks become the color they print**, through the ink table (`INK_GLSL`: the chosen profile as a 3D texture, the plates that print as a switch), **and multiply the paper's color**, as ink on stock. The inks are filtered as stored and the color turned into light only then, so type keeps its weight, as browsers and Acrobat antialias it. (The client viewer's pages are sRGB images instead: the same shaders take either, `uInkPages`.)
 - **The gutter** darkens toward the fold, by the binding's width and depth.
 - **Show-through**: the other side of the leaf, faintly, mirrored and softened, by the paper's weight.
 - **Paper grain**: a tileable bump of fibers.

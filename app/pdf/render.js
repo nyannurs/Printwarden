@@ -11,6 +11,7 @@
 
 import { COVER_BASE } from "../core/document.js";
 import { SYSTEM_MEMORY } from "../platform.js";
+import { naiveLut } from "../viewer/inklut.js";
 
 export const THUMB_HEIGHT = 200;
 const BASE_BUDGET_BYTES = 480 * 1024 * 1024;
@@ -53,6 +54,8 @@ export function routedRenderer(main, cover) {
     render(index, ...rest) { const [r, i] = of(index); return r.render(i, ...rest); },
     info(index) { const [r, i] = of(index); return r.info(i); },
     setInks(inkOn) { main.setInks(inkOn); cover.setInks(inkOn); },
+    setProfile(bytes) { main.setProfile(bytes); cover.setProfile(bytes); },
+    inkLut(bytes) { return main.inkLut(bytes); },
     cancel(predicate) { main.cancel(predicate); cover.cancel(predicate); },
     destroy() { main.destroy(); cover.destroy(); },
   };
@@ -175,6 +178,21 @@ class Scheduler {
   /** A page's spot colours (name, CMYK equivalent) and whether it overprints (see mupdf-render.js). */
   info() {
     return Promise.resolve({ spots: [], overprint: false });
+  }
+
+  /** The CMYK profile (ICC bytes, or null for MuPDF's own) for the sRGB images drawn from now on. */
+  setProfile(bytes) {
+    this.profile = bytes;
+    this.cache.clear();
+  }
+
+  /**
+   * The ink table for a profile (ICC bytes, or null): see mupdf-render.js lut.
+   * @param {Uint8Array | null} _bytes
+   * @returns {Promise<Uint8Array | null>} null if it couldn't be made
+   */
+  inkLut(_bytes) {
+    return Promise.resolve(naiveLut());
   }
 
   /** Start what can start (each kind of renderer its own way). */
@@ -339,6 +357,23 @@ class WorkerPool extends Scheduler {
     for (const slot of this.workers) slot.worker.postMessage({ type: "inks", inkOn });
   }
 
+  setProfile(bytes) {
+    super.setProfile(bytes);
+    for (const slot of this.workers) slot.worker.postMessage({ type: "profile", bytes: bytes ?? null });
+  }
+
+  /** @returns {Promise<Uint8Array | null>} the table, or null if the thread failed */
+  inkLut(bytes) {
+    if (this.closed) return Promise.resolve(null);
+    const slot = this.workers[0];
+    const id = `l${++jobIds}`;
+    clearTimeout(this.resting);
+    return new Promise((resolve) => {
+      this.infoJobs.set(id, resolve);
+      slot.worker.postMessage({ type: "lut", id, bytes: bytes ?? null });
+    });
+  }
+
   /** @returns {Promise<{spots: {name: string, cmyk: number[]}[], overprint: boolean}>} */
   info(index) {
     if (this.closed) return super.info();
@@ -352,21 +387,22 @@ class WorkerPool extends Scheduler {
   }
 
   #finished(slot, msg) {
-    if (msg.type === "info") {
+    if (msg.type === "info" || msg.type === "lut") {
       const resolve = this.infoJobs.get(msg.id);
       this.infoJobs.delete(msg.id);
-      resolve?.({ spots: msg.spots ?? [], overprint: !!msg.overprint });
+      resolve?.(msg.type === "lut" ? msg.data ?? null : { spots: msg.spots ?? [], overprint: !!msg.overprint });
       this.pump();
       return;
     }
     if (msg.crashed) {
-      for (const [id, resolve] of this.infoJobs) { this.infoJobs.delete(id); resolve({ spots: [], overprint: false }); }
+      for (const [id, resolve] of this.infoJobs) { this.infoJobs.delete(id); resolve(id.startsWith("l") ? null : { spots: [], overprint: false }); }
     }
     const job = slot.job;
     slot.job = null;
     if (job) {
       if (msg.type === "done") {
         (slot.knows ??= new Set()).add(job.index);
+        if (msg.ink) msg.ink.close = () => { msg.ink.data = null; }; // as an ImageBitmap's: its bytes let go
         job.resolve(msg.bitmap ?? msg.ink);
       } else {
         job.reject(new Error(msg.message));
@@ -378,7 +414,7 @@ class WorkerPool extends Scheduler {
   destroy() {
     this.close();
     clearTimeout(this.resting);
-    for (const [id, resolve] of this.infoJobs) { this.infoJobs.delete(id); resolve({ spots: [], overprint: false }); }
+    for (const [id, resolve] of this.infoJobs) { this.infoJobs.delete(id); resolve(id.startsWith("l") ? null : { spots: [], overprint: false }); }
     for (const slot of this.workers) slot.worker.terminate();
   }
 }
@@ -407,7 +443,10 @@ export class MainThreadRenderer extends Scheduler {
   async #draw({ index, rect, height, mode }) {
     await new Promise((r) => setTimeout(r, 0)); // a frame between pages
     const drawn = this.doc.draw(index, rect, height, mode);
-    if (mode === "ink") return drawn;
+    if (mode === "ink") {
+      drawn.close = () => { drawn.data = null; };
+      return drawn;
+    }
     const { toBitmap } = await import("./mupdf-render.js");
     return toBitmap(drawn);
   }
@@ -415,6 +454,15 @@ export class MainThreadRenderer extends Scheduler {
   setInks(inkOn) {
     super.setInks(inkOn);
     this.doc.setInks(inkOn);
+  }
+
+  setProfile(bytes) {
+    super.setProfile(bytes);
+    this.doc.setProfile(bytes ?? null);
+  }
+
+  inkLut(bytes) {
+    return Promise.resolve(this.doc.lut(bytes ?? null));
   }
 
   info(index) {

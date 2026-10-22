@@ -5,10 +5,11 @@
 import * as THREE from "three";
 import { HOLE_OFFSET_MM, leafShape } from "./model.js";
 import {
-  EDGE_FRAGMENT_HEADER, EDGE_INK, EDGE_INK_SHARE, EDGE_INSET_MM,
+  EDGE_FRAGMENT_HEADER, EDGE_INK, EDGE_INK_SHARE, EDGE_INSET_MM, INK_GLSL, inkUniforms,
   FINISH_FRAGMENT, FINISH_HIGHLIGHT, FINISH_REFLECTION, HOLE_DISCARD, LEAF_FILL, LEAF_ROWS, MAX_DETAIL, MID_ROW,
   OTHER_ROWS, PAGE_FRAGMENT_HEADER, PAGE_MAP_FRAGMENT, PAPER_ROLLOFF, patchShader, sheetShader, SHOW_THROUGH,
 } from "./shaders.js";
+import { makeInkTexture } from "./textures.js";
 
 /** The first and last leaves are the covers (a single leaf is both). */
 export function isCover(model, i) {
@@ -281,7 +282,7 @@ export function uploadSheets(scene, changed) {
  */
 function pageMaterial(scene, isFront, holesOf = null) {
   const m = new THREE.MeshPhysicalMaterial({
-    map: scene.white,
+    map: scene.blank,
     bumpMap: scene.grain,
     bumpScale: 0.3,
     roughness: 0.92,
@@ -291,12 +292,12 @@ function pageMaterial(scene, isFront, holesOf = null) {
     depthWrite: !scene.depthPass, // else already drawn (see makeLeaf)
   });
   m.userData.uniforms = holesOf?.userData.uniforms ?? {
-    uBack: { value: scene.white },
+    uBack: { value: scene.blank },
     uShow: { value: 0.01 },
     uSpineAtU0: { value: isFront ? 1 : 0 },
     // Up to MAX_DETAIL sharp strips laid over the page (see detail.js).
     ...Object.fromEntries(Array.from({ length: MAX_DETAIL }, (_, i) => [
-      [`uDetail${i}`, { value: scene.white }],
+      [`uDetail${i}`, { value: scene.blank }],
       [`uDetailRect${i}`, { value: new THREE.Vector4(0, 0, 0, 0) }],
     ]).flat()),
     uDetailCount: { value: 0 },
@@ -362,20 +363,28 @@ export function makeFlap(scene, leaf, side, reach, image, flip) {
   geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   geo.setIndex(idx);
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
-  const tex = new THREE.Texture(image);
-  tex.flipY = false;
-  tex.colorSpace = THREE.NoColorSpace; // as the pages' images: decoded in the shader
-  tex.anisotropy = scene.renderer.capabilities.getMaxAnisotropy();
-  tex.needsUpdate = true;
+  // Its image as the pages' are: inks ({width, height, data}, shown through the ink table), or
+  // an sRGB image (decoded in the shader, as the pages').
+  let tex;
+  if (image.data) tex = makeInkTexture(image, scene.renderer.capabilities.getMaxAnisotropy());
+  else {
+    tex = new THREE.Texture(image);
+    tex.flipY = false;
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.anisotropy = scene.renderer.capabilities.getMaxAnisotropy();
+    tex.needsUpdate = true;
+  }
   const m = new THREE.MeshPhysicalMaterial({ roughness: 0.9, side: THREE.DoubleSide, map: tex });
   m.userData.lift = { value: scene.model.thickness[leaf.i] }; // off the face it lies on, outward (the sheet shader takes the face's side)
   m.onBeforeCompile = (shader) => {
     sheetShader(shader, scene.shared);
+    inkUniforms(shader, scene.shared);
     shader.uniforms.uSheetLift = m.userData.lift;
     shader.fragmentShader = patchShader(shader.fragmentShader, [
+      ["void main() {", INK_GLSL + "void main() {"],
       ["#include <map_fragment>", `{
   vec4 ink = texture2D( map, vMapUv );
-  diffuseColor *= sRGBTransferEOTF( ink );
+  diffuseColor *= sRGBTransferEOTF( pvPageColor( ink ) );
 }`],
     ]);
   };
@@ -415,11 +424,18 @@ export function freeFlap(scene, mesh) {
  * paper, 0.17.90, showed the edges blank while the stack flew, the ink there on landing.)
  */
 function inkFiller(scene, page) {
-  const m = new THREE.MeshBasicMaterial({ map: page.map ?? scene.white, side: THREE.DoubleSide });
+  const m = new THREE.MeshBasicMaterial({ map: page.map ?? scene.blank, side: THREE.DoubleSide });
   m.color.copy(scene.sheetFiller.color).multiplyScalar(0.9);
   m.userData.fillerOf = page;
-  page.userData.white = scene.white;
-  m.onBeforeCompile = (shader) => sheetShader(shader, scene.shared);
+  page.userData.white = scene.blank;
+  m.onBeforeCompile = (shader) => {
+    sheetShader(shader, scene.shared);
+    inkUniforms(shader, scene.shared);
+    shader.fragmentShader = patchShader(shader.fragmentShader, [
+      ["void main() {", INK_GLSL + "void main() {"],
+      ["#include <map_fragment>", "diffuseColor *= sRGBTransferEOTF( pvPageColor( texture2D( map, vMapUv ) ) );"],
+    ]);
+  };
   m.customProgramCacheKey = () => "bookview-sheet-ink-filler";
   return m;
 }
@@ -508,15 +524,16 @@ export function pageHit(model, leaf, ray, front, near = 0, far = Infinity) {
 function edgeMaterial(scene, base, front, back) {
   const m = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide });
   m.userData.uniforms = {
-    uEdgeFront: { value: scene.white },
-    uEdgeBack: { value: scene.white },
+    uEdgeFront: { value: scene.blank },
+    uEdgeBack: { value: scene.blank },
     uEdgeInset: { value: new THREE.Vector2(EDGE_INSET_MM / scene.model.width, EDGE_INSET_MM / scene.model.height) },
     uEdgeInk: { value: EDGE_INK_SHARE },
   };
-  m.userData.edgeOf = { base, front, back, white: scene.white };
+  m.userData.edgeOf = { base, front, back, white: scene.blank };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, m.userData.uniforms);
     sheetShader(shader, scene.shared);
+    inkUniforms(shader, scene.shared);
     shader.vertexShader = patchShader(shader.vertexShader, [
       ["void main() {", "attribute vec2 edgeUv;\nvarying vec2 vEdgeUv;\nvoid main() {"],
       ["vec3 transformed = sheetPosition();", (line) => line + "\n  vEdgeUv = edgeUv;"],
