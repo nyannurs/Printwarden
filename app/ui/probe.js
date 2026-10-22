@@ -133,10 +133,6 @@ export async function runProbe(scene, onProgress) {
       r.setPixelRatio(ratio);
       scene.composer.setPixelRatio(ratio);
     });
-    const vecHere = pages().map((m) => m.userData.uniforms.uVecOn.value);
-    await panning("  no vector text", () => {
-      for (const m of pages()) m.userData.uniforms.uVecOn.value = 0;
-    }, () => pages().forEach((m, i) => { m.userData.uniforms.uVecOn.value = vecHere[i]; }));
     await panning("  no re-pivot onto the paper", () => { scene.debugNoPivot = true; }, () => { scene.debugNoPivot = false; });
     lines.push("");
     scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
@@ -157,10 +153,6 @@ export async function runProbe(scene, onProgress) {
       for (const m of pages()) m.needsUpdate = true;
     });
     await dragging("  no multisampling", () => setSamples(0), () => setSamples(samples));
-    const vec = pages().map((m) => m.userData.uniforms.uVecOn.value);
-    await dragging("  no vector text", () => {
-      for (const m of pages()) m.userData.uniforms.uVecOn.value = 0;
-    }, () => pages().forEach((m, i) => { m.userData.uniforms.uVecOn.value = vec[i]; }));
     const top = new Set([scene.opening - 1, scene.opening]);
     await dragging("  only the two open pages", () => {
       for (const l of scene.leaves) l.mesh.visible = top.has(l.i);

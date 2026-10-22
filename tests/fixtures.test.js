@@ -125,21 +125,16 @@ test("fixtures: spot-image.pdf: an image in a spot ink is drawn as the ink, as b
   ok(Math.abs(ir - fr) <= 3 && Math.abs(ig - fg) <= 3 && Math.abs(ib - fb) <= 3, `the image the same (${ir}, ${ig}, ${ib}), not the tint transform's mauve`);
 });
 
-test("fixtures: overprint.pdf: shown, the overprinting yellow box turns green on the cyan panel; ignored, it stays yellow; the knockout box yellow either way", async () => {
-  const shown = await draw("overprint.pdf", 0, true);
-  const ignored = await draw("overprint.pdf", 0, false);
+test("fixtures: overprint.pdf: the overprinting yellow box turns green on the cyan panel, the knockout box stays yellow (overprint as the press prints it)", async () => {
+  const f = await draw("overprint.pdf", 0, true);
   // The yellow boxes: 50 × 28 mm from x 16 (knockout) and x 80 (overprint), y 108 to 136 from the foot.
   const knock = [41, 210 - 122];
   const over = [105, 210 - 122];
   const cyan = [41, 210 - 70]; // the panel alone, beside the black text row
-  for (const f of [shown, ignored]) {
-    const [r, g, b] = px(f, ...knock);
-    ok(r > 200 && g > 180 && b < 90, `the knockout box is yellow (${r}, ${g}, ${b})`);
-    const [cr, , cb] = px(f, ...cyan);
-    ok(cr < 90 && cb > 160, `the panel is cyan (${cr}, ${cb})`);
-  }
-  const [sr, sg, sb] = px(shown, ...over);
-  ok(sr < 110 && sg > 120 && sb < 110, `shown: green (${sr}, ${sg}, ${sb})`);
-  const [ir, ig, ib] = px(ignored, ...over);
-  ok(ir > 200 && ig > 180 && ib < 90, `ignored: yellow (${ir}, ${ig}, ${ib})`);
+  const [r, g, b] = px(f, ...knock);
+  ok(r > 200 && g > 180 && b < 90, `the knockout box is yellow (${r}, ${g}, ${b})`);
+  const [cr, , cb] = px(f, ...cyan);
+  ok(cr < 90 && cb > 160, `the panel is cyan (${cr}, ${cb})`);
+  const [sr, sg, sb] = px(f, ...over);
+  ok(sr < 110 && sg > 120 && sb < 110, `the overprinting box is green (${sr}, ${sg}, ${sb})`);
 });

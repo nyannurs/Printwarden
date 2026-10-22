@@ -48,7 +48,7 @@ The first start downloads Electron, which is a few hundred MB. If you want to bu
 - **Imposed PDF export**: you can export an imposed PDF with creep compensation, as 2-up spreads or as folding schemes of 8 or 16 pages per sheet, folded the way a folding machine folds them.
 - **Client viewer**: export the book as a single HTML file that you can send to a client. It opens in any browser, from a folder or hosted on a website, with nothing else attached, and the client can flip through the book in 3D.
 - **Screenshots and videos**: you can render screenshots or a flipbook animation.
-- **Color**: CMYK is rendered with the PDF's output intent if it has one, otherwise with a CMYK profile from your computer. Overprint is shown the way it prints, like Acrobat's overprint preview, and can be turned off.
+- **Color**: CMYK is rendered with the PDF's output intent if it has one, otherwise with a CMYK profile from your computer. Overprint is shown the way it prints, like Acrobat's overprint preview, and spot colors as their inks. A Separations window switches the plates on and off, like Acrobat's Output Preview.
 - **Your files are safe**: Printwarden only reads the PDF you open and only writes the files you save yourself. It won't overwrite the PDF you imported. It only goes online once at startup to check for a new update.
 
 ## Controls

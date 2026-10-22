@@ -1,15 +1,15 @@
-// Page images for the 3D book and the timeline, rendered from the PDF's vectors.
+// Page images for the 3D book and the timeline, drawn by MuPDF from the PDF's vectors as the
+// press prints them (mupdf-render.js: overprint, spot colours, the chosen CMYK profile).
 //
-// A pool of background workers does the drawing (render-worker.js), several pages at
-// once, so the interface never stalls. Results are ImageBitmaps. If workers can't start,
-// a main-thread renderer takes over (slower, same results).
+// A pool of background workers does the drawing (mupdf-worker.js), several pages at once, so
+// the interface never stalls. Results are ImageBitmaps (or a page's inks, `mode: "ink"`). If
+// workers can't start, a main-thread renderer takes over (same drawing, the interface waits).
 //
 // Requests: one image per page (sized to a memory budget), a small one per page (the
 // timeline's thumbnail, and the page where it is small on screen), and on-demand sharp
 // strips for the pages in view, at the resolution they're shown at.
 
 import { COVER_BASE } from "../core/document.js";
-import { mmToPt } from "../core/units.js";
 import { SYSTEM_MEMORY } from "../platform.js";
 
 export const THUMB_HEIGHT = 200;
@@ -26,18 +26,20 @@ export function baseHeight(pageCount, aspect) {
 
 /**
  * How many threads render pages: half the processor's, two to six; fewer on a computer with
- * little memory (three with 8 GB). Each thread holds what it learns from the file (about
- * 100 MB for a 10 MB report) and, for a small file, a copy of it; a large one is shared.
+ * little memory (three with 8 GB), and fewer for a large file: every thread holds its own copy
+ * of the file in MuPDF's memory (MuPDF reads a file whole), plus what it caches from it (fonts,
+ * decoded images: up to 100 MB).
  */
-const poolSize = () => Math.max(1, Math.min(
+const poolSize = (bytes = 0) => Math.max(1, Math.min(
   Math.max(2, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))),
   Math.floor(SYSTEM_MEMORY / (2.5 * 2 ** 30)),
+  Math.floor(THREADS_FILE_BYTES / Math.max(1, bytes)),
 ));
-// A file this large is not copied for each thread: one Blob of it is shared, and the threads
-// read the parts their pages need (see render-worker.js). Smaller files are handed over
-// whole, which pdf.js reads fastest.
+const THREADS_FILE_BYTES = 1.5 * 2 ** 30; // the threads' copies of a file together, at most
+// A file this large goes to the threads as one Blob (each reads it into its own memory when it
+// opens); smaller files are handed over whole.
 const SHARED_FILE_BYTES = 24 * 2 ** 20;
-// Threads idle this long let go of the pages and caches they built (see render-worker.js).
+// Threads idle this long let go of the pages and caches they built (see mupdf-worker.js).
 const REST_MS = 20000;
 
 /**
@@ -49,8 +51,8 @@ export function routedRenderer(main, cover) {
   const of = (index) => (index >= COVER_BASE ? [cover, index - COVER_BASE] : [main, index]);
   return {
     render(index, ...rest) { const [r, i] = of(index); return r.render(i, ...rest); },
-    warm(index) { const [r, i] = of(index); r.warm(i); },
-    vectorText(index) { const [r, i] = of(index); return r.vectorText(i); },
+    info(index) { const [r, i] = of(index); return r.info(i); },
+    setInks(inkOn) { main.setInks(inkOn); cover.setInks(inkOn); },
     cancel(predicate) { main.cancel(predicate); cover.cancel(predicate); },
     destroy() { main.destroy(); cover.destroy(); },
   };
@@ -58,20 +60,23 @@ export function routedRenderer(main, cover) {
 
 /**
  * Start a renderer for `bytes`: worker pool if possible, main thread otherwise.
- * `cmykProfile` (ICC bytes, or a promise of them, optional) converts plain CMYK; without
- * it, pdf.js's built-in profile is used. Embedded ICC profiles are always honoured. The
- * workers start loading right away and wait for the profile only before opening.
- * `overprint` (or a promise of it): whether overprinting objects are shown as on press (see
- * parser-profile.js).
+ * `cmykProfile` (ICC bytes, or a promise of them, optional): plain CMYK is read in it and RGB
+ * content converted through it; without it, MuPDF's own. Embedded ICC profiles are always
+ * honoured. The workers start loading right away and wait for the profile only before opening.
+ * (`fallback` and `overprint` are kept for callers from before MuPDF: overprint is always drawn
+ * as the press prints it.)
  * @param {boolean | Promise<boolean>} [overprint]
  */
-export async function createRenderer(bytes, fallbackPdf, cmykProfile = null, overprint = true) {
+export async function createRenderer(bytes, _fallback = null, cmykProfile = null, overprint = true) {
   try {
-    const slots = takeSpareWorkers(poolSize());
+    const slots = takeSpareWorkers(poolSize(bytes.byteLength));
     return await WorkerPool.start(bytes, slots, cmykProfile, overprint);
   } catch (err) {
     console.warn("Background rendering unavailable, using the main thread:", err);
-    return new MainThreadRenderer(await fallbackPdf());
+    const { InkDocument } = await import("./mupdf-render.js");
+    const doc = new InkDocument(bytes);
+    doc.setProfile((await cmykProfile) ?? null);
+    return new MainThreadRenderer(doc);
   }
 }
 
@@ -119,20 +124,17 @@ class Scheduler {
    * Render `rectMm` (PDF user space) of page `index` at `height` pixels.
    * Lower priority numbers go first; re-requesting a queued key re-prioritises it.
    * `cache: false` for one-off sharp renders, which are large; "pending" to share a render
-   * only while it runs (an image handed on and freed, see loadAllTextures in ui/pages.js). `vector`:
-   * for the 3D page, the glyphs to leave out (it draws them from their outlines; see
-   * vectorText in ui/pages.js), null for all text in the image.
-   */
-  /**
+   * only while it runs (an image handed on and freed, see loadAllTextures in ui/pages.js).
+   * `mode` "rgb" (an ImageBitmap) or "ink" (the page's inks, see mupdf-render.js).
    * @param {number} index
    * @param {{x0: number, y0: number, x1: number, y1: number}} rectMm
    * @param {number} height
    * @param {number} [priority]
-   * @param {{cache?: boolean | "pending", flex?: boolean, slot?: any, vector?: string[] | null}} [options]
-   * @returns {Promise<ImageBitmap>}
+   * @param {{cache?: boolean | "pending", flex?: boolean, slot?: any, mode?: "rgb" | "ink"}} [options]
+   * @returns {Promise<any>}
    */
-  render(index, rectMm, height, priority = 10, { cache = true, flex = false, slot = null, vector = null } = {}) {
-    const key = `${index}|${height}|${[rectMm.x0, rectMm.y0, rectMm.x1, rectMm.y1].map((v) => v.toFixed(2))}|${vector ? "v" : ""}`;
+  render(index, rectMm, height, priority = 10, { cache = true, flex = false, slot = null, mode = "rgb" } = {}) {
+    const key = `${index}|${height}|${[rectMm.x0, rectMm.y0, rectMm.x1, rectMm.y1].map((v) => v.toFixed(2))}|${mode}`;
     const hit = this.cache.get(key);
     if (hit) {
       const queued = this.queue.find((q) => q.key === key);
@@ -140,7 +142,7 @@ class Scheduler {
       return hit;
     }
     const promise = new Promise((resolve, reject) => {
-      this.queue.push({ id: ++jobIds, key, index, rect: { ...rectMm }, height, priority, resolve, reject, flex, slot, vector });
+      this.queue.push({ id: ++jobIds, key, index, rect: { ...rectMm }, height, priority, resolve, reject, flex, slot, mode });
     });
     if (cache) this.cache.set(key, promise);
     const drop = () => this.cache.get(key) === promise && this.cache.delete(key);
@@ -159,12 +161,20 @@ class Scheduler {
     });
   }
 
-  /** Let more threads learn a page, so its sharp strips can render in parallel. */
-  warm() {}
+  /**
+   * Which plates print (by plate: Cyan, Magenta, Yellow, Black, then a page's spots; false
+   * leaves one out): every image drawn from now on is without them. What was drawn before is
+   * let go of (the caller asks again for what it shows).
+   * @param {boolean[]} inkOn
+   */
+  setInks(inkOn) {
+    this.inkOn = inkOn;
+    this.cache.clear();
+  }
 
-  /** A page's vector text, or null where there is none (see render-worker.js). */
-  vectorText() {
-    return Promise.resolve(null);
+  /** A page's spot colours (name, CMYK equivalent) and whether it overprints (see mupdf-render.js). */
+  info() {
+    return Promise.resolve({ spots: [], overprint: false });
   }
 
   /** Start what can start (each kind of renderer its own way). */
@@ -187,16 +197,15 @@ class Scheduler {
 
 // --- workers started ahead of time -----------------------------------------------------
 //
-// Starting a render worker means loading pdf.js (~2 MB of code) twice (renderer and
-// parser); six at once, while a file is being read, took seconds. So a set of workers is
-// started while the app is idle and handed to the first document; then a couple are
-// prepared for the next. Each set serves one document: pdf.js keeps the CMYK profile it
-// first used for the lifetime of its parser.
+// Starting a render worker means instantiating MuPDF (10 MB of WebAssembly); six at once,
+// while a file is being read, takes seconds. So a set of workers is started while the app is
+// idle and handed to the first document; then a couple are prepared for the next. Each set
+// serves one document.
 
 let spare = null;
 
 function spawnWorker() {
-  const worker = new Worker(new URL("./render-worker.js", import.meta.url), { type: "module" });
+  const worker = new Worker(new URL("./mupdf-worker.js", import.meta.url), { type: "module" });
   // Listeners, not handler properties: the pool sets its own handlers while this waits.
   /** @type {Promise<void>} */
   const loaded = new Promise((resolve, reject) => {
@@ -233,8 +242,8 @@ class WorkerPool extends Scheduler {
     super();
     /** @type {any[]} the threads (slots), once started */
     this.workers = [];
-    this.owner = new Map(); // page index -> first slot to interpret it
-    this.vectorJobs = new Map(); // id -> {resolve, slot}
+    this.owner = new Map(); // page index -> first slot to read it (its images are cached there)
+    this.infoJobs = new Map(); // id -> resolve
   }
 
   /** @param {boolean | Promise<boolean>} [overprint] */
@@ -281,11 +290,11 @@ class WorkerPool extends Scheduler {
   }
 
   /**
-   * A worker keeps the pages it interpreted last, so later renders of one (sharper, other
-   * regions) take milliseconds there. Pages therefore go to a worker that knows
-   * them: normally the one that first interpreted it; sharp strips ("flex" jobs) to any
-   * worker that knows the page, so a page's strips render in parallel once warm() has
-   * taught it to the others. A page nobody knows yet goes to whichever worker is free.
+   * A worker keeps the pages it read last (their decoded images above all), so later renders
+   * of one (sharper, other regions) are quickest there. Pages therefore go to a worker that
+   * knows them: normally the one that first read it; sharp strips ("flex" jobs) to any worker
+   * that knows the page, or any free one (MuPDF reads a page in milliseconds; a photo page's
+   * JPEG once more on another thread). A page nobody knows yet goes to whichever is free.
    */
   pump() {
     if (this.closed) return;
@@ -299,7 +308,7 @@ class WorkerPool extends Scheduler {
         const owner = this.owner.get(job.index);
         // (Its first thread always fits: it may have let the page go, as may every other.)
         const fits = job.slot ? job.slot === slot
-          : job.flex ? !owner || owner === slot || slot.knows.has(job.index)
+          : job.flex ? true
           : !owner || owner === slot;
         if (!fits) continue;
         if (best < 0 || job.priority < this.queue[best].priority) best = i;
@@ -308,92 +317,57 @@ class WorkerPool extends Scheduler {
       const job = this.queue.splice(best, 1)[0];
       if (!this.owner.has(job.index)) this.owner.set(job.index, slot);
       slot.job = job;
-      slot.worker.postMessage({ type: "render", id: job.id, index: job.index, rect: job.rect, height: job.height, vector: job.vector });
+      slot.worker.postMessage({ type: "render", id: job.id, index: job.index, rect: job.rect, height: job.height, mode: job.mode });
     }
-    if (!this.queue.length && !this.vectorJobs?.size && this.workers.every((s) => !s.job)) {
+    if (!this.queue.length && !this.infoJobs?.size && this.workers.every((s) => !s.job)) {
       this.resting = setTimeout(() => {
         for (const slot of this.workers) slot.worker.postMessage({ type: "rest" });
       }, REST_MS);
     }
   }
 
-  /** Queued work is dropped; work being drawn stops within a slice (see render-worker.js). */
+  /** Queued work is dropped (a render in a thread's hands runs on: milliseconds). */
   cancel(predicate) {
     super.cancel(predicate);
     for (const slot of this.workers) {
-      if (slot.job && !slot.job.cancelled && predicate(slot.job)) {
-        slot.job.cancelled = true;
-        slot.worker.postMessage({ type: "cancel", id: slot.job.id });
-      }
+      if (slot.job && !slot.job.cancelled && predicate(slot.job)) slot.job.cancelled = true;
     }
   }
 
-  warm(index) {
-    for (const slot of this.workers) {
-      slot.knows ??= new Set();
-      slot.warming ??= new Set();
-      if (slot.knows.has(index) || slot.warming.has(index)) continue;
-      slot.warming.add(index);
-      // A tiny render is enough: interpreting the page is the work that gets kept.
-      // Done, the thread knows the page (#finished): until it lets it go, when warm() teaches
-      // it again (kept as warming, it never was, and a page's strips rendered on one thread).
-      this.render(index, { x0: 0, y0: 0, x1: 1, y1: 1 }, 4, 150, { cache: false, slot })
-        .then((img) => img?.close?.(), () => {})
-        .finally(() => slot.warming.delete(index));
-    }
+  setInks(inkOn) {
+    super.setInks(inkOn);
+    for (const slot of this.workers) slot.worker.postMessage({ type: "inks", inkOn });
   }
 
-  /**
-   * A page's vector text: the glyphs its 3D page draws from their outlines, and where (any
-   * thread gives the same answer; the page's own thread knows it best).
-   * Null if the threads stop first (a page's image never waits on its text for ever).
-   * @returns {Promise<{glyphs: Map<string, Float32Array>, instances: {glyph: string, m: number[], color: number[]}[]} | null>}
-   */
-  vectorText(index) {
-    if (this.closed) return Promise.resolve(null);
+  /** @returns {Promise<{spots: {name: string, cmyk: number[]}[], overprint: boolean}>} */
+  info(index) {
+    if (this.closed) return super.info();
     const slot = this.owner?.get(index) ?? this.workers[index % this.workers.length];
-    const id = `v${++jobIds}`;
+    const id = `i${++jobIds}`;
     clearTimeout(this.resting);
     return new Promise((resolve) => {
-      this.vectorJobs.set(id, { resolve, slot });
-      slot.worker.postMessage({ type: "vector", id, index });
+      this.infoJobs.set(id, resolve);
+      slot.worker.postMessage({ type: "info", id, index });
     });
   }
 
-  /** Answer waiting vector text requests (of one thread, or all) with none. */
-  #dropVectorJobs(slot = null) {
-    for (const [id, job] of this.vectorJobs ?? []) {
-      if (slot && job.slot !== slot) continue;
-      this.vectorJobs.delete(id);
-      job.resolve(null);
-    }
-  }
-
   #finished(slot, msg) {
-    if (msg.type === "forgot") { // let go of (see render-worker.js): learnt again if needed
-      slot.knows?.delete(msg.index);
-      return;
-    }
-    if (msg.type === "vector") {
-      const job = this.vectorJobs?.get(msg.id);
-      this.vectorJobs?.delete(msg.id);
-      job?.resolve({ glyphs: new Map(msg.glyphs), instances: msg.instances });
+    if (msg.type === "info") {
+      const resolve = this.infoJobs.get(msg.id);
+      this.infoJobs.delete(msg.id);
+      resolve?.({ spots: msg.spots ?? [], overprint: !!msg.overprint });
       this.pump();
       return;
     }
-    // Only a thread that crashed leaves its text requests unanswered. A render that failed,
-    // most often one cancelled because the view moved on, is no reason: until 0.17.81 every
-    // cancelled render answered the thread's waiting requests with "no vector text", so pages
-    // loading while you flipped quickly got their image without its text and no text to draw
-    // over it, and their text was missing.
-    if (msg.crashed) this.#dropVectorJobs(slot);
+    if (msg.crashed) {
+      for (const [id, resolve] of this.infoJobs) { this.infoJobs.delete(id); resolve({ spots: [], overprint: false }); }
+    }
     const job = slot.job;
     slot.job = null;
     if (job) {
       if (msg.type === "done") {
         (slot.knows ??= new Set()).add(job.index);
-        msg.bitmap.skippedOps = msg.skipped; // for tests: operators left out (see cull.js)
-        job.resolve(msg.bitmap);
+        job.resolve(msg.bitmap ?? msg.ink);
       } else {
         job.reject(new Error(msg.message));
       }
@@ -404,23 +378,22 @@ class WorkerPool extends Scheduler {
   destroy() {
     this.close();
     clearTimeout(this.resting);
-    this.#dropVectorJobs();
+    for (const [id, resolve] of this.infoJobs) { this.infoJobs.delete(id); resolve({ spots: [], overprint: false }); }
     for (const slot of this.workers) slot.worker.terminate();
   }
 }
 
-/** Fallback: renders on the main thread with pdf.js's display pacing (stays responsive). */
+/** Fallback: MuPDF on the main thread (the same drawing; the interface waits while a page draws). */
 export class MainThreadRenderer extends Scheduler {
-  constructor(pdf, { intent = "display" } = {}) {
+  /** @param {import("./mupdf-render.js").InkDocument} doc */
+  constructor(doc) {
     super();
-    this.pdf = pdf;
-    this.intent = intent;
-    this.pages = new Map();
+    this.doc = doc;
     this.active = 0;
   }
 
   pump() {
-    while (!this.closed && this.active < 2) {
+    while (!this.closed && this.active < 1) {
       const job = this.next();
       if (!job) return;
       this.active++;
@@ -431,34 +404,25 @@ export class MainThreadRenderer extends Scheduler {
     }
   }
 
-  async #draw({ index, rect: r, height }) {
-    if (!this.pages.has(index)) this.pages.set(index, this.pdf.getPage(index + 1));
-    const page = await this.pages.get(index);
-    const base = page.getViewport({ scale: 1 });
-    // PDF user space (pt) to viewport pixels at scale 1, via the viewport's matrix.
-    const [ax, ay] = toViewport(base, mmToPt(r.x0), mmToPt(r.y0));
-    const [bx, by] = toViewport(base, mmToPt(r.x1), mmToPt(r.y1));
-    const x0 = Math.min(ax, bx);
-    const y0 = Math.min(ay, by);
-    const scale = height / Math.abs(by - ay);
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(Math.abs(bx - ax) * scale));
-    canvas.height = Math.max(1, Math.round(height));
-    const ctx = canvas.getContext("2d", { alpha: false });
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const viewport = page.getViewport({ scale, offsetX: -x0 * scale, offsetY: -y0 * scale });
-    await page.render({ canvasContext: ctx, viewport, intent: this.intent }).promise;
-    return createImageBitmap(canvas);
+  async #draw({ index, rect, height, mode }) {
+    await new Promise((r) => setTimeout(r, 0)); // a frame between pages
+    const drawn = this.doc.draw(index, rect, height, mode);
+    if (mode === "ink") return drawn;
+    const { toBitmap } = await import("./mupdf-render.js");
+    return toBitmap(drawn);
+  }
+
+  setInks(inkOn) {
+    super.setInks(inkOn);
+    this.doc.setInks(inkOn);
+  }
+
+  info(index) {
+    return Promise.resolve(this.doc.info(index));
   }
 
   destroy() {
     this.close();
-    this.pdf.loadingTask?.destroy?.() ?? this.pdf.destroy?.();
+    this.doc.destroy();
   }
-}
-
-function toViewport(viewport, x, y) {
-  const [a, b, c, d, e, f] = viewport.transform;
-  return [a * x + c * y + e, b * x + d * y + f];
 }

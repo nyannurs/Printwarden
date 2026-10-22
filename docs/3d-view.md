@@ -150,19 +150,10 @@ A page's look comes from four sources:
    - Each strip is rendered from the PDF at what its own part of the screen needs, 1.25 image pixels per screen pixel at its densest point, up to 8192 px a side.
    - If the base image already gives that everywhere, it stays (`baseSuffices`).
    - New strips fade in over 220 ms, so the swap doesn't read as the page's pixels shifting.
-4. **Vector text** (below) for plain type, exact at any zoom.
 
 How much of each page is on screen, and at what density, is measured by casting rays from a grid of screen points onto the pages (`visiblePages`). The rays meet the cross-section curve itself, not the triangles, so the result is exact at any zoom and angle.
 
 Image uploads are spread over frames, two a frame (`UPLOADS_PER_FRAME`), and a page image is freed from memory once it is on the graphics card. Strips are made only once the view rests: 120 ms after it stops, 350 ms after a page turn, so pages only flipped past aren't sharpened.
-
-### Vector text
-
-`vectortext.js` draws glyphs from their outlines in the page's own shader, by Eric Lengyel's Slug method. Each pixel casts a horizontal and a vertical ray against only the curves of the glyph bands it lies in, and the curves' roots give exact, antialiased coverage.
-- **What comes in**: the outlines, the placements and the colors, from the render threads (see [PDFs](pdf.md#vector-text)).
-- **What goes out**: two data textures per page. One holds the curves and placements as floats. The other holds the bands, and a grid over the page listing which placements touch each cell.
-- **Curves**: cubic curves are split into quadratics within a tolerance.
-- **Blending**: text is blended as a canvas blends it, so it matches the image around it.
 
 ## The scene and its frame loop
 

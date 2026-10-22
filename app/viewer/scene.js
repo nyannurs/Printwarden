@@ -21,8 +21,7 @@ import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, pageH
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
 import { motionReset, motionState, motionStep } from "./motion.js";
 import { MAX_DETAIL, sheetShader } from "./shaders.js";
-import { disposeTexture, freeImage, makeContactMap, makeGrain, makeWarmer, makeWhite, vectorFloats, vectorInts } from "./textures.js";
-import { TEX_W } from "./vectortext.js";
+import { disposeTexture, freeImage, makeContactMap, makeGrain, makeWarmer, makeWhite } from "./textures.js";
 
 const TURN_MS = 720;
 const FAST_TURN_MS = 360; // for requests in quick succession (rapid clicks, scrubbing)
@@ -191,10 +190,6 @@ export class BookScene {
 
     this.white = makeWhite();
     this.none = makeWhite(); // a finish mask without ink
-    // Vector text (see #setVector): per page, two data textures; pages without any use
-    // these placeholders (a sampler needs a texture of its own kind bound).
-    this.vector = { pages: new Map(), noF: vectorFloats(new Float32Array(4), 1, 1), noU: vectorInts(new Uint32Array(2), 1, 1) };
-    this.small = new Map(); // folio -> small texture of the page with its text (see #setSmall)
     /** @type {Map<number, THREE.Mesh>} folio -> a flap lying on that page (see setPageFlap) */
     this.flaps = new Map();
     // folio -> the page's image, on the GPU only (see setPageTexture); kept through rebuilds.
@@ -399,7 +394,6 @@ export class BookScene {
     makeSheets(this);
     this.extras = makeExtras(this);
     this.#applyFinish();
-    this.#applyVector();
     for (let folio = 1; folio <= 2 * this.leaves.length; folio++) this.#showPage(folio);
     this.setPaper(spec.paper);
     layoutGround(this);
@@ -491,58 +485,12 @@ export class BookScene {
 
   /** Forget every page's image, vector text and small image (a new file). */
   clearPages() {
-    for (const folio of [...this.vector.pages.keys()]) this.#setVector(folio, null);
-    for (const folio of [...this.small.keys()]) this.#setSmall(folio, null);
-    this.#applyVector();
     for (const { image } of this.uploads.values()) image?.close();
     this.uploads.clear();
     for (const tex of [...this.pageTextures.values(), ...this.overrides.values()]) tex.dispose();
     this.pageTextures.clear();
     this.overrides.clear();
     for (let folio = 1; folio <= 2 * this.leaves.length; folio++) this.#showPage(folio);
-  }
-
-  /**
-   * A page's vector text (packed by packVectorText in vectortext.js), or null for none: its
-   * glyphs are drawn from their outlines over the page image, which then leaves them out.
-   * Kept through rebuilds of the book.
-   */
-  #setVector(folio, packed) {
-    const old = this.vector.pages.get(folio);
-    if (old) {
-      old.f.dispose();
-      old.u.dispose();
-      this.vector.pages.delete(folio);
-    }
-    if (packed) {
-      const page = {
-        f: vectorFloats(packed.floats, TEX_W, packed.rowsF),
-        u: vectorInts(packed.ints, TEX_W, packed.rowsU),
-        info: packed.info,
-      };
-      this.#warm(page.f, page.u); // on the GPU now, not mid-turn (see #warm)
-      this.vector.pages.set(folio, page);
-    }
-  }
-
-  /**
-   * A small image of a page with its text (its own image leaves vector text out), or null:
-   * what shows through onto the other side of its leaf, and the page itself where it is
-   * small on screen (see PAGE_MAP_FRAGMENT).
-   */
-  #setSmall(folio, image) {
-    const old = this.small.get(folio);
-    if (old?.image === image) return;
-    old?.dispose();
-    this.small.delete(folio);
-    if (!image) return;
-    const tex = new THREE.Texture(image);
-    tex.flipY = false;
-    tex.colorSpace = PAGE_COLOR_SPACE;
-    tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    tex.needsUpdate = true; // not owned: the timeline's thumbnail is scaled from it
-    this.#warm(tex); // see #warm
-    this.small.set(folio, tex);
   }
 
   /**
@@ -564,22 +512,6 @@ export class BookScene {
       r.render(w.scene, w.camera);
     }
     r.setRenderTarget(before);
-  }
-
-  #applyVector() {
-    for (const leaf of this.leaves ?? []) {
-      for (const [mat, folio] of [[leaf.front, 2 * leaf.i + 1], [leaf.back, 2 * leaf.i + 2]]) {
-        const v = this.vector.pages.get(folio);
-        const small = this.small.get(folio);
-        const u = mat.userData.uniforms;
-        u.uVecF.value = v?.f ?? this.vector.noF;
-        u.uVecU.value = v?.u ?? this.vector.noU;
-        u.uVecInfo.value = v?.info ?? [0, 1, 1, 0];
-        u.uVecOn.value = v ? 1 : 0;
-        u.uSmall.value = small ?? this.white;
-        u.uSmallOn.value = v && small ? 1 : 0;
-      }
-    }
   }
 
   #applyFinish() {
@@ -920,16 +852,14 @@ export class BookScene {
   }
 
   /**
-   * A page's image (an ImageBitmap, or null for plain paper), with its {vector, small} (see
-   * #setVector, #setSmall), which change with it in the same frame (left out, the page keeps
-   * its own). Uploads are spread over frames, so a burst of finished renders never stutters.
-   * The scene takes the image: once it is on the GPU it is freed from memory, and the texture
-   * is kept through rebuilds of the book.
+   * A page's image (an ImageBitmap, or null for plain paper). Uploads are spread over frames,
+   * so a burst of finished renders never stutters. The scene takes the image: once it is on
+   * the GPU it is freed from memory, and the texture is kept through rebuilds of the book.
    */
-  setPageTexture(folio, image, text) {
+  setPageTexture(folio, image) {
     const waiting = this.uploads.get(folio);
     if (waiting?.image && waiting.image !== image) waiting.image.close(); // replaced before it went up
-    this.uploads.set(folio, { image, text: text ?? waiting?.text });
+    this.uploads.set(folio, { image });
     this.dirty = true;
   }
 
@@ -1003,7 +933,7 @@ export class BookScene {
     if (!leaf) return;
     const [mat, other] = folio % 2 ? [leaf.front, leaf.back] : [leaf.back, leaf.front];
     mat.map = this.overrides.get(folio) ?? this.pageTextures.get(folio) ?? this.white;
-    other.userData.uniforms.uBack.value = this.small.get(folio) ?? mat.map; // show-through from this side
+    other.userData.uniforms.uBack.value = mat.map; // show-through from this side
   }
 
   /**
@@ -1384,15 +1314,9 @@ export class BookScene {
 
   #flushUploads() {
     let n = 0;
-    for (const [folio, { image, text }] of this.uploads) {
+    for (const [folio, { image }] of this.uploads) {
       if (n >= UPLOADS_PER_FRAME) break;
       this.uploads.delete(folio);
-      if (text) { // with its image, in the same frame: the image leaves the vector text out
-        this.#setVector(folio, text.vector);
-        this.#setSmall(folio, text.small);
-        this.#applyVector();
-        this.dirty = true;
-      }
       this.pageTextures.get(folio)?.dispose();
       this.pageTextures.delete(folio);
       if (image) {

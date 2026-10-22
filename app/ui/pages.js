@@ -3,11 +3,9 @@
 // screen again from the PDF's vectors, as sharp as the screen needs (see sharpen).
 
 import { pageSizeOf } from "../core/analysis.js";
-import { MM_PER_PT } from "../core/units.js";
 import { baseHeight, THUMB_HEIGHT } from "../pdf/render.js";
 import { baseSuffices, planDetail } from "../viewer/detail.js";
 import { MAX_DETAIL } from "../viewer/shaders.js";
-import { packVectorText } from "../viewer/vectortext.js";
 import { scene, state } from "./app.js";
 import { showLoad } from "./dom.js";
 import { applySpine, averageEdge } from "./spine-panel.js";
@@ -31,83 +29,29 @@ function textureKey(folio) {
   if (!g) return "blank";
   const src = state.analysis.book.pages[folio - 1].source;
   const rect = [g.trim.x0, g.trim.y0, g.trim.x1, g.trim.y1].map((v) => v.toFixed(2));
-  return `${state.colour.choice}|${state.colour.overprint === false ? "op-off" : "op"}|${src.index}|${rect}`;
+  return `${state.colour.choice}|${(state.colour.inks ?? []).map(Number).join("")}|${src.index}|${rect}`;
 }
 
-// Text drawn on the 3D page from its outlines, exact at any zoom (see viewer/vectortext.js):
-// the page's images for the 3D view leave it out.
-export const VECTOR_TEXT = true;
-
-/**
- * A page's vector text, packed for the 3D page, or null: the glyphs' placements from the
- * render threads (glyph space to PDF user space) taken to this page's texture coordinates
- * (u across its trim box, v down from the head). Asked once a page (and colour profile):
- * the same answer for the 3D page and for every image of it, which leaves out exactly the
- * glyphs packed here (`keys`) and nothing else. Without vector text, images keep all text.
- * @returns {Promise<ReturnType<typeof packVectorText>>}
- */
-export function vectorText(folio) {
-  const key = textureKey(folio);
-  if (!texts.has(key)) {
-    texts.set(key, (async () => {
-      const a = state.analysis;
-      const g = a.geometry[folio - 1];
-      if (!VECTOR_TEXT || !g) return null;
-      const renderer = await state.rendererReady;
-      const text = await renderer.vectorText(a.book.pages[folio - 1].source.index);
-      if (!text?.instances.length) return null;
-      const t = g.trim;
-      const w = t.x1 - t.x0;
-      const h = t.y1 - t.y0;
-      const k = MM_PER_PT;
-      const instances = text.instances.map(({ glyph, m: [a1, b1, c1, d1, e1, f1], color, key: id }) => ({
-        glyph, color, key: id, m: [(a1 * k) / w, (-b1 * k) / h, (c1 * k) / w, (-d1 * k) / h, (e1 * k - t.x0) / w, (t.y1 - f1 * k) / h],
-      }));
-      return packVectorText({ glyphs: text.glyphs, instances });
-    })().catch(() => null));
-  }
-  return texts.get(key);
-}
-const texts = new Map(); // textureKey -> Promise of the page's packed vector text (see vectorText)
-
-/** What a render of the page for the 3D view leaves out: its vector text's glyphs (null: nothing). */
-async function textLeftOut(folio) {
-  const keys = (await vectorText(folio))?.keys;
-  return keys?.length ? keys : null;
-}
-
-/**
- * A rendered image (ImageBitmap) of a finished page, or null for a blank. `vector: true`:
- * for the 3D page, without the glyphs it draws from their outlines (see vectorText).
- */
+/** A rendered image (ImageBitmap) of a finished page, or null for a blank. */
 export async function pageImage(folio, height, priority, options = {}) {
   const g = state.analysis.geometry[folio - 1];
   if (!g) return null;
   const page = state.analysis.book.pages[folio - 1];
-  const vector = options.vector ? await textLeftOut(folio) : null;
   const r = await state.rendererReady;
-  return r.render(page.source.index, g.trim, height, priority, { ...options, vector });
+  return r.render(page.source.index, g.trim, height, priority, options);
 }
 
-/** Part of a page (`rect`, mm in PDF user space) for the 3D page: without its vector text. */
+/** Part of a page (`rect`, mm in PDF user space). */
 export async function pageRegionImage(folio, rect, height, priority, options = {}) {
   const page = state.analysis.book.pages[folio - 1];
-  const vector = await textLeftOut(folio);
   const r = await state.rendererReady;
-  return r.render(page.source.index, rect, height, priority, { ...options, vector });
+  return r.render(page.source.index, rect, height, priority, options);
 }
 
-/**
- * A small image of a page with its text, for its timeline thumbnail, for showing through
- * its leaf, and for the 3D page where it is small on screen (its own image leaves vector
- * text out): one render for all.
- */
+/** The page's base image (the 3D view's, one render for both), for its timeline thumbnail. */
 function smallImage(folio, priority) {
-  if (!VECTOR_TEXT) {
-    const size = pageSizeOf(state.analysis) ?? { width: 1, height: 1 };
-    return pageImage(folio, baseHeight(state.analysis.book.pages.length, size.width / size.height), priority);
-  }
-  return pageImage(folio, THUMB_HEIGHT * 2, priority);
+  const size = pageSizeOf(state.analysis) ?? { width: 1, height: 1 };
+  return pageImage(folio, baseHeight(state.analysis.book.pages.length, size.width / size.height), priority);
 }
 
 const thumbs = new Map(); // key -> Promise<ImageBitmap>
@@ -136,12 +80,12 @@ export function loadAllTextures() {
     if (have?.key === key && have.height >= height) continue;
     if (key === "blank") {
       state.textures.set(folio, { key, height: Infinity, blank: true });
-      scene.setPageTexture(folio, null, { vector: null, small: null });
+      scene.setPageTexture(folio, null);
       continue;
     }
     // An outdated image stays on screen until its replacement arrives: no flashing.
     const distance = Math.abs(folio - centre);
-    const apply = (h) => ([image, vector, small]) => {
+    const apply = (h) => (image) => {
       // (Not freed when not taken: a render asked for twice is one image, and the other
       // request may have handed it on.)
       const cur = state.textures.get(folio);
@@ -150,14 +94,12 @@ export function loadAllTextures() {
       // The image goes to the 3D view, which frees it once it is on the GPU.
       const edge = folio === 1 || folio === n ? averageEdge(image, folio % 2 === 1) : null;
       state.textures.set(folio, { key, height: h, edge });
-      // Image and text together: the image leaves the vector text out.
-      scene.setPageTexture(folio, image, { vector, small: VECTOR_TEXT ? small : null });
+      scene.setPageTexture(folio, image);
       if (folio === 1 || folio === n) applySpine(); // the spine colour may come from a cover
     };
-    // Per page: its image, its vector text and a small image with the text; nearest first.
+    // Per page: its image, nearest first.
     pending++;
-    Promise.all([pageImage(folio, height, 100 + distance, { vector: VECTOR_TEXT, cache: "pending" }), vectorText(folio).catch(() => null),
-      VECTOR_TEXT ? smallImage(folio, 100 + distance).catch(() => null) : null])
+    pageImage(folio, height, 100 + distance, { cache: "pending" })
       .then(apply(height))
       .catch(() => {})
       .finally(() => {
@@ -173,14 +115,14 @@ export function loadAllTextures() {
  * from the PDF's vectors as strips, each at the resolution its own part of the screen needs
  * (a tilted page needs far more near the camera than far away), and laid over the page.
  *
- * One pass once the view stops (none while it moves: type is drawn from its outlines and
- * stays exact anyway, and strips arriving mid-motion stalled frames as they went to the GPU):
+ * One pass once the view stops (none while it moves: strips arriving mid-motion stalled frames
+ * as they went to the GPU):
  * the strips at the screen's own density (SUPERSAMPLE), mipmapped for when the view moves
  * on. (Until 0.17.75 two passes, a quick one at screen density and a fine one at three times
  * it: the page changed look twice after every move, and the fine one's pixels were read
  * through a filter that blurred them.) A new pass cancels the renders of an outdated one,
  * even mid-drawing; so does moving again.
- * The strips render in parallel on every thread that knows the page (warmVisiblePages).
+ * The strips render in parallel on the render threads.
  */
 const PASSES = {
   sharp: { priority: SHARP_FINE, supersample: SUPERSAMPLE, maxTiles: MAX_DETAIL, step: 1.3, enough: 0.9 },
@@ -190,10 +132,6 @@ let sharpenRun = 0;
 export function sharpen() {
   const a = state.analysis;
   if (!a || !state.renderer || state.capturing) return;
-  // Every render thread reads the pages in view, for their strips to render on all of them.
-  // Here, at rest, not as each page turns: every thread reading every page flipped past took
-  // the processor from drawing, 20-40 ms frames the first time through a document.
-  warmVisiblePages();
   const gen = state.generation;
   const run = ++sharpenRun;
   state.renderer.cancel(isSharp);
@@ -283,19 +221,7 @@ function sufficient(current, seen, plan, ratio) {
 
 const overlaps = (a, b) => a.u0 < b.u1 && b.u0 < a.u1 && a.v0 < b.v1 && b.v0 < a.v1;
 
-/** Teach every render thread the pages in view, so their strips can render in parallel. */
-export function warmVisiblePages() {
-  const a = state.analysis;
-  if (!a || !state.renderer) return;
-  const folios = scene.shownFolios;
-  for (const folio of folios) {
-    const src = a.book.pages[folio - 1]?.source;
-    if (src) state.renderer.warm(src.index);
-  }
-}
-
 /** Thumbnails made again (a new file, a new CMYK profile). */
 export function forgetThumbnails() {
   thumbs.clear();
-  texts.clear(); // a page's vector text, asked again with its images
 }

@@ -2,25 +2,13 @@
 // switched on and off live, to check overprint and what each ink carries. A button under Video
 // opens a small window to its left, in the manner of a dropdown's open list: a row per plate with
 // its ink's circle and name; a click prints the plate or leaves it out. Process plates switches
-// the four at once. The drawing is the renderer's (setPlatesEngine): every page, raster images
-// included, wholly in the plates that print. Without an engine that has plates (pdf.js has
-// none: MuPDF's renderer brings them, see CONTEXT.md, Decisions) the rows are muted. Every
-// plate prints again with a new file.
+// the four at once. The drawing is MuPDF's (setPlates in colour.js): every page drawn again
+// without the plates left out, raster images included. The rows are muted until a document's
+// renderer is ready. Every plate prints again with a new file.
 
+import { state } from "./app.js";
+import { setPlates } from "./colour.js";
 import { $ } from "./dom.js";
-
-/**
- * What draws the plates: whether the document has any now, and the plates to print (by plate:
- * Cyan, Magenta, Yellow, Black, then the page's spots; false leaves one out). None yet.
- * @type {{canSeparate: () => boolean, setInks: (inkOn: boolean[]) => void} | null}
- */
-let engine = null;
-
-/** The renderer that draws the plates, or null (the window muted). */
-export function setPlatesEngine(next) {
-  engine = next;
-  show();
-}
 
 // The process inks on the screen as ISO Coated v2 prints them solid (C 0/159/227, M 229/0/125,
 // Y 255/237/0, K 29/29/27): what the circles show.
@@ -98,13 +86,13 @@ export function resetPlates() {
 
 function setInks(next) {
   inkOn = next;
-  engine?.setInks([...inkOn, true, true, true, true]); // spots always print
+  setPlates([...inkOn, true, true, true, true]); // spots always print
   show();
 }
 
 /**
  * The rows and the button as things are: a row's circle filled while its plate prints, an outline
- * when it doesn't; muted when the document has no plates (no engine, or Overprint ignored). The
+ * when it doesn't; muted until the document's renderer is ready. The
  * button inverted while any plate is left out, so it can't be forgotten.
  */
 export function refreshPlates() {
@@ -112,7 +100,7 @@ export function refreshPlates() {
 }
 
 function show() {
-  const usable = !!engine?.canSeparate();
+  const usable = !!state.renderer;
   rows.forEach((r, i) => {
     const on = i === 0 ? inkOn.every(Boolean) : inkOn[i - 1];
     r.setAttribute("aria-checked", String(on));

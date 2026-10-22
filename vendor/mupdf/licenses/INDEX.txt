@@ -1,0 +1,9 @@
+cmark-gfm: COPYING
+freetype: LICENSE.TXT
+gumbo-parser: COPYING
+harfbuzz: COPYING
+jbig2dec: LICENSE
+lcms2: LICENSE
+libjpeg: README
+openjpeg: LICENSE
+zlib: LICENSE

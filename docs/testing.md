@@ -30,15 +30,12 @@ node tools/make-testfiles.mjs
 | `core.test.js` | The arithmetic: pairing (including what adding one or two pages in InDesign does to every pair), parity, the center spread, page counts per binding, imposition and folding schemes against the classic tables, creep, setup detection, paper and spine figures, the side-glue rule. |
 | `v2.test.js` | Odd setups, imposed files folded back, sheet plans, the 3D book model. |
 | `pdf.test.js` | Real PDFs, made with pdf-lib: read back, imposed, folded back, rendered the same before and after imposition. |
-| `fixtures.test.js` | The generated test documents through the app's own import path: cover files (spine, flaps, outside only, hardcover), spine artwork widths, booklets' sheet counts, output intents, overprint drawn by the render threads. |
-| `cull.test.js` | Skipping drawing outside a sharp strip. |
+| `fixtures.test.js` | The generated test documents through the app's own import path: cover files (spine, flaps, outside only, hardcover), spine artwork widths, booklets' sheet counts, output intents, overprint and a spot image drawn by the render threads (MuPDF). |
 | `geometry.test.js` | The geometry proof: no two sheets pass through each other, in any binding, at rest at any opening, closed on either cover, closing and opening, mid-turn, with several pages in the air, flipping fast forward and back. Every pair of sheets that could meet is tested, as outlines at their drawn thickness (`crossings.js`). |
 | `turning.test.js` | Turning, opening and closing in every binding, frame by frame on the scene's own clock: no frame jumps. Single and double clicks, quick bursts, back and forth, closing from the middle, opening deep in, 80 pages. |
 | `fold.test.js` | A stapled booklet's folds: each sheet's fold stays inside the one round it while opening and closing, at three paper thicknesses; no kink at the gutter mid-turn; the staples' legs only at the center spread. |
 | `scene.test.js` | Every kind of sheet drawn once: three.js's shaders, changed as text, still compile. |
 | `sharpness.test.js` | When a page keeps its base image and when it gets strips; strips reach the page's edges; a video's page images per frame, the turning page included; strips go to the graphics card like any page image. |
-| `text.test.js` | Text can't go missing: every render thread leaves out exactly the glyphs it is told; a failed render doesn't lose a text request; overprint multiplies when shown. |
-| `vectortext.test.js` | Glyph outlines to quadratic curves, coverage computed as the shader does, the render threads' choice of glyphs. |
 | `motion.test.js` | The motion resolution's steps, including real figures from a report. |
 | `checklist.test.js` | Points from designer testing that numbers can settle: endpapers, boards and the headband on the spine, side glue in Preflight, staples and creep, signatures nesting with creep, switching bindings on one book. |
 | `panel.test.js` | The side panel, built with the app's own stylesheets at several window sizes: every control and label on whole pixels. |
@@ -76,9 +73,8 @@ They run the real app from source, off-screen and never focused, so you can keep
 | `memory.py` | Memory and idle activity with every page visited. At rest the app should use no processor time. |
 | `make-testfiles.mjs` | The test documents, each with what to expect printed on it. Deterministic: run again, the same bytes. |
 | `make-long-pdf.mjs`, `prepare-long-photos.py`, `make-heavy-pdf.py` | Long and heavy test books: 240 pages of photos and layouts, and a file of large CMYK photos. |
-| `patch-pdfjs.py` | Applies the documented pdf.js patches after replacing pdf.js. |
+| `mupdf/build.sh`, `mupdf/printwarden.c` | Printwarden's MuPDF build: MuPDF's released source with these glue functions added, built by the Build MuPDF workflow (see `tools/mupdf/README.md`). |
 | `build-ffmpeg.sh` | Builds the shipped FFmpeg from source. |
-| `build-jpeg-wasm.sh` | Builds the WebAssembly JPEG decoder from `tools/jpegwasm`. The result is committed, so nobody needs Rust to run or build the app. |
 
 ## What a machine can't check
 

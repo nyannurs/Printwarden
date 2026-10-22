@@ -1,26 +1,7 @@
 // Textures the scene makes for itself: placeholders (white paper, no finish), the paper's
-// grain, the contact shadow's soft footprint, vector text's data, and handling for page
-// images once on the GPU.
+// grain, the contact shadow's soft footprint, and handling for page images once on the GPU.
 
 import * as THREE from "three";
-
-/** Vector text data: RGBA 32-bit floats, and pairs of 32-bit unsigned integers. */
-export function vectorFloats(data, width, height) {
-  const t = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
-  t.minFilter = t.magFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
-  t.needsUpdate = true;
-  return t;
-}
-
-export function vectorInts(data, width, height) {
-  const t = new THREE.DataTexture(data, width, height, THREE.RGIntegerFormat, THREE.UnsignedIntType);
-  t.internalFormat = "RG32UI";
-  t.minFilter = t.magFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
-  t.needsUpdate = true;
-  return t;
-}
 
 /** One pixel to draw textures into once (see #warm). */
 export function makeWarmer() {

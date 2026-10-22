@@ -9,7 +9,6 @@ import { forgetThumbnails, loadAllTextures } from "./pages.js";
 import { applySpine, renderSpineArt } from "./spine-panel.js";
 
 const PROFILE_PREF = "cmykProfile"; // remembered choice (localStorage)
-const OVERPRINT_PREF = "overprint"; // "off" when overprint is not to be shown
 
 // Shipped with the app by the European Color Initiative's permission (see vendor/icc/README.txt):
 // the default everywhere, so colours look the same on every computer, whatever is installed.
@@ -30,18 +29,31 @@ export async function colourOptions(outputIntent) {
     if (p.name === INCLUDED_PROFILE.name) continue; // the same profile, installed: listed once
     options.push({ id: `system:${p.path}`, name: p.name, path: p.path });
   }
-  options.push({ id: "builtin", name: "Built-in: US coated (GRACoL)" });
+  options.push({ id: "builtin", name: "Built-in: MuPDF's own CMYK" }); // no profile handed over: MuPDF's default
   let pref = null;
-  let overprint = true;
   try {
     pref = localStorage.getItem(PROFILE_PREF);
-    overprint = localStorage.getItem(OVERPRINT_PREF) !== "off";
   } catch {
     // no storage: fine
   }
   const has = (id) => options.some((o) => o.id === id);
   const choice = pref !== "intent" && has(pref) ? pref : outputIntent ? "intent" : INCLUDED_PROFILE.id;
-  return { options, choice, overprint };
+  return { options, choice, inks: [true, true, true, true] };
+}
+
+/**
+ * Which plates print (the Separations window, ui/plates.js): by plate, Cyan, Magenta, Yellow,
+ * Black, then a page's spots; false leaves one out. Every page is drawn again without them
+ * (MuPDF leaves a plate's ink out of the page, raster images included), the open spread
+ * first; what shows stays until its replacement arrives. (Pages drawn as inks, switched in the
+ * shader at once, are to come: see CONTEXT.md, Decisions.)
+ * @param {boolean[]} inkOn
+ */
+export function setPlates(inkOn) {
+  if (!state.bytes || !state.renderer) return;
+  state.colour = { ...state.colour, inks: inkOn.slice(0, 4) };
+  state.renderer.setInks(inkOn);
+  refresh();
 }
 
 export async function profileBytes(colour, id) {
@@ -69,22 +81,6 @@ export async function setColourProfile(id) {
   rerender();
 }
 
-/**
- * Show overprint or not: overprinting objects (the graphics state's OP and op) are drawn as
- * the press lays them, ink over ink (multiplied), as Acrobat's Overprint Preview shows them;
- * off, they cover what is under them, as most viewers draw them. Remembered.
- */
-export function setOverprint(on) {
-  if (!state.bytes || on === state.colour.overprint) return;
-  state.colour = { ...state.colour, overprint: on };
-  try {
-    localStorage.setItem(OVERPRINT_PREF, on ? "on" : "off");
-  } catch {
-    // no storage: fine
-  }
-  rerender();
-}
-
 /** Restart the renderer with the colour settings and re-render every page. */
 function rerender() {
   const old = state.renderer;
@@ -92,10 +88,17 @@ function rerender() {
   state.rendererReady = rendererReady;
   state.renderer = null;
   rendererReady.then((r) => {
-    if (state.rendererReady === rendererReady) state.renderer = r;
-    else r.destroy();
+    if (state.rendererReady === rendererReady) {
+      state.renderer = r;
+      r.setInks([...state.colour.inks, true, true, true, true]); // the plates as switched
+    } else r.destroy();
     old?.destroy();
   });
+  refresh();
+}
+
+/** Every page image made again (the renderer draws differently now), the old ones shown until then. */
+function refresh() {
   for (const folio of [...state.details.keys()]) scene.setPageDetails(folio, []);
   state.details.clear();
   inspector.render(state.analysis, state.name, state.colour);

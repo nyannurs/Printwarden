@@ -410,7 +410,7 @@ test("architecture: core/ imports nothing but core/", async () => {
 
 test("ICC header reader: CMYK profile recognised", async () => {
   const { iccInfo } = await import("../app/pdf/icc.js");
-  const icc = new Uint8Array(await (await fetch("../vendor/pdf-iccs/CGATS001Compat-v2-micro.icc")).arrayBuffer());
+  const icc = new Uint8Array(await (await fetch("../vendor/icc/ISOcoated_v2_eci.icc")).arrayBuffer());
   const info = iccInfo(icc);
   eq(info.colorSpace, "CMYK");
   eq(iccInfo(new Uint8Array(200)), null);

@@ -9,22 +9,22 @@ import { coverOf, PAPER_FINISHES, paperThicknessMm, showThrough } from "../core/
 import { openingOf } from "../core/pairing.js";
 import { planSheets } from "../core/sheets.js";
 import { coverMmFor, hasSpine, paperForSpine } from "../core/spine.js";
-import { openForRendering, openPdf, writeImposed } from "../pdf/load.js";
+import { openPdf, writeImposed } from "../pdf/load.js";
 import { createRenderer, prepareSpareWorkers, routedRenderer } from "../pdf/render.js";
 import { makeSamplePdf } from "../pdf/sample.js";
 import { APP_NAME, APP_VERSION, canQuit, latestRelease, onMenuCommand, openReleases, quit, savePdf } from "../platform.js";
 import { BookScene } from "../viewer/scene.js";
 import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js";
 import { buildClientHtml, exportClientViewer } from "./client.js";
-import { colourOptions, profileBytes, setColourProfile, setOverprint } from "./colour.js";
+import { colourOptions, profileBytes, setColourProfile } from "./colour.js";
 import { makeCompass } from "./compass.js";
 import { aboutDialog, exportChoiceDialog, exportDialog, importDialog } from "./dialogs.js";
 import { $, addScrollbar, fitPill, showLoad, snapToPixels, toast } from "./dom.js";
 import { Filmstrip } from "./filmstrip.js";
 import { importFinish, openFinishDialog } from "./finish.js";
 import { Inspector } from "./inspector.js";
-import { forgetThumbnails, isSharp, loadAllTextures, sharpen, thumbnail, warmVisiblePages } from "./pages.js";
-import { initPlates, resetPlates } from "./plates.js";
+import { forgetThumbnails, isSharp, loadAllTextures, sharpen, thumbnail } from "./pages.js";
+import { initPlates, refreshPlates, resetPlates } from "./plates.js";
 import { applySpine, importSpineArt, openSpinePanel, renderSpineArt, updateSpinePanel } from "./spine-panel.js";
 import { initView, setBackground, showZoom } from "./view.js";
 
@@ -49,7 +49,7 @@ export const state = {
   // a cover keeps its colour along the spine, see coverEdge)
   textures: new Map(),
   details: new Map(), // folio -> strips on screen: [{region, pxPerMm}]
-  colour: { options: [], choice: "builtin", overprint: true }, // CMYK profile options for this document, overprint shown or not
+  colour: { options: [], choice: "builtin", inks: [true, true, true, true] }, // CMYK profile options for this document, the plates that print
   flapKey: "", // which flap images the 3D covers show (see applyCoverExtras)
   background: "#56575b", // 3D backdrop colour, remembered between launches
   bookKey: "",
@@ -87,7 +87,6 @@ export const inspector = new Inspector($("inspector"), {
   onSpine: () => openSpinePanel(),
   onFinish: () => openFinishDialog(),
   onColourProfile: (id) => setColourProfile(id),
-  onOverprint: (on) => setOverprint(on),
   onBackground: (color, commit) => setBackground(color, commit),
   background: () => state.background,
   onAbout: () => aboutDialog({ name: APP_NAME, version: APP_VERSION }),
@@ -106,10 +105,9 @@ export async function startImport(file = null) {
  * of them. Used on import, and again when the profile changes (colour.js).
  * @param {{bytes: Uint8Array, cover?: {bytes: Uint8Array} | null}} files
  */
-/** @param {boolean | Promise<boolean>} [overprint] */
-export function startRenderers(files, profile, overprint = state.colour.overprint) {
-  const main = createRenderer(files.bytes, () => openForRendering(files.bytes), profile, overprint);
-  const cover = files.cover ? createRenderer(files.cover.bytes, () => openForRendering(files.cover.bytes), profile, overprint) : null;
+export function startRenderers(files, profile) {
+  const main = createRenderer(files.bytes, null, profile);
+  const cover = files.cover ? createRenderer(files.cover.bytes, null, profile) : null;
   return Promise.all([main, cover]).then(([m, c]) => routedRenderer(m, c));
 }
 
@@ -130,8 +128,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     const coverStructure = cover && source === "pages" ? openPdf(cover.bytes) : null;
     const colour = structure.then((s) => colourOptions(s.outputIntent));
     colour.catch(() => {}); // a file that can't be read: reported below, from `structure`
-    rendererReady = startRenderers({ bytes: file.bytes, cover: coverStructure ? cover : null }, colour.then((c) => profileBytes(c, c.choice)),
-      colour.then((c) => c.overprint));
+    rendererReady = startRenderers({ bytes: file.bytes, cover: coverStructure ? cover : null }, colour.then((c) => profileBytes(c, c.choice)));
     const { pages } = await structure;
     const coverPages = coverStructure ? (await coverStructure).pages : null;
     const colourOptionsOfFile = await colour;
@@ -144,7 +141,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     rendererReady.then((r) => {
       if (state.rendererReady !== rendererReady) return r.destroy();
       state.renderer = r;
-      warmVisiblePages();
+      refreshPlates(); // the Separations window's rows: usable now
     });
     state.bytes = file.bytes;
     state.pages = pages;
@@ -442,5 +439,5 @@ prepareSpareWorkers(300);
 
 // For debugging from the developer console.
 window.app = {
-  state, scene, openDocument, updateSetup, sharpen, setColourProfile, setOverprint, prepareCaptureTile, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
+  state, scene, openDocument, updateSetup, sharpen, setColourProfile, prepareCaptureTile, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
 };

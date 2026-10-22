@@ -31,7 +31,7 @@ export class Inspector {
    * @param {{onSetup: (patch: object) => void, onGoToFolio: (folio: number) => void,
    *          onPaperPreview: (colors: {color?: string, coverColor?: string, endpaperColor?: string}) => void,
    *          onWirePreview: (color: string) => void, onHeadbandPreview: (color: string) => void,
-   *          onColourProfile: (id: string) => void, onOverprint: (on: boolean) => void, onSpine: () => void, onFinish: () => void,
+   *          onColourProfile: (id: string) => void, onSpine: () => void, onFinish: () => void,
    *          onBackground: (color: string, commit: boolean) => void, background: () => string,
    *          onAbout: () => void}} deps
    */
@@ -229,10 +229,7 @@ export class Inspector {
     const profile = select(colour.options.map((o) => [o.id, o.name]), colour.choice, (id) => this.deps.onColourProfile(id));
     const row = field("CMYK profile", profile);
     row.classList.add("wide"); // profile names run long: the panel's whole width
-    const overprint = select([["on", "Shown"], ["off", "Ignored"]], colour.overprint === false ? "off" : "on", (v) => this.deps.onOverprint(v === "on"));
-    const overprintRow = field("Overprint", overprint);
-    overprintRow.classList.add("wide"); // stacked like the profile above it: the section reads alike
-    return section("Color", null, row, overprintRow);
+    return section("Color", null, row);
   }
 
   #findingsSection(findings, book, colour) {
@@ -249,9 +246,7 @@ export class Inspector {
       // designer compared two FOGRA39 profiles and saw no change: there is almost none.)
       const shown = colour.options.find((o) => o.id === colour.choice)?.name.replace(/^(Included|From PDF): /, "") ?? colour.choice;
       findings = [...findings, { severity: "info", code: "profile", folios: [],
-        message: `Plain CMYK is shown with ${shown}. Images with their own profile and RGB keep their colors, whatever is chosen.`
-          + (colour.overprint === false ? " Overprint is ignored: overprinting objects cover what is under them."
-            : " Overprinting objects are shown as printed, their ink over what is under them.") }];
+        message: `Plain CMYK is shown with ${shown}, and RGB content converted through it, as it prints. Images with their own profile keep their colors. Overprinting objects are shown as printed, their ink over what is under them.` }];
     }
     if (!findings.length) list.append(Object.assign(el("li", "muted"), { textContent: "Nothing to report." }));
     for (const f of findings) {

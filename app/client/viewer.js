@@ -146,7 +146,7 @@ function pageLoader(scene, data) {
     for (const folio of near()) {
       if (!data.pages[folio - 1]) continue;
       const image = await createImageBitmap(await blobOf(folio), { resizeHeight: base, resizeQuality: "high" });
-      scene.setPageTexture(folio, image, null);
+      scene.setPageTexture(folio, image);
     }
   })();
   return {

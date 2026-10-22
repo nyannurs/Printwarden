@@ -24,6 +24,7 @@
 | Joint | The flexible strip of a hardcover's case between a board and the spine. |
 | Output intent | The printing condition a PDF/X file was made for, with its CMYK profile. |
 | Overprint | Ink printed over other ink instead of knocking it out. |
+| Plate, separation | One ink's share of a page: Cyan, Magenta, Yellow, Black, and each spot color. The Separations window switches them. |
 | Perfect binding | A softcover with the pages glued at the spine into a wraparound cover. |
 | Recto, verso | The right-hand page (odd number) and the left-hand page (even number). |
 | Saddle stitch | A booklet of folded sheets nested together and stapled through the fold. Printwarden calls it Staple binding. |
@@ -46,14 +47,13 @@
 | Base image | The one image of a page every page has, sized so the whole book fits in memory. |
 | Cross-section, profile | A leaf's shape seen from its head: a curve from the spine to the fore-edge, the same along the spine except during a corner-led turn. |
 | Frame | One picture the graphics card draws: as many a second as the screen shows (60 to 120) while things move, none at rest. |
-| Texture key | The identity of a page's image (`textureKey` in ui/pages.js): the color profile, overprint, source page and trim. When it is unchanged, the image is reused. |
+| Texture key | The identity of a page's image (`textureKey` in ui/pages.js): the color profile, the plates that print, the source page and its trim. When it is unchanged, the image is reused. |
 | GPU | The graphics card. |
 | Leaf | One sheet in the book: two pages. |
 | Main thread | The thread that runs the window. Work that would freeze it runs in background threads (workers). |
 | Motion resolution | The smaller picture drawn while things move on a slow graphics card. |
 | Opening | Which pages lie open: 0 is the front cover. |
-| Render thread, worker | A background thread drawing PDF pages with pdf.js. |
+| Render thread, worker | A background thread drawing PDF pages with MuPDF. |
 | Shader | A small program the graphics card runs per vertex or per pixel. |
 | Sharp strip | A part of a page rendered again from the PDF at the resolution the screen needs, laid over the base image. |
 | Texture | An image on the graphics card. |
-| Vector text | Type drawn on the 3D page from its outlines rather than from an image: exact at any zoom. |

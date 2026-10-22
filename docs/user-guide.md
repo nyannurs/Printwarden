@@ -53,7 +53,7 @@ The buttons over the view:
 - **Left page / Spread / Right page** centers the view on one page or the whole spread. Each press shows the next choice. It has nothing to do while one page shows, closed or at a cover.
 - **Close / Open** closes the book, turning back to the front cover first, or opens it.
 - **Screenshot** and **Video** open their dialogs (see Exports).
-- **Separations** opens a small window beside it, as Acrobat's Output Preview has them: a row per plate (Process plates, Cyan, Magenta, Yellow, Black) with its ink's circle. Click a row to leave that plate out or print it again; Process plates switches the four at once. The rows are muted until the renderer can separate the document into plates (pdf.js can't; the coming MuPDF renderer will).
+- **Separations** opens a small window beside it, as Acrobat's Output Preview has them: a row per plate (Process plates, Cyan, Magenta, Yellow, Black) with its ink's circle. Click a row to leave that plate out or print it again; Process plates switches the four at once. Every page is drawn again without the plates left out, the open spread first; what shows stays until its replacement arrives. Overprint shows this way: a black set to overprint leaves the color under it when the black plate is off, a knockout leaves paper.
 
 Below them:
 - **The zoom slider** steps through 50, 75, 100, 125, 150, 200, 300, 400, 600 and 800 %. 100 % is the preset's framing. A preset and a zoom step always frame the book the same way, so mockups are comparable. The wheel zooms freely in between.
@@ -147,7 +147,6 @@ The backdrop color behind the book, flat, exactly as chosen. It is remembered.
   - A PDF with an output intent (PDF/X) can be shown **From PDF**, as Acrobat does.
   - Every CMYK profile installed on the computer is offered too, from the system's color folders and Adobe's.
   - The profile last chosen sticks for every file until you choose another.
-- **Overprint**: on, overprinting objects print ink over ink, as Acrobat's Overprint Preview shows them. Off, they cover what is under them, as most viewers draw them.
 
 ### Preflight
 
@@ -203,7 +202,7 @@ The camera stays fixed for the whole video, framed so every page stays in the pi
 
 Press Ctrl+Shift+P (Cmd+Shift+P on a Mac) with a document open, or the **Performance check** button in a client viewer. It runs for about 35 seconds:
 1. It pans the view where it is.
-2. It drags the camera round the book, two seconds at a time, with one part of the image switched off each time: half the pixels, shadows, multisampling, vector text, and every sheet but the two open pages.
+2. It drags the camera round the book, two seconds at a time, with one part of the image switched off each time: half the pixels, shadows, multisampling, and every sheet but the two open pages.
 3. It turns pages quickly.
 4. It asks you to pan by hand for four seconds. It measures how often the mouse reports a move, because a frame can only be drawn when one arrives.
 
@@ -211,4 +210,4 @@ The report opens in a window with a **Copy** button. The parts that change the r
 
 ## Where settings are kept
 
-Window size, camera preset, backdrop, color profile and overprint are remembered between starts, in the app's own data folder. Delete the `Printwarden Data` folder to reset the app; see [The desktop app](desktop-app.md).
+Window size, camera preset, backdrop and color profile are remembered between starts, in the app's own data folder. Delete the `Printwarden Data` folder to reset the app; see [The desktop app](desktop-app.md).

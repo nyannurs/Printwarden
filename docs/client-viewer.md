@@ -55,7 +55,7 @@ The viewer runs the app's own code, so a change to the 3D book reaches the next 
 - **The camera presets**, from the app's list.
 - **The performance check** (`app/ui/probe.js`), the same file as Ctrl/Cmd+Shift+P.
 - **Everything about the look**, read off the app's live scene when exporting, not worked out again: paper colors and stocks, the endpaper color, the sheet thickness, the spine color and artwork, the covers' spine-edge colors.
-- **The page images**, rendered by the app's own page renderer with your color profile and overprint setting.
+- **The page images**, rendered by the app's own page renderer with your color profile, overprint as printed.
 - **The base image size**, by the app's own rule.
 - **The side-glue rule and the wire's finish**, from `app/core/binding.js`, the same as the app and Preflight.
 

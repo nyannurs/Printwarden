@@ -13,12 +13,12 @@ What it adds is the window, the controls, and the bookkeeping of which page has 
 | `inspector.js` | The side panel. |
 | `filmstrip.js` | The timeline. |
 | `view.js` | Around the 3D view: zoom steps, camera presets, backdrop, drag and drop, the frame counter, the performance check shortcut. |
-| `pages.js` | Page images for the 3D view: loading, sharpening, vector text, thumbnails. |
+| `pages.js` | Page images for the 3D view: loading, sharpening, thumbnails. |
 | `dialogs.js` | Every dialog: import, export choice, imposed export, HTML export, screenshot, video, spot finish, book spine, About and Licenses, reports. |
 | `capture.js` | Screenshots and videos: the pages at the output's resolution, the MP4 encoder, ProRes through FFmpeg. |
 | `client.js` | The client viewer export (see [The client viewer](client-viewer.md)). |
-| `colour.js` | The CMYK profile and overprint choices. |
-| `plates.js` | The Separations button and window: which plates print, handed to the renderer (`setPlatesEngine`); muted without one. |
+| `colour.js` | The CMYK profile choice, and the plates that print. |
+| `plates.js` | The Separations button and window: which plates print (`setPlates` in colour.js); muted until the document's renderer is ready. |
 | `spine-panel.js` | The spine's color or artwork and the Book spine panel. |
 | `finish.js` | Spot finishes. |
 | `compass.js` | The view's compass. |
@@ -73,14 +73,12 @@ Thumbnails are the small images, 200 px tall. A click asks app.js to turn the bo
 ## Page images (`pages.js`)
 
 The bookkeeping between the PDF and the 3D pages:
-- **`loadAllTextures`** renders every page's base image, nearest the open spread first. A page's key names the color profile, the overprint setting, the source page and its trim. A page whose key hasn't changed keeps its image, so a settings change redraws only what it affects.
+- **`loadAllTextures`** renders every page's base image, nearest the open spread first. A page's key names the color profile, the plates that print, the source page and its trim. A page whose key hasn't changed keeps its image, so a settings change redraws only what it affects.
 - **`sharpen`**, at rest:
   - It plans strips for every page in view (viewer/detail.js) at 1.25 image pixels per screen pixel.
   - It keeps strips already on screen that are within reach of the new plan (`sufficient`).
   - It renders the rest from the PDF's vectors. Strips outdated by a turn or a move are dropped.
-- **`vectorText`** asks the render threads once per page and profile for its vector text. It packs it for the 3D page, and every image of that page leaves exactly those glyphs out.
-- **`warmVisiblePages`** teaches every render thread the pages in view, so their strips render in parallel.
-- **`thumbnail`** makes the small image, with all text.
+- **`thumbnail`** scales a page's base image down for the timeline.
 
 ## Dialogs (`dialogs.js`)
 
@@ -104,8 +102,9 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 ## Color (`colour.js`)
 
 - `colourOptions` lists the profiles: the included ISO Coated v2 (ECI), "From PDF" where the file has an output intent, and every installed CMYK profile.
-- The last choice is remembered, as is overprint.
-- `setColourProfile` and `setOverprint` restart the renderer and redraw every page. The old images stay until the new ones arrive.
+- The last choice is remembered.
+- `setColourProfile` restarts the renderer and redraws every page. The old images stay until the new ones arrive.
+- `setPlates` (the Separations window) tells the renderer which plates print and redraws every page the same way, the open spread first.
 
 ## The spine (`spine-panel.js`)
 
@@ -135,8 +134,8 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 `runProbe(scene, onProgress)` measures the computer it runs on and returns a text report:
 - The GPU, the screen (pixel ratio, canvas size, multisampling), processor threads, the book.
 - The refresh rate, from frames with nothing drawn.
-- **Panning where the view is**: as is, at half the pixels, without vector text, without re-pivoting onto the paper.
-- **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, vector text, and every sheet but the two open pages.
+- **Panning where the view is**: as is, at half the pixels, without re-pivoting onto the paper.
+- **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, and every sheet but the two open pages.
 - **Turning pages quickly.**
 - **Panning by hand**: the mouse's moves per second, frames drawn per second, the card's time, the resolution drawn at.
 
@@ -164,7 +163,6 @@ Each run reports frames per second, the 95th-percentile and worst frame time, th
 Remembered between starts, in the browser storage of the app's data folder:
 - the camera preset;
 - the backdrop color;
-- the CMYK profile choice;
-- overprint.
+- the CMYK profile choice.
 
 The window's size and place are kept by the desktop shell. Nothing about a document is remembered.

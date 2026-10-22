@@ -4,7 +4,6 @@
 // GPU from their cross-sections (SHEET_VERTEX); pages are shaded as ink on paper.
 
 import * as THREE from "three";
-import { VECTOR_TEXT_GLSL } from "./vectortext.js";
 
 export const MAX_DETAIL = 6; // sharp strips per page
 
@@ -229,8 +228,6 @@ uniform float uScore;
 // squares at head, foot and fore-edge, the cover's turn-in shows (rgb, its colour; a 1 on).
 uniform vec4 uTurnIn;
 uniform sampler2D uBack;
-uniform sampler2D uSmall;
-uniform float uSmallOn;
 uniform float uShow;
 uniform float uSpineAtU0;
 uniform vec4 uHoles;      // shape (0 none, 1 round, 2 square), pitch, radius or half-width, offset from spine (mm)
@@ -243,7 +240,6 @@ uniform float uOpenness;
 uniform float uOuterCover;
 uniform sampler2D uFinish;  // spot finish mask, see FINISH_FRAGMENT
 uniform float uFinishKind;  // 0 none, 1 gloss varnish, 2 gold, 3 silver, 4 copper foil
-${VECTOR_TEXT_GLSL}
 // A page image sampled once, by the GPU's own trilinear, anisotropic filter, with the
 // gradients shortened a little (0.7: half a mipmap level finer than the footprint asks), so
 // an image at about one pixel per screen pixel is read from its full level, not blended with
@@ -268,28 +264,13 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
 #ifdef USE_MAP
   vec2 detailDx = dFdx( vMapUv );
   vec2 detailDy = dFdy( vMapUv );
-  // Small on screen (a page under about 400 px tall, all of it under 200), the page comes
-  // from its small image, which has the text and is mipmapped like any image: drawn from
-  // outlines, strokes thinner than a pixel flicker as the view moves. Small both ways: a page
-  // seen edge-on while it turns is narrow, not small (taken for small, it went soft every turn).
-  float smallShare = 0.0;
-  if ( uSmallOn > 0.5 ) {
-    vec2 texels = vec2( textureSize( uSmall, 0 ) );
-    smallShare = smoothstep( 1.0, 2.0, min( length( detailDx * texels ), length( detailDy * texels ) ) );
-  }
   vec4 sampledDiffuseColor = vec4( 1.0 );
-  if ( smallShare < 1.0 ) {
-    bool covered = false;
-    ${DETAIL_LOOKUPS}
-    if ( !covered ) sampledDiffuseColor = pageSample( map, vMapUv, detailDx, detailDy );
-    // Strips just arrived: the base image gives way to them over a few frames (swapped in at
-    // once, the page's pixels visibly shifted as it came to rest).
-    else if ( uDetailFade < 1.0 ) sampledDiffuseColor = mix( pageSample( map, vMapUv, detailDx, detailDy ), sampledDiffuseColor, uDetailFade );
-    // Text from its outlines, over the image (which leaves it out), blended as stored, as
-    // a canvas blends: see vectortext.js.
-    sampledDiffuseColor.rgb = pvVectorText( sampledDiffuseColor.rgb, vMapUv, detailDx, detailDy );
-  }
-  if ( smallShare > 0.0 ) sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, pageSample( uSmall, vMapUv, detailDx, detailDy ).rgb, smallShare );
+  bool covered = false;
+  ${DETAIL_LOOKUPS}
+  if ( !covered ) sampledDiffuseColor = pageSample( map, vMapUv, detailDx, detailDy );
+  // Strips just arrived: the base image gives way to them over a few frames (swapped in at
+  // once, the page's pixels visibly shifted as it came to rest).
+  else if ( uDetailFade < 1.0 ) sampledDiffuseColor = mix( pageSample( map, vMapUv, detailDx, detailDy ), sampledDiffuseColor, uDetailFade );
   // The strip glued to the cover: paper, whatever was printed there (it faces the cover).
   float glueFrom = ( uSpineAtU0 > 0.5 ? vMapUv.x : 1.0 - vMapUv.x ) * uPageSize.x;
   if ( uGlue > 0.0 && glueFrom < uGlue ) sampledDiffuseColor = vec4( 1.0 );

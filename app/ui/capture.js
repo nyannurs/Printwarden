@@ -8,7 +8,7 @@ import { MAX_DETAIL } from "../viewer/shaders.js";
 import { onOpeningChanged, scene, state } from "./app.js";
 import { mp4Bitrate, screenshotDialog, videoDialog, videoLength } from "./dialogs.js";
 import { showBusy, toast } from "./dom.js";
-import { CAPTURE_PRIORITY, DETAIL_MAX_SIDE, isSharp, pageImage, pageRegionImage, sharpen, VECTOR_TEXT } from "./pages.js";
+import { CAPTURE_PRIORITY, DETAIL_MAX_SIDE, isSharp, pageImage, pageRegionImage, sharpen } from "./pages.js";
 
 /**
  * When a picture or video was made, for its file name, so each render has a name of its
@@ -188,7 +188,7 @@ export async function sharpenForVideo(sharp, need) {
     const have = sharp.get(folio);
     const height = videoImageHeight(px, g.trim.y1 - g.trim.y0, have?.height ?? null, maxHeight);
     if (height == null) return;
-    const image = await pageImage(folio, height, CAPTURE_PRIORITY, { cache: false, vector: VECTOR_TEXT });
+    const image = await pageImage(folio, height, CAPTURE_PRIORITY, { cache: false });
     if (!image) return;
     scene.showPageImage(folio, image);
     have?.image.close();

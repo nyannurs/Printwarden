@@ -304,12 +304,6 @@ function pageMaterial(scene, isFront, holesOf = null) {
     uOuterCover: { value: 0 }, // 1 on the outside of the covers: no gutter shade there
     uFinish: { value: scene.none }, // spot finish mask (any ink = finished), see setFinish
     uFinishKind: { value: 0 },
-    uVecF: { value: scene.vector.noF }, // vector text, see #setVector
-    uVecU: { value: scene.vector.noU },
-    uVecInfo: { value: [0, 1, 1, 0] },
-    uVecOn: { value: 0 },
-    uSmall: { value: scene.white }, // the page with its text, small (see #setSmall)
-    uSmallOn: { value: 0 },
     uGlue: { value: 0 }, // side glue and the score: see setPageGlue, setCoverScore
     uScore: { value: 0 },
     uTurnIn: { value: new THREE.Vector4(0, 0, 0, 0) }, // a board's inside: the cover's turn-in round the endpaper (setPaper)

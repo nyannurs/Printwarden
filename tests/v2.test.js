@@ -207,7 +207,7 @@ test("page turn: fore-edge leads while lifting, trails while settling", () => {
 test("output intent: a PDF/X-style CMYK profile is found and named", async () => {
   const { PDFDocument, PDFName } = await import("../vendor/pdf-lib.esm.js");
   const { readStructure } = await import("../app/pdf/structure.js");
-  const icc = new Uint8Array(await (await fetch("../vendor/pdf-iccs/CGATS001Compat-v2-micro.icc")).arrayBuffer());
+  const icc = new Uint8Array(await (await fetch("../vendor/icc/ISOcoated_v2_eci.icc")).arrayBuffer());
   const doc = await PDFDocument.create();
   doc.addPage([420, 595]);
   const profile = doc.context.flateStream(icc, { N: 4 });

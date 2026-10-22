@@ -11,13 +11,13 @@ test("client viewer: relative imports resolve to keys under app/", () => {
   eq(resolveKey("viewer/scene.js", "./camera.js"), "viewer/camera.js");
   eq(resolveKey("viewer/scene.js", "three"), "three");
   eq(resolveKey("viewer/scene.js", "three/addons/postprocessing/RenderPass.js"), "three/addons/postprocessing/RenderPass.js");
-  eq(resolveKey("viewer/shaders.js", "./vectortext.js"), "viewer/vectortext.js");
+  eq(resolveKey("viewer/shaders.js", "./model.js"), "viewer/model.js");
 });
 
 test("client viewer: the bundle holds the viewer, the 3D code and three.js, with no import left pointing at a file", async () => {
   const modules = await bundleModules(CLIENT_ENTRY);
   const keys = Object.keys(modules);
-  for (const k of [CLIENT_ENTRY, "viewer/scene.js", "viewer/model.js", "viewer/shaders.js", "viewer/vectortext.js", "viewer/capture.js", "three"]) {
+  for (const k of [CLIENT_ENTRY, "viewer/scene.js", "viewer/model.js", "viewer/shaders.js", "viewer/capture.js", "three"]) {
     ok(keys.includes(k), `${k} is in the bundle`);
   }
   ok(keys.some((k) => k.startsWith("three/addons/")), "three's addons");

@@ -4,7 +4,8 @@ import { analyse } from "../app/core/analysis.js";
 import { defaultExportOptions, planSheets } from "../app/core/sheets.js";
 import { rectSize } from "../app/core/units.js";
 import { writeImposedPdf } from "../app/impose/writer.js";
-import { openForRendering, openPdf, writeImposed } from "../app/pdf/load.js";
+import { openPdf, writeImposed } from "../app/pdf/load.js";
+import { InkDocument } from "../app/pdf/mupdf-render.js";
 import { createRenderer, MainThreadRenderer } from "../app/pdf/render.js";
 import { makeSamplePdf } from "../app/pdf/sample.js";
 import { readStructure } from "../app/pdf/structure.js";
@@ -82,8 +83,8 @@ test("FOLDING SCHEME (sewn, 16 pages a sheet): every cell of the sheets is its p
   const back = await readStructure(out);
   eq(back.pages.length, 4);
   eq(back.imposition?.sheetPages, 16);
-  const r1 = new MainThreadRenderer(await openForRendering(bytes), { intent: "print" });
-  const r2 = new MainThreadRenderer(await openForRendering(out), { intent: "print" });
+  const r1 = new MainThreadRenderer(new InkDocument(bytes));
+  const r2 = new MainThreadRenderer(new InkDocument(out));
   const turnedOver = (image) => {
     const c = document.createElement("canvas");
     c.width = image.width;
@@ -127,8 +128,8 @@ for (const [binding, pages, sides] of [["saddle", 16, 8], ["hardcover", 20, 10]]
     ok(!b.hasErrors, JSON.stringify(b.findings));
     eq(b.book.pages.length, pages);
 
-    const r1 = new MainThreadRenderer(await openForRendering(bytes), { intent: "print" });
-    const r2 = new MainThreadRenderer(await openForRendering(out), { intent: "print" });
+    const r1 = new MainThreadRenderer(new InkDocument(bytes));
+    const r2 = new MainThreadRenderer(new InkDocument(out));
     // The printed pages, in order (a hardcover's book has its endpaper leaves too, unprinted
     // and not on the sheets: the re-import has 20 pages to the original book's 24).
     const printed = a.book.pages.map((page, i) => ({ page, i })).filter(({ page }) => !page.endpaper);

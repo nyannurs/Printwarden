@@ -1,0 +1,36 @@
+# Builds Printwarden's MuPDF (WebAssembly) on GitHub's machines, so no one installs the
+# Emscripten toolchain: MuPDF at a tag, its glue with tools/mupdf/printwarden.c added (see
+# tools/mupdf/README.md). Run it from the repository's Actions tab ("Run workflow"); the built
+# files appear as the artifact "mupdf-wasm", to go into vendor/mupdf/.
+name: Build MuPDF
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "MuPDF's git tag"
+        required: true
+        default: "1.28.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Emscripten SDK
+        run: git clone --quiet --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+      - name: Build
+        env:
+          EMSDK: ${{ runner.temp }}/emsdk
+          MUPDF_TAG: ${{ inputs.tag }}
+          WORK: ${{ runner.temp }}/mupdf
+          OUT: ${{ runner.temp }}/out
+        run: bash tools/mupdf/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mupdf-wasm
+          path: ${{ runner.temp }}/out
+          if-no-files-found: error

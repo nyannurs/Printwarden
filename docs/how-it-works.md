@@ -2,7 +2,7 @@
 
 Printwarden is a web app that runs inside a desktop shell. The app itself is plain JavaScript modules, with no build step. It uses three libraries:
 - **three.js** for the 3D view;
-- **pdf.js** to read and draw PDFs;
+- **MuPDF** to draw PDFs;
 - **pdf-lib** to write the imposed PDF.
 
 The shell is Electron. It gives the app a window and native open and save dialogs, and keeps it to its own files. The same app also runs in a plain browser, which is how the tests run, and its 3D part runs inside every client viewer.
@@ -24,7 +24,7 @@ app/viewer/     app/pdf/  app/impose/                                  (3D room,
 | Folder | Lines | Its job |
 |---|---|---|
 | `app/core/` | 1,700 | Page pairing, binding rules, imposition and folding schemes, sheet geometry, spine and paper figures, setup detection, Preflight. Pure numbers in millimeters. A test enforces that it imports nothing outside itself. |
-| `app/pdf/` | 1,640 | Reading PDFs (pdf-lib) and drawing them (pdf.js) in background threads; color profiles; skipping drawing outside a sharp strip; the vector text's glyphs. |
+| `app/pdf/` | 1,000 | Reading PDFs (pdf-lib) and drawing them (MuPDF) in background threads, as the press prints them; color profiles. |
 | `app/impose/` | 160 | Writing the imposed PDF from a sheet plan. |
 | `app/viewer/` | 7,000 | The 3D book: the physical model, layout, the GPU-built sheets and shaders, each binding's parts, the scene and its frame loop, the camera, input, screenshots and videos. |
 | `app/ui/` | 3,960 | The window: state, the side panel, the timeline, dialogs, page images, exports, the performance check. |
@@ -37,7 +37,7 @@ Outside `app/`:
 |---|---|
 | `index.html` | The window's markup and its strict content policy. |
 | `app/styles.css`, `app/theme.css` | The look. |
-| `vendor/` | The outside libraries, exactly as released, plus their licenses. pdf.js is patched in eight lines by `tools/patch-pdfjs.py` (see [PDFs](pdf.md)). |
+| `vendor/` | The outside libraries, exactly as released, plus their licenses. MuPDF is Printwarden's own build of its released source, with a few glue functions added (`tools/mupdf/`, see [PDFs](pdf.md)). |
 | `_build/` | The Electron shell and the build scripts. |
 | `tests/` | The browser test suite. |
 | `tools/` | Development tools: smoke runs, the geometry proof, render comparisons, the test documents' generators. |
@@ -52,7 +52,7 @@ Outside `app/`:
    - It also reads the output intent's CMYK profile, and settings Printwarden left in a file it exported.
    - This is done in a thread so the window never freezes on a large file.
 3. **The renderers start in parallel** (pdf/render.js `createRenderer`).
-   - A pool of threads opens the file with pdf.js: half the processor's threads, two to six, fewer on a computer with little memory (three with 8 GB).
+   - A pool of threads opens the file with MuPDF: half the processor's threads, two to six, fewer on a computer with little memory (three with 8 GB) or for a large file.
    - They wait only for the color profile, which depends on step 2.
 4. **The document is understood** (core/analysis.js `analyse`).
    - From the pages and your settings: spread or single detection (core/detect.js), the setup (core/setup.js), the binding's rule (core/binding.js) and the book itself (core/book.js).
@@ -84,7 +84,7 @@ Outside `app/`:
 - **Every frame of a video or a test runs on the scene's own clock.** A frame is placed by time, not by how long the last one took. Videos are evenly spaced, and tests give the same result every run.
 - **Measure, then change.** Wherever a number was tuned (a resolution, a threshold, a budget), the comment beside it says what was measured. Many comments also record what went wrong before and in which version it was fixed, so the next change doesn't undo the lesson.
 - **Whole pixels in the interface.** Sizes and positions are kept on whole pixels; a test measures the side panel at several window sizes.
-- **Outside code is used as released.** Libraries sit in `vendor/` byte for byte, except the documented pdf.js patches. three.js's shaders are changed as text through `patchShader`, which fails loudly if an upgrade changed what it looks for.
+- **Outside code is used as released.** Libraries sit in `vendor/` byte for byte. MuPDF is built by Printwarden from its released source with its own glue functions appended, nothing of it changed (`tools/mupdf/`). three.js's shaders are changed as text through `patchShader`, which fails loudly if an upgrade changed what it looks for.
 
 ## Names to keep apart
 

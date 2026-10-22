@@ -1,10 +1,6 @@
 // Entry points for PDF work from the interface. Heavy jobs run in a background worker
 // (tasks-worker.js); if workers are unavailable they run here instead.
 
-import * as pdfjs from "../../vendor/pdf.mjs";
-
-pdfjs.GlobalWorkerOptions.workerSrc = new URL("../../vendor/pdf.worker.mjs", import.meta.url).href;
-
 let worker = null;
 let seq = 0;
 const pending = new Map();
@@ -66,17 +62,4 @@ export function readImposition(bytes) {
 export function writeImposed(bytes, analysis, plan, info, coverBytes = null) {
   return run("export", { bytes, analysis, plan, info, coverBytes },
     async () => (await import("../impose/writer.js")).writeImposedPdf(bytes, analysis, plan, info, coverBytes));
-}
-
-const vendor = (p) => new URL(`../../vendor/${p}`, import.meta.url).href;
-
-/** A pdf.js document on the main thread: only needed if background rendering fails. */
-export function openForRendering(bytes) {
-  return pdfjs.getDocument({
-    data: bytes.slice(),
-    wasmUrl: vendor("pdf-wasm/"),
-    iccUrl: vendor("pdf-iccs/"),
-    standardFontDataUrl: vendor("pdf-standard-fonts/"),
-    cMapUrl: vendor("pdf-cmaps/"),
-  }).promise;
 }
