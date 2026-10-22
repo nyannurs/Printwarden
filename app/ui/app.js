@@ -12,7 +12,8 @@ import { coverMmFor, hasSpine, paperForSpine } from "../core/spine.js";
 import { openPdf, writeImposed } from "../pdf/load.js";
 import { createRenderer, prepareSpareWorkers, routedRenderer } from "../pdf/render.js";
 import { makeSamplePdf } from "../pdf/sample.js";
-import { APP_NAME, APP_VERSION, canQuit, latestRelease, onMenuCommand, openReleases, quit, savePdf } from "../platform.js";
+import { APP_NAME, APP_VERSION, canQuit, latestRelease, onMenuCommand, openReleases, quit, savePdf, SYSTEM_MEMORY } from "../platform.js";
+import { tileBudget } from "../viewer/tiles.js";
 import { BookScene } from "../viewer/scene.js";
 import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js";
 import { buildClientHtml, exportClientViewer } from "./client.js";
@@ -24,10 +25,11 @@ import { $, addScrollbar, fitPill, showLoad, snapToPixels, toast } from "./dom.j
 import { Filmstrip } from "./filmstrip.js";
 import { importFinish, openFinishDialog } from "./finish.js";
 import { Inspector } from "./inspector.js";
-import { forgetThumbnails, isSharp, loadAllTextures, sharpen, thumbnail } from "./pages.js";
+import { forgetThumbnails, loadAllTextures, thumbnail } from "./pages.js";
 import { initPlates, refreshPlates, resetPlates } from "./plates.js";
 import { applySpine, importSpineArt, openSpinePanel, renderSpineArt, updateSpinePanel } from "./spine-panel.js";
 import { initView, setBackground, showZoom } from "./view.js";
+import { resetTiles, tileStats, updateTiles } from "./tiles.js";
 
 const app = $("app");
 document.title = APP_NAME;
@@ -65,12 +67,13 @@ export const scene = new BookScene($("viewport"), {
   onTurnRequest: (delta) => scene.goTo(scene.opening + delta),
   onOpenRequest: () => scene.open(),
   onChange: () => onOpeningChanged(),
-  onViewSettled: () => sharpen(),
-  // Moving: what was being sharpened for the view that was is no longer wanted.
-  onViewMoving: () => state.renderer?.cancel(isSharp),
+  // The tiles the view needs (ui/tiles.js): as it moves, and once more at rest (the next finer level too).
+  onViewFrame: (time) => updateTiles(time),
+  onViewSettled: (time) => updateTiles(time, { settled: true }),
   onZoom: (percent) => showZoom(percent),
   onCamera: (camera) => updateCompass(camera),
 });
+scene.tiles.setBudget(tileBudget(SYSTEM_MEMORY));
 
 /** The timeline's thumbnails from their inks (the profile and the plates as the 3D view has them). */
 export const inkView = new InkView();
@@ -167,6 +170,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     state.stripKey = "";
     state.textures.clear();
     scene.clearPages();
+    resetTiles();
     state.details.clear();
     forgetThumbnails();
     resetPlates(); // every plate prints again with a new file
@@ -446,5 +450,5 @@ prepareSpareWorkers(300);
 
 // For debugging from the developer console.
 window.app = {
-  state, scene, openDocument, updateSetup, sharpen, setColourProfile, setPlates, prepareCaptureTile, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
+  state, scene, openDocument, updateSetup, updateTiles, tileStats, setColourProfile, setPlates, prepareCaptureTile, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
 };

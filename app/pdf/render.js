@@ -133,11 +133,13 @@ class Scheduler {
    * @param {{x0: number, y0: number, x1: number, y1: number}} rectMm
    * @param {number} height
    * @param {number} [priority]
-   * @param {{cache?: boolean | "pending", flex?: boolean, slot?: any, mode?: "rgb" | "ink"}} [options]
+   * @param {{cache?: boolean | "pending", flex?: boolean, slot?: any, mode?: "rgb" | "ink", tag?: string | null, mips?: number}} [options]
+   *   `tag`: a name to cancel the render by (cancel's predicate sees it as job.tag); `mips`: smaller
+   *   copies with an ink drawing (see mupdf-render.js)
    * @returns {Promise<any>}
    */
-  render(index, rectMm, height, priority = 10, { cache = true, flex = false, slot = null, mode = "rgb" } = {}) {
-    const key = `${index}|${height}|${[rectMm.x0, rectMm.y0, rectMm.x1, rectMm.y1].map((v) => v.toFixed(2))}|${mode}`;
+  render(index, rectMm, height, priority = 10, { cache = true, flex = false, slot = null, mode = "rgb", tag = null, mips = 0 } = {}) {
+    const key = `${index}|${height}|${[rectMm.x0, rectMm.y0, rectMm.x1, rectMm.y1].map((v) => v.toFixed(2))}|${mode}|${mips}`;
     const hit = this.cache.get(key);
     if (hit) {
       const queued = this.queue.find((q) => q.key === key);
@@ -145,7 +147,7 @@ class Scheduler {
       return hit;
     }
     const promise = new Promise((resolve, reject) => {
-      this.queue.push({ id: ++jobIds, key, index, rect: { ...rectMm }, height, priority, resolve, reject, flex, slot, mode });
+      this.queue.push({ id: ++jobIds, key, index, rect: { ...rectMm }, height, priority, resolve, reject, flex, slot, mode, tag, mips });
     });
     if (cache) this.cache.set(key, promise);
     const drop = () => this.cache.get(key) === promise && this.cache.delete(key);
@@ -335,7 +337,7 @@ class WorkerPool extends Scheduler {
       const job = this.queue.splice(best, 1)[0];
       if (!this.owner.has(job.index)) this.owner.set(job.index, slot);
       slot.job = job;
-      slot.worker.postMessage({ type: "render", id: job.id, index: job.index, rect: job.rect, height: job.height, mode: job.mode });
+      slot.worker.postMessage({ type: "render", id: job.id, index: job.index, rect: job.rect, height: job.height, mode: job.mode, mips: job.mips });
     }
     if (!this.queue.length && !this.infoJobs?.size && this.workers.every((s) => !s.job)) {
       this.resting = setTimeout(() => {
@@ -440,9 +442,9 @@ export class MainThreadRenderer extends Scheduler {
     }
   }
 
-  async #draw({ index, rect, height, mode }) {
+  async #draw({ index, rect, height, mode, mips }) {
     await new Promise((r) => setTimeout(r, 0)); // a frame between pages
-    const drawn = this.doc.draw(index, rect, height, mode);
+    const drawn = this.doc.draw(index, rect, height, mode, { mips });
     if (mode === "ink") {
       drawn.close = () => { drawn.data = null; };
       return drawn;

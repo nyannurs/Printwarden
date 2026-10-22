@@ -1,30 +1,17 @@
 // Page images for the 3D view: every page of the document, nearest first, at a size the
-// whole book fits in memory with; then, once the view stops, the part of each page on
-// screen again from the PDF's vectors, as sharp as the screen needs (see sharpen). All of them
+// whole book fits in memory with (its base image, the pyramid's level 0: the sharper levels
+// are tiles, kept as a map keeps them, see ui/tiles.js); the timeline's thumbnails. All of them
 // as the page's inks (pdf/mupdf-render.js, mode "ink"): the 3D view and the timeline turn them
 // into colour through the ink table, so the profile and the plates change them at once.
 
 import { pageSizeOf } from "../core/analysis.js";
 import { baseHeight, THUMB_HEIGHT } from "../pdf/render.js";
-import { baseSuffices, planDetail } from "../viewer/detail.js";
-import { MAX_DETAIL } from "../viewer/shaders.js";
 import { scene, state } from "./app.js";
 import { showLoad } from "./dom.js";
 import { applySpine, averageEdge } from "./spine-panel.js";
 
-// Sharp renders jump the queue, ahead of everything else.
-const SHARP_FINE = -1;
-export const CAPTURE_PRIORITY = -3; // screenshot tiles: never cancelled by the view
-// Image pixels per device pixel in a sharp strip, at the strip's densest point. With the
-// page shader's one tap and its 0.7 gradients (see pageSample), 1.25 read crispest against
-// pdf.js's own rendering (1.0 and 1.1 a little softer, more a little aliased); it also keeps
-// no part of the strip magnified (the density is sampled on a grid, the true peak lies
-// between samples). Three, until 0.17.75: nine times the pixels, read through a filter that
-// blurred them.
-const SUPERSAMPLE = 1.25;
-export const DETAIL_MAX_SIDE = 8192;
-const DETAIL_MAX_PIXELS = 36e6;
-const STRIP_MAX_PIXELS = 7e6; // larger strips take more than a frame to upload
+export const CAPTURE_PRIORITY = -3; // a capture's images: never cancelled by the view
+export const DETAIL_MAX_SIDE = 8192; // a capture's strips (see ui/capture.js prepareCaptureTile)
 
 function textureKey(folio) {
   const g = state.analysis.geometry[folio - 1];
@@ -72,6 +59,7 @@ export function loadAllTextures() {
     const key = textureKey(folio);
     const have = state.textures.get(folio);
     if (have?.key === key && have.height >= height) continue;
+    if (have && have.key !== key) scene.forgetTiles(folio); // its tiles were of the page that was
     if (key === "blank") {
       state.textures.set(folio, { key, height: Infinity, blank: true });
       scene.setPageTexture(folio, null);
@@ -103,117 +91,6 @@ export function loadAllTextures() {
   }
   showLoad(pending ? (n - pending) / n : null);
 }
-
-/**
- * Keep type and linework crisp at any zoom. The part of each page on screen is re-rendered
- * from the PDF's vectors as strips, each at the resolution its own part of the screen needs
- * (a tilted page needs far more near the camera than far away), and laid over the page.
- *
- * One pass once the view stops (none while it moves: strips arriving mid-motion stalled frames
- * as they went to the GPU):
- * the strips at the screen's own density (SUPERSAMPLE), mipmapped for when the view moves
- * on. (Until 0.17.75 two passes, a quick one at screen density and a fine one at three times
- * it: the page changed look twice after every move, and the fine one's pixels were read
- * through a filter that blurred them.) A new pass cancels the renders of an outdated one,
- * even mid-drawing; so does moving again.
- * The strips render in parallel on the render threads.
- */
-const PASSES = {
-  sharp: { priority: SHARP_FINE, supersample: SUPERSAMPLE, maxTiles: MAX_DETAIL, step: 1.3, enough: 0.9 },
-};
-export const isSharp = (job) => job.priority === SHARP_FINE;
-let sharpenRun = 0;
-export function sharpen() {
-  const a = state.analysis;
-  if (!a || !state.renderer || state.capturing) return;
-  const gen = state.generation;
-  const run = ++sharpenRun;
-  state.renderer.cancel(isSharp);
-  const visible = scene.visiblePages();
-  const inView = new Set(visible.map((v) => v.folio));
-  for (const folio of [...state.details.keys()]) {
-    if (!inView.has(folio)) {
-      scene.setPageDetails(folio, []);
-      state.details.delete(folio);
-    }
-  }
-  for (const view of visible) {
-    const { folio } = view;
-    const g = a.geometry[folio - 1];
-    const t = state.textures.get(folio);
-    if (!g || !t || t.blank) continue;
-    const pageMm = { width: g.trim.x1 - g.trim.x0, height: g.trim.y1 - g.trim.y0 };
-    for (const kind of ["sharp"]) {
-      const pass = PASSES[kind];
-      const plan = planDetail(view, pageMm, {
-        // Per point of the screen: a Retina screen's pixels are already twice as fine, and the
-        // same supersampling of them took four times the pixels (36 megapixels a turn).
-        supersample: pass.supersample,
-        maxTiles: pass.maxTiles,
-        maxSide: Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize),
-        maxPixels: DETAIL_MAX_PIXELS,
-        maxStripPixels: STRIP_MAX_PIXELS,
-        step: pass.step,
-      });
-      // The base image is enough wherever it has at least a pixel for every screen pixel: it
-      // is drawn as crisp as the strips would be, and nothing on screen changes as the view
-      // settles. (Until 0.17.79 strips came as soon as the base had fewer than 1.25 pixels a
-      // screen pixel, which made strips hardly finer than the base, 5.9 pixels a millimetre
-      // over its 5.85, at an ordinary size of the view: the page changed look when it came
-      // to rest for no gain, and on a Mac the strip came out softer than the base beside it.)
-      if (baseSuffices(plan, t.height / pageMm.height, pass.supersample)) {
-        if (state.details.delete(folio)) scene.setPageDetails(folio, []);
-        break;
-      }
-      if (sufficient(state.details.get(folio), view.region, plan, pass.enough)) continue;
-      // A pass cancelled by a newer one, or by moving on, just stops.
-      renderStrips(folio, g, pageMm, view.region, plan, pass, () => gen !== state.generation
-        || run !== sharpenRun || state.capturing).catch(() => {});
-    }
-  }
-}
-
-/** Render a page's planned strips and lay them over it, unless outdated by then. */
-function renderStrips(folio, g, pageMm, seen, plan, pass, outdated) {
-  const tr = g.trim;
-  const renders = plan.map(({ region, heightPx }) => {
-    // Image v runs from the head down; PDF y runs up.
-    const rect = {
-      x0: tr.x0 + region.u0 * pageMm.width, x1: tr.x0 + region.u1 * pageMm.width,
-      y0: tr.y1 - region.v1 * pageMm.height, y1: tr.y1 - region.v0 * pageMm.height,
-    };
-    return pageRegionImage(folio, rect, heightPx, pass.priority, { mode: "ink", cache: false, flex: true });
-  });
-  return Promise.all(renders).then((images) => {
-    const stale = outdated() || !scene.visiblePages().some((v) => v.folio === folio)
-      // A quicker set arriving after a sharper one mustn't replace it.
-      || sufficient(state.details.get(folio), seen, plan, 1.0001);
-    if (stale) {
-      for (const img of images) img.close();
-      return;
-    }
-    scene.setPageDetails(folio, images.map((image, i) => ({ image, region: plan[i].region })));
-    state.details.set(folio, plan.map(({ region, pxPerMm }) => ({ region, pxPerMm })));
-  }, (err) => Promise.all(renders.map((r) => r.then((img) => img.close(), () => {}))).then(() => { throw err; }));
-}
-
-/**
- * Do the strips on screen already cover `seen` at `ratio` of the density the new plan
- * wants, everywhere the plan has a strip?
- */
-function sufficient(current, seen, plan, ratio) {
-  if (!current?.length) return false;
-  const covers = (r, q) => r.u0 <= q.u0 + 1e-6 && r.v0 <= q.v0 + 1e-6 && r.u1 >= q.u1 - 1e-6 && r.v1 >= q.v1 - 1e-6;
-  const union = current.reduce((acc, c) => ({
-    u0: Math.min(acc.u0, c.region.u0), v0: Math.min(acc.v0, c.region.v0),
-    u1: Math.max(acc.u1, c.region.u1), v1: Math.max(acc.v1, c.region.v1),
-  }), { u0: 1, v0: 1, u1: 0, v1: 0 });
-  if (!covers(union, seen)) return false;
-  return plan.every((tile) => current.some((c) => overlaps(c.region, tile.region) && c.pxPerMm >= ratio * tile.pxPerMm)
-    && current.filter((c) => overlaps(c.region, tile.region)).every((c) => c.pxPerMm >= ratio * tile.pxPerMm));
-}
-
-const overlaps = (a, b) => a.u0 < b.u1 && b.u0 < a.u1 && a.v0 < b.v1 && b.v0 < a.v1;
 
 /** Thumbnails made again (a new file, a new CMYK profile). */
 export function forgetThumbnails() {

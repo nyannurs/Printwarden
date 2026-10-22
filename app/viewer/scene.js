@@ -23,6 +23,7 @@ import { motionReset, motionState, motionStep } from "./motion.js";
 import { MAX_DETAIL, sheetShader } from "./shaders.js";
 import { naiveLut } from "./inklut.js";
 import { disposeTexture, freeImage, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeInkTexture, makeWarmer, makeWhite } from "./textures.js";
+import { TileCache } from "./tiles.js";
 
 const TURN_MS = 720;
 const FAST_TURN_MS = 360; // for requests in quick succession (rapid clicks, scrubbing)
@@ -38,6 +39,7 @@ const SETTLE_MS = 120; // quiet time before the view counts as settled
 // PDF and sent to the GPU, four times the pixels on a Retina screen) as the next click comes.
 const TURN_SETTLE_MS = 350;
 const UPLOADS_PER_FRAME = 2;
+const TILES_PER_FRAME = 3; // tiles to the GPU a frame (5.5 MB each with its mips: a frame at 130 Hz takes about three)
 // Sharp strips arriving on a page that had none fade in over the base image this long: the
 // swap no longer reads as the page's pixels shifting as it comes to rest.
 const DETAIL_FADE_MS = 220;
@@ -85,9 +87,11 @@ export class BookScene {
   /**
    * @param {HTMLElement} container
    * @param {{onTurnRequest?: (delta: number) => void, onOpenRequest?: () => void,
-   *          onChange?: () => void, onViewSettled?: () => void, onViewMoving?: () => void,
+   *          onChange?: () => void, onViewSettled?: (time: number) => void, onViewMoving?: () => void,
+   *          onViewFrame?: (time: number) => void,
    *          onZoom?: (percent: number) => void, onCamera?: (camera: THREE.PerspectiveCamera) => void}} callbacks
-   *   onCamera: after the camera is placed for a frame drawn (the compass)
+   *   onCamera: after the camera is placed for a frame drawn (the compass); onViewFrame: every
+   *   frame the view moves (the tiles it needs, ui/tiles.js), onViewSettled once it stops
    */
   constructor(container, callbacks = {}) {
     this.container = container;
@@ -114,6 +118,7 @@ export class BookScene {
     this.layoutVersion = 0; // counts the book's layouts (the leaves', and the parts around them)
     container.appendChild(r.domElement);
     this.renderer = r;
+    this.tiles = new TileCache(r); // the pages' tiles on the GPU (see tiles.js); bound to the pages by #bindTiles
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#56575b");
@@ -214,6 +219,8 @@ export class BookScene {
       // Where no shadow caster comes near (see nearestCasters).
       uCasterMap: { value: null },
       uCasterMapOn: { value: 0 },
+      // The tile cache's texture array (TILE_GLSL; each page's table is its own uniform).
+      uTiles: { value: this.tiles.texture },
       // The pages' inks to colour (INK_GLSL): the table, the plates that print, whether the
       // pages are inks at all (see setPageKind).
       uInkLut: { value: this.inkLut },
@@ -431,7 +438,10 @@ export class BookScene {
     makeSheets(this);
     this.extras = makeExtras(this);
     this.#applyFinish();
-    for (let folio = 1; folio <= 2 * this.leaves.length; folio++) this.#showPage(folio);
+    for (let folio = 1; folio <= 2 * this.leaves.length; folio++) {
+      this.#showPage(folio);
+      this.#bindTiles(folio);
+    }
     this.setPaper(spec.paper);
     layoutGround(this);
     this.geometryDirty = true;
@@ -527,7 +537,29 @@ export class BookScene {
     for (const tex of [...this.pageTextures.values(), ...this.overrides.values()]) tex.dispose();
     this.pageTextures.clear();
     this.overrides.clear();
-    for (let folio = 1; folio <= 2 * this.leaves.length; folio++) this.#showPage(folio);
+    this.tiles.reset();
+    for (let folio = 1; folio <= 2 * this.leaves.length; folio++) {
+      this.#showPage(folio);
+      this.#bindTiles(folio);
+    }
+  }
+
+  /** A page's tiles (its table and its pyramid's shape) on its material; none, the empty table. */
+  #bindTiles(folio) {
+    const leaf = this.leaves[Math.ceil(folio / 2) - 1];
+    if (!leaf) return;
+    const u = (folio % 2 ? leaf.front : leaf.back).userData.uniforms;
+    const t = this.tiles.pageUniforms(folio);
+    u.uTileTable.value = t?.table ?? this.tiles.emptyTable;
+    if (t) u.uTilePage.value.fromArray(t.page);
+    u.uTileOn.value = t ? 1 : 0;
+  }
+
+  /** A page's tiles let go (its image changed: ui/pages.js). */
+  forgetTiles(folio) {
+    this.tiles.forgetPage(folio);
+    this.#bindTiles(folio);
+    this.dirty = true;
   }
 
   /**
@@ -984,7 +1016,8 @@ export class BookScene {
    * its triangles (see pageHit): zoomed in, every ray reaches the page's bounds, and
    * testing thousands of triangles each took about 50 ms a call while moving.
    * @returns {{folio: number, region: {u0: number, v0: number, u1: number, v1: number},
-   *            samples: {u: number, v: number, pxPerMm: number}[]}[]}
+   *            samples: {u: number, v: number, pxPerMm: number, sx: number, sy: number}[]}[]}
+   *   a sample's `sx`, `sy`: where on the screen it was taken (0 to 1)
    * @param {{width?: number, height?: number, folios?: number[]}} [size] a capture tile's, in
    *   device pixels (else the canvas's); `folios`: the pages to look for (else the open spread's)
    */
@@ -1040,7 +1073,7 @@ export class BookScene {
             const mm = Math.hypot((n.x - q.x) * pw, (n.y - q.y) * ph);
             if (mm > 1e-6) here = Math.max(here, step / mm);
           }
-          if (here) samples.push({ u: q.x, v: q.y, pxPerMm: here });
+          if (here) samples.push({ u: q.x, v: q.y, pxPerMm: here, sx: i / cols, sy: j / rows });
         }
       }
       if (u1 < u0 || v1 < v0) continue; // not on screen
@@ -1469,13 +1502,15 @@ export class BookScene {
     if (!draw) {
       // At rest, settled, nothing waiting to go to the GPU: no more frames until something
       // changes (asking for them every refresh kept a CPU core 7 % busy for nothing).
-      if (this.settled && !this.uploads.size && !this.detailQueue.size) this.idleFrames++;
+      if (this.settled && !this.uploads.size && !this.detailQueue.size && !this.tiles.pending) this.idleFrames++;
       return;
     }
     this.idleFrames = 0;
     this.dirty = false;
     this.#placeCamera();
     this.callbacks.onCamera?.(this.camera);
+    // The view as this frame draws it (the camera just placed): what it needs (ui/tiles.js).
+    if (inMotion) this.callbacks.onViewFrame?.(time);
     shadows(this);
     drawOrder(this);
     const low = inMotion && this.motion.scale < 1 && this.clock == null;
@@ -1688,6 +1723,13 @@ export class BookScene {
     // times the pixels on a Retina screen); they are for a view that has stopped anyway.
     if (this.uploads.size) this.#flushUploads();
     else if (this.detailQueue.size && this.settled) this.#prepareDetails();
+    // Tiles go up a few a frame, moving or not (they are small, and the view moving is when
+    // they are wanted); one just up fades in over a few frames.
+    if (this.tiles.pending) {
+      for (const folio of this.tiles.flush(TILES_PER_FRAME, time)) this.#bindTiles(folio);
+      this.dirty = true;
+    }
+    if (this.tiles.tick(time)) this.dirty = true;
     // Wheel zoom and pan change the camera outside the rig's own animations: count them
     // as motion too, or the pages would never re-sharpen after a zoom.
     glideZoom(this, this.#own, time);
@@ -1704,7 +1746,7 @@ export class BookScene {
       this.settled = false;
     } else if (!this.settled && time - this.lastMotion > (this.lastTurned ? TURN_SETTLE_MS : SETTLE_MS)) {
       this.settled = true;
-      this.callbacks.onViewSettled?.();
+      this.callbacks.onViewSettled?.(time);
     }
     return { animating, moving };
   }

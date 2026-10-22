@@ -302,6 +302,10 @@ function pageMaterial(scene, isFront, holesOf = null) {
     ]).flat()),
     uDetailCount: { value: 0 },
     uDetailFade: { value: 1 }, // strips fading in over the base image (see #prepareDetails in scene.js)
+    // The page's tiles (viewer/tiles.js): its table and its pyramid's shape, bound by the scene (#bindTiles).
+    uTileTable: { value: scene.tiles.emptyTable },
+    uTilePage: { value: new THREE.Vector4(1, 1, 0, 1) },
+    uTileOn: { value: 0 },
     uOuterCover: { value: 0 }, // 1 on the outside of the covers: no gutter shade there
     uFinish: { value: scene.none }, // spot finish mask (any ink = finished), see setFinish
     uFinishKind: { value: 0 },

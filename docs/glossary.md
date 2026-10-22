@@ -56,5 +56,6 @@
 | Opening | Which pages lie open: 0 is the front cover. |
 | Render thread, worker | A background thread drawing PDF pages with MuPDF. |
 | Shader | A small program the graphics card runs per vertex or per pixel. |
-| Sharp strip | A part of a page rendered again from the PDF at the resolution the screen needs, laid over the base image. |
+| Sharp strip | A part of a page rendered again from the PDF at exactly a capture's resolution, laid over the base image. |
+| Tile | A 1024-texel square of a page at one of its levels, each level twice as fine as the one below and the base image at the bottom; rendered once when the view first needs it and kept on the graphics card (the tile cache), as a map keeps its tiles. |
 | Texture | An image on the graphics card. |

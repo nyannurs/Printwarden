@@ -38,8 +38,8 @@ Pages are drawn by [MuPDF](https://mupdf.com) (Artifex Software), the renderer b
 - **Resting:** a thread idle for 20 seconds lets go of the pages and caches it built.
 
 The scheduler (`Scheduler`, `pump`) decides what goes where:
-- **Priorities:** sharp strips first, then pages in view, then the rest by distance from the open spread.
-- **Which thread:** a thread keeps the last eight pages it read, their decoded images above all, so another render of one is quickest there. A page goes to the thread that knows it; its sharp strips to any free thread (MuPDF reads a page in milliseconds; a photo's JPEG is decoded once more on another thread).
+- **Priorities:** a capture's images first, then the view's tiles nearest the screen's middle, then every page's base image by distance from the open spread.
+- **Which thread:** a thread keeps the last eight pages it read, their decoded images above all, so another render of one is quickest there. A page goes to the thread that knows it; its tiles and a capture's strips to any free thread (MuPDF reads a page in milliseconds; a photo's JPEG is decoded once more on another thread).
 - **Canceling:** work no longer needed is dropped from the queue. A render in a thread's hands runs on: tens of milliseconds at most.
 
 ### What gets rendered
@@ -47,7 +47,8 @@ The scheduler (`Scheduler`, `pump`) decides what goes where:
 | Image | Size | Used for |
 |---|---|---|
 | Base image | 700 to 1600 px tall: as large as a 480 MB budget allows for the whole book | Every page in 3D |
-| Sharp strips | Exactly what the screen needs, up to 8192 px a side | The part of a page on screen, at rest |
+| Tiles | 1024 px square, at twice the base image's density and up (32 × at most) | The part of a page on screen, as the view moves; kept (see [The 3D view](3d-view.md)) |
+| Sharp strips | Exactly what a capture needs, up to 8192 px a side | A screenshot's or a video frame's pages |
 | Thumbnail | 200 px tall | The timeline |
 | Capture images | What a screenshot tile or a video frame needs | Exports |
 

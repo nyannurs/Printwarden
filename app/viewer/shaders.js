@@ -5,7 +5,9 @@
 
 import * as THREE from "three";
 
-export const MAX_DETAIL = 6; // sharp strips per page
+import { TILE, TILE_BORDER, TILE_PAYLOAD, TILE_SUPERSAMPLE } from "./tiles.js";
+
+export const MAX_DETAIL = 4; // sharp strips per page (a capture's; the view's own sharpness is the tiles', see TILE_GLSL)
 
 // Leaves are drawn this much of their thickness: neighbours never share a surface (which
 // flickers at grazing angles), and the stack's edges show the fine lines of real paper.
@@ -247,6 +249,69 @@ vec3 sheetNormal() {
 }
 `;
 
+// The page's tiles (viewer/tiles.js): the level this fragment needs, from how many level-0
+// texels a screen pixel covers; from it down, the first level whose tile is in the cache
+// (the page's table says which layer of uTiles holds it), the base image when none is. A
+// tile just landed fades in over what was drawn before it (the level under it, or the base).
+const TILE_GLSL = /* glsl */ `
+uniform highp sampler2DArray uTiles;
+uniform sampler2D uTileTable;
+uniform vec4 uTilePage;  // the page in level-0 texels (x, y), its levels (z), its table's rows a level (w)
+uniform float uTileOn;   // 1 once the page has a table
+const float PV_TILE = ${TILE.toFixed(1)};
+const float PV_TILE_PAY = ${TILE_PAYLOAD.toFixed(1)};
+const float PV_TILE_BORDER = ${TILE_BORDER.toFixed(1)};
+const float PV_TILE_SUPER = ${TILE_SUPERSAMPLE.toFixed(3)};
+bool pvTile( vec2 uv, vec2 dx, vec2 dy, out vec4 color ) {
+  if ( uTileOn < 0.5 ) return false;
+  float r0 = max( length( dx * uTilePage.xy ), length( dy * uTilePage.xy ) ); // level-0 texels a pixel
+  int need = int( ceil( log2( PV_TILE_SUPER / max( r0, 1e-6 ) ) ) );
+  if ( need < 1 ) return false;
+  need = min( need, int( uTilePage.z ) );
+  vec2 cuv = clamp( uv, 0.0, 1.0 );
+  int rows = int( uTilePage.w );
+  // The tile to draw (the finest there is from the level needed down) and, while it fades in,
+  // the one under it: found in the loop, read after it (a texture read with gradients inside a
+  // loop of varying length is undefined on Direct3D).
+  vec3 at = vec3( 0.0 );      // where in uTiles: the tile's uv and layer
+  vec2 scale = vec2( 0.0 );   // the page in that level's texels: the gradients' scale
+  float fade = 1.0;
+  vec3 under = vec3( 0.0 );
+  vec2 underScale = vec2( 0.0 );
+  int have = 0;
+  for ( int k = need; k >= 1; k-- ) {
+    vec2 sizeK = uTilePage.xy * exp2( float( k ) );
+    vec2 t = cuv * sizeK;
+    vec2 cell = floor( t / PV_TILE_PAY );
+    vec4 e = texelFetch( uTileTable, ivec2( int( cell.x ), k * rows + int( cell.y ) ), 0 );
+    if ( e.b < 0.5 ) continue;
+    float layer = floor( e.r * 255.0 + 0.5 ) + floor( e.g * 255.0 + 0.5 ) * 256.0;
+    vec3 here = vec3( ( t - cell * PV_TILE_PAY + PV_TILE_BORDER ) / PV_TILE, layer );
+    if ( have == 0 ) {
+      at = here;
+      scale = sizeK;
+      fade = e.a;
+      have = 1;
+      if ( fade >= 1.0 ) break;
+    } else {
+      under = here;
+      underScale = sizeK;
+      have = 2;
+      break;
+    }
+  }
+  if ( have == 0 ) return false;
+  vec4 found = textureGrad( uTiles, at, dx * scale / PV_TILE * 0.7, dy * scale / PV_TILE * 0.7 );
+  if ( fade < 1.0 ) {
+    vec4 below = have == 2 ? textureGrad( uTiles, under, dx * underScale / PV_TILE * 0.7, dy * underScale / PV_TILE * 0.7 )
+      : pageSample( map, uv, dx, dy );
+    found = mix( below, found, fade );
+  }
+  color = found;
+  return true;
+}
+`;
+
 export const PAGE_FRAGMENT_HEADER = /* glsl */ `
 ${INK_GLSL}
 // Side glue (perfect, sewn): the first and last page are glued to the cover this far from
@@ -285,6 +350,7 @@ uniform float uFinishKind;  // 0 none, 1 gloss varnish, 2 gold, 3 silver, 4 copp
 vec4 pageSample( sampler2D t, vec2 uv, vec2 dx, vec2 dy ) {
   return textureGrad( t, uv, dx * 0.7, dy * 0.7 );
 }
+${TILE_GLSL}
 `;
 
 // The page image, with the sharp strips where they cover. Unrolled per strip: arrays of
@@ -299,6 +365,7 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
   vec4 sampledDiffuseColor = vec4( 1.0 );
   bool covered = false;
   ${DETAIL_LOOKUPS}
+  if ( !covered ) covered = pvTile( vMapUv, detailDx, detailDy, sampledDiffuseColor );
   if ( !covered ) sampledDiffuseColor = pageSample( map, vMapUv, detailDx, detailDy );
   // Strips just arrived: the base image gives way to them over a few frames (swapped in at
   // once, the page's pixels visibly shifted as it came to rest).

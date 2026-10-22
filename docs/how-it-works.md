@@ -72,7 +72,7 @@ Outside `app/`:
    - the binding's parts follow (extras.js `layoutExtras`);
    - the frame is drawn: shadows only when they changed, sheets nearest first.
    - At rest nothing is drawn at all.
-8. **When the view comes to rest** (ui/pages.js `sharpen`), the part of each page on screen is rendered again from the PDF's vectors, in strips. Each strip gets exactly the resolution its part of the screen needs, and is laid over the page.
+8. **As the view moves** (ui/tiles.js), the tiles it needs are rendered from the PDF's vectors at the level the screen needs and kept on the graphics card, as a map keeps its tiles; a view seen before draws from the cache at once, and a coarser level shows for the few frames a new one takes.
 
 ## Rules the code keeps
 

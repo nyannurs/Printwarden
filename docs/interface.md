@@ -13,7 +13,8 @@ What it adds is the window, the controls, and the bookkeeping of which page has 
 | `inspector.js` | The side panel. |
 | `filmstrip.js` | The timeline. |
 | `view.js` | Around the 3D view: zoom steps, camera presets, backdrop, drag and drop, the frame counter, the performance check shortcut. |
-| `pages.js` | Page images for the 3D view: loading, sharpening, thumbnails. |
+| `pages.js` | Page images for the 3D view: the base images, the timeline's thumbnails. |
+| `tiles.js` | Which tiles the view needs (viewer/tiles.js): asked for as the view moves, cancelled when no longer wanted. |
 | `dialogs.js` | Every dialog: import, export choice, imposed export, HTML export, screenshot, video, spot finish, book spine, About and Licenses, reports. |
 | `capture.js` | Screenshots and videos: the pages at the output's resolution, the MP4 encoder, ProRes through FFmpeg. |
 | `client.js` | The client viewer export (see [The client viewer](client-viewer.md)). |
@@ -40,7 +41,7 @@ Beside them, `app/platform.js` is the only place that knows whether the app runs
 - the source bytes, kept for export;
 - the source pages, and any cover file, spine artwork and spot finish;
 - the setup, which is your settings, and the analysis made from it;
-- which image each page has on the graphics card (`textures`) and which sharp strips (`details`);
+- which image each page has on the graphics card (`textures`) and which strips a capture laid over it (`details`);
 - the color choices, the backdrop, the export options;
 - `generation`, which bumps on every re-analysis so renders made for an old one are dropped.
 
@@ -75,11 +76,11 @@ Thumbnails are the pages' inks, 200 px tall, drawn as the color they print by `i
 
 The bookkeeping between the PDF and the 3D pages:
 - **`loadAllTextures`** renders every page's base image, nearest the open spread first, as its inks. A page's key names the source page and its trim (the profile and the plates don't change the image). A page whose key hasn't changed keeps its image, so a settings change redraws only what it affects.
-- **`sharpen`**, at rest:
-  - It plans strips for every page in view (viewer/detail.js) at 1.25 image pixels per screen pixel.
-  - It keeps strips already on screen that are within reach of the new plan (`sufficient`).
-  - It renders the rest from the PDF's vectors. Strips outdated by a turn or a move are dropped.
-- **`thumbnail`** scales a page's base image down for the timeline.
+- **`thumbnail`** renders a page's inks small for the timeline.
+
+## Tiles (`tiles.js`)
+
+The view's sharpness (see [The 3D view](3d-view.md), Keeping pages sharp): `updateTiles` runs every frame the view moves (throttled to one in 24 ms) and once more at rest. For every density sample the scene measures on the pages in view it wants the tile at the level that part needs, the tiles a sample's spacing around it and the level under it (at rest the next finer too), nearest the screen's middle first; what the cache has is touched (not the next to go), the rest asked of the renderer with a tag, and queued renders no longer wanted are cancelled by it. A tile that lands is queued for the graphics card (the scene takes three a frame). `resetTiles` on a new document; `cancelTiles` when a capture wants the renderer.
 
 ## Dialogs (`dialogs.js`)
 

@@ -17,6 +17,7 @@
 import * as mupdf from "../../vendor/mupdf/mupdf.js";
 import { libmupdfModule as libmupdf } from "../../vendor/mupdf/mupdf.js";
 import { LUT_DEPTH, LUT_ENTRIES, lutInks } from "../viewer/inklut.js";
+import { mipChain } from "./mips.js";
 
 const PT_PER_MM = 72 / 25.4;
 const { ColorSpace, DrawDevice, Pixmap } = mupdf;
@@ -184,9 +185,10 @@ export class InkDocument {
   /**
    * Draw `rect` (mm, PDF user space) of page `index` at `height` pixels, with the inks that print.
    * `mode` "rgb": {width, height, data: Uint8ClampedArray RGBA, sRGB, opaque}; "ink": {width,
-   * height, n: 4, data: Uint8Array, 4 bytes a pixel: C, M, Y, K, the spots composited in}.
+   * height, n: 4, data: Uint8Array, 4 bytes a pixel: C, M, Y, K, the spots composited in},
+   * with `mips` smaller copies (half, quarter, ...: see mips.js) when asked for.
    */
-  draw(index, rect, height, mode = "rgb") {
+  draw(index, rect, height, mode = "rgb", { mips = 0 } = {}) {
     const p = this.page(index);
     const { ctm, width, height: hPx } = this.#place(p, rect, height);
     const ink = mode === "ink";
@@ -220,7 +222,9 @@ export class InkDocument {
       data.set(pix.getPixels()); // a view into MuPDF's heap: copied out before anything else moves it
       if (!ink) return { width, height: hPx, data, overprint: p.overprint };
       // (The process plates are switched where the inks are shown: every ink image carries all four.)
-      return { width, height: hPx, n, data, spots: p.spots, overprint: p.overprint };
+      const out = { width, height: hPx, n, data, spots: p.spots, overprint: p.overprint, mips: undefined };
+      if (mips > 0) out.mips = mipChain(data, width, hPx, mips);
+      return out;
     } finally {
       dev?.destroy();
       pix?.destroy();

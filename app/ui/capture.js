@@ -8,7 +8,8 @@ import { MAX_DETAIL } from "../viewer/shaders.js";
 import { onOpeningChanged, scene, state } from "./app.js";
 import { mp4Bitrate, screenshotDialog, videoDialog, videoLength } from "./dialogs.js";
 import { showBusy, toast } from "./dom.js";
-import { CAPTURE_PRIORITY, DETAIL_MAX_SIDE, isSharp, pageImage, pageRegionImage, sharpen } from "./pages.js";
+import { CAPTURE_PRIORITY, DETAIL_MAX_SIDE, pageImage, pageRegionImage } from "./pages.js";
+import { cancelTiles, updateTiles } from "./tiles.js";
 
 /**
  * When a picture or video was made, for its file name, so each render has a name of its
@@ -35,7 +36,7 @@ export async function renderScreenshot() {
   if (!target) return;
   const busy = showBusy("Rendering screenshot…");
   state.capturing = true;
-  state.renderer.cancel(isSharp);
+  cancelTiles();
   try {
     const blob = await scene.captureImage({
       ...choice,
@@ -54,7 +55,7 @@ export async function renderScreenshot() {
     // The capture's page images were sized for the capture: back to the screen's.
     for (const folio of [...state.details.keys()]) scene.setPageDetails(folio, []);
     state.details.clear();
-    sharpen();
+    updateTiles(performance.now(), { settled: true });
   }
 }
 
@@ -111,7 +112,7 @@ export async function renderVideo(preset = null) {
   const sharp = new Map();
   let writer = null;
   state.capturing = true;
-  state.renderer.cancel(isSharp);
+  cancelTiles();
   for (const folio of [...state.details.keys()]) scene.setPageDetails(folio, []);
   state.details.clear();
   try {
@@ -161,7 +162,7 @@ export async function renderVideo(preset = null) {
     scene.goTo(before.opening, { animate: false });
     if (before.closed && !scene.isClosed) scene.setClosed(true, { animate: false });
     onOpeningChanged();
-    sharpen();
+    updateTiles(performance.now(), { settled: true });
   }
 }
 

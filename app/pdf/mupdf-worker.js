@@ -1,7 +1,7 @@
 // A render thread: MuPDF drawing pages (mupdf-render.js) for the pool in render.js, which
 // hands it the document, the CMYK profile, the plates that print, and one render at a time.
 // Messages in: open {bytes | blob}, profile {bytes}, inks {inkOn}, render {id, index, rect,
-// height, mode}, info {id, index}, lut {id, bytes}, rest, cancel (a render in hand runs on: tens
+// height, mode, mips}, info {id, index}, lut {id, bytes}, rest, cancel (a render in hand runs on: tens
 // of milliseconds). Out: loaded, ready, error, done {id, bitmap | ink}, fail {id, message},
 // info {id, ...}, lut {id, data}.
 
@@ -32,9 +32,9 @@ self.onmessage = async ({ data }) => {
         return;
       case "render": {
         if (!doc) throw new Error("no document");
-        const drawn = doc.draw(data.index, data.rect, data.height, data.mode ?? "rgb");
+        const drawn = doc.draw(data.index, data.rect, data.height, data.mode ?? "rgb", { mips: data.mips ?? 0 });
         if (data.mode === "ink") {
-          self.postMessage({ type: "done", id: data.id, ink: drawn }, [drawn.data.buffer]);
+          self.postMessage({ type: "done", id: data.id, ink: drawn }, [drawn.data.buffer, ...(drawn.mips ?? []).map((m) => m.buffer)]);
         } else {
           const bitmap = await toBitmap(drawn);
           self.postMessage({ type: "done", id: data.id, bitmap, overprint: drawn.overprint }, [bitmap]);

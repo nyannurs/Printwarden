@@ -16,8 +16,8 @@ World space is millimeters. The book lies on a table, the spine along z, the hea
 | `input.js` | Mouse and keyboard on the view. |
 | `motion.js` | How small to draw while things move on a slow graphics card. |
 | `draw.js` | Drawing a frame: shadows only when needed, sheets nearest first. |
-| `detail.js` | Planning sharp strips for a page in view. |
-| `vectortext.js` | Text drawn from its outlines, exact at any zoom. |
+| `tiles.js` | The tile cache: the pages' sharper levels kept on the graphics card as a map keeps its tiles. |
+| `detail.js` | Planning a capture's sharp strips. |
 | `textures.js` | Placeholder and generated textures: white paper, grain, the contact shadow. |
 | `capture.js` | Screenshots in tiles, videos frame by frame. |
 
@@ -142,18 +142,18 @@ Meshes rebuilt every frame are written into their own buffers in place (`commitG
 
 ## Keeping pages sharp
 
-A page's look comes from four sources:
-1. **A base image** for every page, at a height that lets the whole book fit in a 480 MB budget (700 to 1600 px).
-2. **A small image**, 200 px tall, where the page is small on screen.
-3. **Sharp strips** when the view comes to rest (detail.js, ui/pages.js):
-   - The visible region of each page is cut into strips across the direction in which the need changes most. A page seen at an angle needs far more resolution near the camera than far away.
-   - Each strip is rendered from the PDF at what its own part of the screen needs, 1.25 image pixels per screen pixel at its densest point, up to 8192 px a side.
-   - If the base image already gives that everywhere, it stays (`baseSuffices`).
-   - New strips fade in over 220 ms, so the swap doesn't read as the page's pixels shifting.
+A page's look comes from three sources:
+1. **A base image** for every page, at a height that lets the whole book fit in a 480 MB budget (700 to 1600 px): the bottom of the page's pyramid, its level 0.
+2. **Tiles** (tiles.js, ui/tiles.js), the way a map viewer draws a map:
+   - Each level above the base is twice as fine, cut into tiles of 1024 texels (a 4-texel border each side, so filtering never sees a tile's edge), up to 32 times the base.
+   - A tile is rendered from the PDF once, when the view first needs it, and kept on the graphics card in one texture array (a 24th of the computer's memory, 256 MB to 1 GB), the least recently drawn going first when the room is needed. A view that was on screen before draws from the cache at once.
+   - While the view moves (every 24 ms), each density sample on the pages in view asks for the tile at the level that part needs (the first with 1.25 texels a screen pixel), the tiles one sample's spacing around it (the gaps between samples, and a margin past the screen's edge, so panning finds them there) and the level under it. At rest, the next finer level too, so a zoom in finds it there. What is no longer wanted but not yet drawn is cancelled.
+   - The page shader looks each fragment's tile up in the page's table (`TILE_GLSL`) and falls back to coarser levels, in the end the base image, for what isn't there yet. So zooming out never shows less than what is kept, and zooming in shows the coarser level for the few frames its tiles take: a text tile about 25 ms in a render thread, three to the graphics card a frame, each with two mips made where it was drawn (pdf/mips.js). A tile fades in over 160 ms.
+3. **A capture's strips** (detail.js, ui/capture.js): a screenshot or a video frame renders the pages at exactly its resolution, in up to four strips laid over the page. (The view sharpened itself this way until 1.0.2: strips rendered only at rest and dropped on every move, so panning back rendered again and a zoom showed the base image first.)
 
 How much of each page is on screen, and at what density, is measured by casting rays from a grid of screen points onto the pages (`visiblePages`). The rays meet the cross-section curve itself, not the triangles, so the result is exact at any zoom and angle.
 
-Image uploads are spread over frames, two a frame (`UPLOADS_PER_FRAME`), and a page image is freed from memory once it is on the graphics card. Strips are made only once the view rests: 120 ms after it stops, 350 ms after a page turn, so pages only flipped past aren't sharpened.
+Image uploads are spread over frames, two a frame (`UPLOADS_PER_FRAME`), tiles three (`TILES_PER_FRAME`), and an image is freed from memory once it is on the graphics card. The view counts as at rest 120 ms after it stops, 350 ms after a page turn.
 
 ## The scene and its frame loop
 
