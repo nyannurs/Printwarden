@@ -185,6 +185,35 @@ test("REGRESSION: closed coil book: every page's hole sits on the wire, closed (
   }
 });
 
+test("REGRESSION: a spiral's wire runs through every page's hole along the spine too (the coil turned so it climbs where no page is; 240 pages)", async () => {
+  const { coilCentre, coilClimb, coilTurn, HOLE_OFFSET_MM, restingAngle } = await import("../app/viewer/model.js");
+  for (const pageCount of [44, 96, 240]) {
+    const book = makeBook({ pageCount, binding: "spiral", thickness: 0.15, coverThickness: 0.15, width: 148, height: 210 });
+    const s = Float32Array.from([0, HOLE_OFFSET_MM, 20, 148]);
+    const room = book.style.holeRadius - book.style.wire; // how far the wire may stray from a hole's middle
+    const states = [];
+    for (const opening of [0, 1, Math.round(book.leafCount / 4), Math.round(book.leafCount / 2), book.leafCount - 1, book.leafCount]) states.push({ opening, closed: 0, side: 1 });
+    states.push({ opening: 0, closed: 1, side: 1 }, { opening: book.leafCount, closed: 1, side: -1 });
+    for (const { opening, closed, side } of states) {
+      const split = opening === 0 ? 0 : book.cum[opening - 1] + book.thickness[opening - 1] / 2;
+      const profiles = [];
+      for (let i = 0; i < book.leafCount; i++) {
+        const th = closed ? side * 90 : restingAngle(book, i, opening);
+        profiles.push(leafProfile(book, i, th, closed, split, 0, s, undefined, side));
+      }
+      const c = coilCentre(book, closed, side);
+      const turn = coilTurn(profiles, c);
+      let worst = 0;
+      for (const p of profiles) {
+        const a = Math.atan2(p.y[1] - c.y, p.x[1] - c.x) - turn; // in the coil's own frame
+        const climb = coilClimb(a);
+        worst = Math.max(worst, Math.min(climb, 1 - climb) * book.style.pitch);
+      }
+      ok(worst <= room, `${pageCount} pages, ${closed ? "closed" : `open at ${opening}`}: the wire ${worst.toFixed(2)} mm along the spine from a hole's middle (room ${room.toFixed(2)})`);
+    }
+  }
+});
+
 test("closed at the back cover: back cover on top, lying left of the spine", () => {
   const book = makeBook({ pageCount: 44, binding: "saddle", thickness: 0.15, coverThickness: 0.3, width: 148, height: 210 });
   const s = samples(148);

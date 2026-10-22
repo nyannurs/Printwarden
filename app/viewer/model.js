@@ -851,16 +851,72 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
     // shrank to 20.7 open, its joints 9.8, 12.4, 6.9 mm: "the spine extends", the author.)
     const S0 = S(0);
     const toRoot = (S0.x - E.x) * back.x + (S0.y - E.y) * back.y;
-    let reach = Math.max(0, toRoot - style.joint);
+    const reach0 = Math.max(0, toRoot - style.joint);
     const H = hinge(bi);
-    if (H) {
-      const dx = E.x - H.x;
-      const dy = E.y - H.y;
+    // Along its own line, the board's inner edge where the covering reaches (from the fore-edge
+    // `F`), or null if the line passes further from the corner than it reaches.
+    const onLine = (F) => {
+      const dx = F.x - H.x;
+      const dy = F.y - H.y;
       const along = dx * back.x + dy * back.y;
       const disc = along * along - (dx * dx + dy * dy) + H.length * H.length;
-      if (disc >= 0) reach = Math.max(0, -along - Math.sqrt(disc));
+      return disc >= 0 ? Math.max(0, -along - Math.sqrt(disc)) : null;
+    };
+    const fallback = { x: E.x + back.x * reach0, y: E.y + back.y * reach0, phi: Math.atan2(-back.x, -back.y) };
+    if (!H) return fallback;
+    const r = onLine(E);
+    if (r !== null) return { x: E.x + back.x * r, y: E.y + back.y * r, phi: Math.atan2(-back.x, -back.y) };
+    // The line misses the covering's reach: a thick block, the board lying open low beside its
+    // tall spine, or in the air, resting on a stand-in sheet that rises from the spine at an
+    // angle. The covering doesn't stretch (until 2026-10-23 it did here, 7 to 25 mm on a 23 mm
+    // block: a wedge of covering at the spine, the author), so the board goes where it lets it:
+    // moved in toward the corner along its normal, or pivoted on its fore-edge where it rests,
+    // its inner edge lifted onto the reach (as a thick hardcover's board rises toward the
+    // spine). Whichever keeps clear of every page; if neither does, as before.
+    const nrm = { x: -back.y, y: back.x };
+    if (nrm.x * Y.x + nrm.y * Y.y < 0) { nrm.x = -nrm.x; nrm.y = -nrm.y; }
+    const width = leaves[bi].s[leaves[bi].s.length - 1];
+    const clear = (P, dir) => { // the board from inner edge P, running `dir` toward the fore-edge
+      const tx = dir.x, ty = dir.y, nx = -ty, ny = tx;
+      for (let j = 1; j < n - 1; j++) {
+        const q2 = leaves[j].profile;
+        const gap = (thickness[bi] + thickness[j]) / 2;
+        for (let k = 0; k < q2.x.length; k++) {
+          const rx = q2.x[k] - P.x, ry = q2.y[k] - P.y;
+          const a = rx * tx + ry * ty;
+          if (a < -0.5 || a > width + 0.5) continue;
+          if (Math.abs(rx * nx + ry * ny) < gap) return false;
+        }
+      }
+      return true;
+    };
+    const fromInner = (P) => {
+      const fx = E.x - P.x, fy = E.y - P.y;
+      const l = Math.hypot(fx, fy) || 1;
+      return { x: P.x, y: P.y, phi: Math.atan2(fx / l, fy / l) };
+    };
+    const candidates = [];
+    // Moved in: the line brought within reach, the edge where it meets the reach.
+    const inward = -((H.x - E.x) * nrm.x + (H.y - E.y) * nrm.y);
+    if (inward > 0) {
+      const m = inward - H.length * 0.999;
+      const F = { x: E.x - nrm.x * m, y: E.y - nrm.y * m };
+      const rr = onLine(F);
+      if (rr !== null) candidates.push({ x: F.x + back.x * rr, y: F.y + back.y * rr, phi: Math.atan2(-back.x, -back.y) });
     }
-    return { x: E.x + back.x * reach, y: E.y + back.y * reach, phi: Math.atan2(-back.x, -back.y) };
+    // Pivoted on the fore-edge: the inner edge on the reach, as far from the fore-edge as it was.
+    const d = Math.hypot(H.x - E.x, H.y - E.y) || 1;
+    const ux = (H.x - E.x) / d, uy = (H.y - E.y) / d;
+    const a0 = (reach0 * reach0 - H.length * H.length + d * d) / (2 * d);
+    const hh = reach0 * reach0 - a0 * a0;
+    if (hh >= 0) {
+      const h = Math.sqrt(hh);
+      for (const sgn of [1, -1]) candidates.push(fromInner({ x: E.x + ux * a0 - sgn * uy * h, y: E.y + uy * a0 + sgn * ux * h }));
+    }
+    // The nearest to where it was that keeps clear of the pages.
+    candidates.sort((p1, p2) => Math.hypot(p1.x - fallback.x, p1.y - fallback.y) - Math.hypot(p2.x - fallback.x, p2.y - fallback.y));
+    for (const c of candidates) if (clear(c, { x: Math.sin(c.phi), y: Math.cos(c.phi) })) return c;
+    return fallback;
   };
   // The case's spine corner at board `bi`'s side (as writeCaseSpine in extras.js builds it:
   // across the block's outer sheets by the boards' thickness, behind its spine by the folds,
@@ -1169,6 +1225,49 @@ function openShape(book, rise) {
   shape.lifted = lifted;
   book.openShapes.set(key, shape);
   return shape;
+}
+
+/**
+ * A spiral coil's climb, 0 to 1, at angle `a` (radians) in the coil's own frame: level (0)
+ * over the half from 0 to π, where the pages hang, then easing up a pitch to the next hole
+ * over the other half (the wire is a coil, it has to advance somewhere). The coil is turned
+ * (coilTurn) so that its level half lies where the pages are.
+ */
+export function coilClimb(a) {
+  const u = ((((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) / Math.PI); // 0..2
+  return u <= 1 ? 0 : (1 - Math.cos((u - 1) * Math.PI)) / 2;
+}
+
+/**
+ * How far to turn the coil about its axis (radians) so the middle of its level half faces
+ * the middle of where the pages' holes are on the ring now: open in the middle, they hang
+ * low on both sides and the wire climbs over the top, as on a real spiral book; closed or
+ * open at a cover, they sit at one side. (Until 2026-10-23 the coil climbed along the
+ * underside, always: a thick book's pages hang there, and the wire ran up to half a pitch,
+ * 3 mm, beside their holes, through the paper.) A real coil turns too as pages are turned.
+ * @param {{x: ArrayLike<number>, y: ArrayLike<number>}[]} profiles the leaves' cross-sections
+ * @param {{x: number, y: number}} centre the ring's (coilCentre)
+ */
+export function coilTurn(profiles, centre) {
+  // The middle of the arc the holes span: the circle less its widest gap between holes (the
+  // holes' average was pulled toward the side with more pages: a cover alone on the other
+  // side fell on the climb).
+  const angles = [];
+  for (const p of profiles) {
+    const dx = p.x[1] - p.x[0], dy = p.y[1] - p.y[0];
+    const len = Math.hypot(dx, dy) || 1;
+    angles.push(Math.atan2(p.y[0] + (dy / len) * HOLE_OFFSET_MM - centre.y, p.x[0] + (dx / len) * HOLE_OFFSET_MM - centre.x));
+  }
+  if (!angles.length) return 0;
+  angles.sort((x, y) => x - y);
+  let gap = -1, after = 0;
+  for (let i = 0; i < angles.length; i++) {
+    const next = i + 1 < angles.length ? angles[i + 1] : angles[0] + 2 * Math.PI;
+    if (next - angles[i] > gap) { gap = next - angles[i]; after = i; }
+  }
+  const start = angles[(after + 1) % angles.length]; // the arc runs from here...
+  const span = 2 * Math.PI - gap; // ...this far round
+  return start + span / 2 - Math.PI / 2;
 }
 
 /** Centre of the coil ring for a given closedness. */

@@ -170,6 +170,36 @@ test("hardcover: the case's covering doesn't stretch as the boards open and clos
   }
 });
 
+test("REGRESSION: a thick hardcover's covering doesn't stretch either (244 pages, 23 mm): opening, to its first spread, the board turned back", () => {
+  const { scene, box } = makeScene();
+  try {
+    scene.setBook({ pageCount: 244, pageSize: { width: 148, height: 210 }, binding: "hardcover", paper, endpapers: true, signaturePages: 16 });
+    const lengths = () => scene.extras.caseSpine.geometry.userData.lengths;
+    scene.clock = 1e6;
+    scene.goTo(0, { animate: false });
+    scene.setClosed(true, { animate: false });
+    scene.debugStep();
+    const shut = lengths().all;
+    let least = shut, most = shut, where = "";
+    const watch = (label) => {
+      const v = lengths().all;
+      if (v < least) { least = v; where = label; }
+      if (v > most) { most = v; where = label; }
+    };
+    let clock = 1e6 + 500;
+    const run = (ms, label) => { for (let t = 0; t <= ms; t += 1000 / 120) { scene.clock = clock + t; scene.debugStep(); watch(label); } clock += ms + 10; };
+    scene.clock = clock; scene.open(); run(1500, "opening");
+    scene.clock = clock; scene.goTo(1); run(1500, "to the first spread");
+    scene.clock = clock; scene.goTo(0); run(1500, "back to the cover");
+    // (Not yet: the whole block flung to the back spread at once, the board riding on the
+    // turning first page, stretches the front joint to 17 mm for a tenth of a second.)
+    ok(most - least < 1.5, `the outside ${least.toFixed(2)} to ${most.toFixed(2)} mm (shut ${shut.toFixed(2)}; worst ${where})`);
+  } finally {
+    scene.clock = null;
+    box.remove();
+  }
+});
+
 test("sewn and hardcover: each signature folds as a booklet does, printed from its fold, trimmed together", () => {
   for (const binding of ["sewn", "hardcover"]) {
     const book = makeBook({ pageCount: 64, binding, thickness: 0.1, coverThickness: 0.3, width: 148, height: 210, signaturePages: 16 });
