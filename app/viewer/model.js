@@ -6,6 +6,7 @@
 // right, -90° flat to the left. A leaf is a ribbon: it leaves its attach point at angle
 // α, bends over `bend` mm to its resting angle θ, then runs straight to the fore-edge.
 
+
 const BINDING_STYLES = {
   // open: angle of the visible pages; stackLimit: how flat the stacks beneath lie;
   // bend: how far from the spine the page curves; rootFollow: how much the root of the
@@ -25,15 +26,24 @@ const BINDING_STYLES = {
   // Case-bound, square back: the block (sewn signatures) in a case of two boards and a flat
   // spine board. board: the boards' thickness unless the spec sets it (mm, = BOARD_MM in
   // core/spine.js); square: how far they overhang the pages at head, foot and fore-edge;
-  // joint: the hinge between board and spine. Bookbinding standards.
+  // joint: the hinge between board and spine. Bookbinding standards; the same as core/spine.js's
+  // CASE_SQUARE_MM and CASE_JOINT_MM (a case wrap is read by them), written out here: the
+  // viewer's bundle holds no core code (see tests/bundle.test.js).
   hardcover: { open: 78, stackLimit: 89, bend: 14, rootFollow: 0.35, spine: "case", gutter: [18, 0.17], board: 2.5, square: 3, joint: 7, rootAngle: 30, stripBend: 4 },
   // Coils: pitch (4:1 and 3:1 per inch), round holes for a spiral, square ones for wire-o
   // (holeRadius: half the hole's width), wire: radius of the wire.
-  spiral: { open: 88.5, stackLimit: 90, bend: 0, rootFollow: 1, spine: "coil", pitch: 6.35, holeRadius: 2.2, squareHoles: false, wire: 0.55, gutter: [7, 0.06] },
-  "wire-o": { open: 88.5, stackLimit: 90, bend: 0, rootFollow: 1, spine: "coil", pitch: 8.467, holeRadius: 2.1, squareHoles: true, wire: 0.42, gutter: [7, 0.06] },
+  // coil: the coil's diameter (mm) for a block this thick, as the binders' size charts have it
+  // (spiral 6 to 50 mm for 3 to 41 mm of block: 1.2 x the block + 2.5; wire-o 6.4 to 31.8 mm
+  // for 3 to 28 mm: 1.1 x + 2).
+  spiral: { open: 88.5, stackLimit: 90, bend: 0, rootFollow: 1, spine: "coil", pitch: 6.35, holeRadius: 2.2, squareHoles: false, wire: 0.55, gutter: [7, 0.06], coil: [1.2, 2.5] },
+  "wire-o": { open: 88.5, stackLimit: 90, bend: 0, rootFollow: 1, spine: "coil", pitch: 8.467, holeRadius: 2.1, squareHoles: true, wire: 0.42, gutter: [7, 0.06], coil: [1.1, 2] },
 };
 
 export const HOLE_OFFSET_MM = 4.5; // centre of punched holes from the spine edge
+/** From the signatures' folds to the inside of a case's spine (mm): the hollow, which the headband's bead fills. */
+export const CASE_HOLLOW = 1.7;
+/** The covering over a case's thin spine board (mm), flush with the boards' outsides. */
+export const CASE_COVER_MM = 1.2;
 const CURL_DEG = 55; // how far the fore-edge leads, then trails, during a turn
 
 const DEG = Math.PI / 180;
@@ -50,10 +60,13 @@ const lerp = (a, b, t) => a + (b - a) * t;
  * What a book is made from: page count and size (mm), binding, the paper's thickness and the
  * cover's (mm), the paper's weight and finish (how stiff its pages are), the pages in a
  * sewn signature, a hardcover's boards (mm; null = the usual), whether its block has
- * endpaper leaves (a flyleaf at each end) and a rounded back.
+ * endpaper leaves (a flyleaf at each end) and a rounded back; side glue (mm from the spine:
+ * the covers glued to the first and last page, see glueCovers; 0 none); a hardcover's case from
+ * a case wrap (its boards show the wrap's faces whole, the case its joints and spine).
  * @typedef {{pageCount: number, binding: string, thickness: number, coverThickness: number,
  *            width: number, height: number, gsm?: number, finish?: string, signaturePages?: number,
- *            boardMm?: number | null, endpapers?: boolean, roundSpine?: boolean}} BookSpec
+ *            boardMm?: number | null, endpapers?: boolean, roundSpine?: boolean, glueMm?: number,
+ *            caseWrap?: boolean}} BookSpec
  */
 
 /**
@@ -62,7 +75,8 @@ const lerp = (a, b, t) => a + (b - a) * t;
  * @typedef {Omit<BookSpec, "thickness"> & {leafCount: number, style: any, thickness: number[],
  *            cum: number[], total: number, ground: number, signatureLeaves: number, foldDepth: number,
  *            firstBlockLeaf: number, rootShift: Float64Array, round: number,
- *            baseSamples?: Float64Array, piled?: any, scratch?: any} & Partial<ReturnType<typeof coilGeometry>>} Book
+ *            baseSamples?: Float64Array, piled?: any, scratch?: any,
+ *            signatureSheets?: [number, number][], signatureTrim?: number} & Partial<ReturnType<typeof coilGeometry>>} Book
  */
 
 /**
@@ -110,7 +124,7 @@ export function makeBook(spec) {
     for (let i = 1; i < leafCount - 1; i++) rootShift[i] = Math.max(0, sag(cum[i] - mid) - base);
   }
   const book = { ...spec, leafCount, style, thickness, cum, total, ground, signatureLeaves, foldDepth, firstBlockLeaf, rootShift, round };
-  if (style.spine === "coil") Object.assign(book, coilGeometry(total, ground, style.wire));
+  if (style.spine === "coil") Object.assign(book, coilGeometry(total, ground, style));
   return book;
 }
 
@@ -122,10 +136,13 @@ export function makeBook(spec) {
  * reaches below the block: the book rests on it, tilted (closedTilt, radians, from the
  * fore-edge, where it touches the table).
  */
-function coilGeometry(total, ground, wire) {
-  // Big enough for the block, and for the paper strip inside the ring (hole to spine
-  // edge) to stop short of the centre, so left and right strips never meet.
-  const coilRadius = Math.max(total / 2 + 2.2, HOLE_OFFSET_MM + 1.8);
+function coilGeometry(total, ground, { wire, coil: [perMm, plus] }) {
+  // As big as the coil a binder takes for a block this thick (the size charts, see the
+  // styles: a 40 mm block in a 50 mm spiral), and big enough for the paper strip inside the
+  // ring (hole to spine edge) to stop short of the centre, so left and right strips never
+  // meet. (The block plus 4.4 mm until 1.1: a thick book's coil looked too small, the
+  // designer said; a 40 mm block had a 44 mm ring.)
+  const coilRadius = Math.max((perMm * total + plus) / 2, total / 2 + 2.2, HOLE_OFFSET_MM + 1.8);
   return {
     coilRadius,
     wireRadius: wire,
@@ -812,13 +829,48 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
       if (px > 1e-6 && px <= len) alpha = Math.max(alpha, Math.atan2(py, px));
     }
     const back = { x: X.x * Math.cos(alpha) + Y.x * Math.sin(alpha), y: X.y * Math.cos(alpha) + Y.y * Math.sin(alpha) };
-    // Anchored at its joint: the board's inner edge a joint's width out from where the
-    // sheet comes out of the spine, along the board. (Pages arching up out of the gutter
-    // draw their fore-edge in; the board stays where it is, overhanging them more.)
+    // Hung from the case's spine corner by the covering across its joint, which doesn't
+    // stretch: along its own line, the board's inner edge as far from that corner as when the
+    // book is shut (a joint's width and the depth behind the block's spine). Pages arching up
+    // out of the gutter draw their fore-edge in; the board stays where it is, overhanging them
+    // more. (Until 1.1 the inner edge was a joint's width along the board from where the sheet
+    // leaves the spine: as the board swung, the case's outside grew 27.2 to 27.5 mm and then
+    // shrank to 20.7 open, its joints 9.8, 12.4, 6.9 mm: "the spine extends", the author.)
     const S0 = S(0);
     const toRoot = (S0.x - E.x) * back.x + (S0.y - E.y) * back.y;
-    const reach = Math.max(0, toRoot - style.joint);
+    let reach = Math.max(0, toRoot - style.joint);
+    const H = hinge(bi);
+    if (H) {
+      const dx = E.x - H.x;
+      const dy = E.y - H.y;
+      const along = dx * back.x + dy * back.y;
+      const disc = along * along - (dx * dx + dy * dy) + H.length * H.length;
+      if (disc >= 0) reach = Math.max(0, -along - Math.sqrt(disc));
+    }
     return { x: E.x + back.x * reach, y: E.y + back.y * reach, phi: Math.atan2(-back.x, -back.y) };
+  };
+  // The case's spine corner at board `bi`'s side (as writeCaseSpine in extras.js builds it:
+  // across the block's outer sheets by the boards' thickness, behind its spine by the folds,
+  // the hollow and half the covering) and the covering's length from there to the board.
+  const hinge = (bi) => {
+    const pl = leaves[1]?.profile;
+    const ph = leaves[n - 2]?.profile;
+    if (style.spine !== "case" || n < 4 || !pl || !ph) return null;
+    let ax = ph.x[0] - pl.x[0];
+    let ay = ph.y[0] - pl.y[0];
+    const al = Math.hypot(ax, ay) || 1;
+    ax /= al;
+    ay /= al;
+    let ox = -ay;
+    let oy = ax;
+    if (ox * Math.sin(pl.phi[0]) + oy * Math.cos(pl.phi[0]) > 0) {
+      ox = -ox;
+      oy = -oy;
+    }
+    const depth = book.foldDepth + CASE_HOLLOW + CASE_COVER_MM / 2;
+    const wide = (t) => t / 2 + thickness[0] - CASE_COVER_MM / 2;
+    const [p, t, sign] = bi === 0 ? [pl, thickness[1], -1] : [ph, thickness[n - 2], 1];
+    return { x: p.x[0] + sign * ax * wide(t) + ox * depth, y: p.y[0] + sign * ay * wide(t) + oy * depth, length: style.joint + depth };
   };
   // A sheet between its two pile shapes, `f` of the way at each point (as the pages are).
   const between = (R, L, f, sv) => {
@@ -862,6 +914,60 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
       p.x[k] = a.x + Math.sin(a.phi) * l.s[k];
       p.y[k] = a.y + Math.cos(a.phi) * l.s[k];
       p.phi[k] = a.phi;
+    }
+  }
+  glueCovers(book, leaves);
+}
+
+/**
+ * Side glue (perfect, sewn: `glueMm`): each cover glued to the page next to it for that far
+ * from the spine. Opening a side-glued paperback, the cover hinges at the end of the glue (its
+ * score line), and its first strip stays with the page: here the cover's first `glueMm` lies on
+ * that page's outer surface, wherever the page is, and the rest of the cover keeps its own
+ * shape, carried from where the strip ends (a crease there). While cover and page lie in one
+ * pile (closed, or both turned) the strip is where the cover lay anyway and nothing moves.
+ * (Until 1.1 the cover rose free from the spine, parting from the page where it is glued.)
+ */
+function glueCovers(book, leaves) {
+  const g = book.glueMm ?? 0;
+  const n = leaves.length;
+  if (!(g > 0) || book.style.spine !== "flat" || n < 4) return;
+  for (const [ci, pi] of [[0, 1], [n - 1, n - 2]]) {
+    const c = leaves[ci].profile;
+    const p = leaves[pi].profile;
+    const cs = leaves[ci].s;
+    const ps = leaves[pi].s;
+    if (!c || !p || cs[cs.length - 1] <= g) continue;
+    // The page's centre line and its normal at arc length v (interpolated).
+    const on = (v) => {
+      let k = 0;
+      while (k < ps.length - 2 && ps[k + 1] < v) k++;
+      const t = Math.max(0, Math.min(1, (v - ps[k]) / Math.max(1e-9, ps[k + 1] - ps[k])));
+      const phi = p.phi[k] + (p.phi[k + 1] - p.phi[k]) * t;
+      return { x: p.x[k] + (p.x[k + 1] - p.x[k]) * t, y: p.y[k] + (p.y[k + 1] - p.y[k]) * t, phi, nx: -Math.cos(phi), ny: Math.sin(phi) };
+    };
+    // The cover's side of the page (its normal, toward the cover's root) and how far out:
+    // half of each sheet.
+    const r0 = on(0);
+    const side = Math.sign((c.x[0] - r0.x) * r0.nx + (c.y[0] - r0.y) * r0.ny) || 1;
+    const off = side * (book.thickness[ci] + book.thickness[pi]) / 2;
+    // Where the strip ends, on the page, and where the cover's own shape is there.
+    const end = on(g);
+    let k = 0;
+    while (k < cs.length - 2 && cs[k + 1] < g) k++;
+    const t = Math.max(0, Math.min(1, (g - cs[k]) / Math.max(1e-9, cs[k + 1] - cs[k])));
+    const dx = end.x + end.nx * off - (c.x[k] + (c.x[k + 1] - c.x[k]) * t);
+    const dy = end.y + end.ny * off - (c.y[k] + (c.y[k + 1] - c.y[k]) * t);
+    for (let j = 0; j < cs.length; j++) {
+      if (cs[j] <= g) {
+        const q = on(cs[j]);
+        c.x[j] = q.x + q.nx * off;
+        c.y[j] = q.y + q.ny * off;
+        c.phi[j] = q.phi;
+      } else {
+        c.x[j] += dx;
+        c.y[j] += dy;
+      }
     }
   }
 }
@@ -1080,9 +1186,12 @@ export function leafShape(book, i) {
   const n = book.leafCount;
   const board = st.spine === "case" && (i === 0 || i === n - 1);
   book.leafShapes ??= /** @type {Map<string, LeafShape>} */ (new Map());
-  // One shape for pages and one for boards; a stitched book's sheets one per depth (below).
+  // One shape for pages and one for boards; a stitched book's sheets one per depth (below),
+  // a sewn block's one per fold (by what the fold takes).
   const depth = st.spine === "fold" ? Math.min(i, n - 1 - i) : null;
-  const kind = board ? "board" : depth === null ? "page" : `fold:${depth}`;
+  const partner = board ? null : signaturePartner(book, i);
+  const sigFold = partner === null ? 0 : (Math.PI / 4) * Math.abs(book.cum[partner] - book.cum[i]);
+  const kind = board ? "board" : depth !== null ? `fold:${depth}` : partner !== null ? `sig:${sigFold.toFixed(6)}` : "page";
   if (!book.leafShapes.has(kind)) {
     if (board) {
       const r = st.board / 2;
@@ -1098,12 +1207,64 @@ export function leafShape(book, i) {
       const folded = (d) => (n - 1 - d > d ? (Math.PI / 4) * (book.cum[n - 1 - d] - book.cum[d]) : 0);
       const width = book.width - folded(0);
       book.leafShapes.set(kind, { s: samples(width), width, height: book.height, uStart: folded(depth), board: false });
+    } else if (partner !== null) {
+      // A sewn block's signatures are booklets: each sheet folds round the ones inside it (a
+      // half circle past the roots, see writeSignatureFolds in extras.js), the pages printed
+      // from the fold, and the block trimmed at the fore-edge as one. So as above, within each
+      // signature: the content starts where its fold ends, and every page is as wide as the
+      // outermost sheets' (the creep cut off). (Until 1.1 every page started at its root, the
+      // folds blank paper beyond: print not all the way to the spine, the designer's sewn
+      // book and hardcover, 2026-10-22.)
+      const width = book.width - signatureTrim(book);
+      book.leafShapes.set(kind, { s: samples(width), width, height: book.height, uStart: sigFold, board: false });
     } else {
-      const s = st.spine === "coil" ? evenly(book.width, 2) : samples(book.width);
-      book.leafShapes.set(kind, { s, width: book.width, height: book.height, uStart: 0, board: false });
+      // A sewn block's covers and flyleaves are trimmed with it.
+      const width = book.width - signatureTrim(book);
+      const s = st.spine === "coil" ? evenly(book.width, 2) : samples(width);
+      book.leafShapes.set(kind, { s, width: st.spine === "coil" ? book.width : width, height: book.height, uStart: 0, board: false });
     }
   }
   return book.leafShapes.get(kind);
+}
+
+/**
+ * The sheets of a sewn block (sewn, hardcover): within each signature of the block (the
+ * covers or boards, and a hardcover's flyleaves, apart), the k-th leaf from its front with the
+ * k-th from its back, as [first, last] leaf pairs from the front. Empty for other bindings.
+ * @returns {[number, number][]}
+ */
+export function signatureSheets(book) {
+  if (book.signatureSheets) return book.signatureSheets;
+  const n = book.leafCount;
+  const sewn = book.style.spine === "case" || (book.style.spine === "flat" && book.binding === "sewn");
+  const pairs = /** @type {[number, number][]} */ ([]);
+  const first = book.firstBlockLeaf;
+  for (let a = first; sewn && a < n - first; a += book.signatureLeaves) {
+    const b = Math.min(n - 1 - first, a + book.signatureLeaves - 1);
+    for (let k = 0; a + k < b - k; k++) pairs.push([a + k, b - k]);
+  }
+  return (book.signatureSheets = pairs);
+}
+
+/** The leaf a sewn block's leaf `i` is one sheet with (itself: the odd leaf at a signature's centre), or null. */
+function signaturePartner(book, i) {
+  if (!signatureSheets(book).length) return null;
+  const n = book.leafCount;
+  const first = book.firstBlockLeaf;
+  if (i < first || i > n - 1 - first) return null;
+  const a = first + Math.floor((i - first) / book.signatureLeaves) * book.signatureLeaves;
+  const b = Math.min(n - 1 - first, a + book.signatureLeaves - 1);
+  return a + b - i;
+}
+
+/** What a sewn block loses at the fore-edge (mm): the most any signature's outer fold takes. */
+function signatureTrim(book) {
+  if (book.signatureTrim === undefined) {
+    let most = 0;
+    for (const [a, b] of signatureSheets(book)) most = Math.max(most, (Math.PI / 4) * (book.cum[b] - book.cum[a]));
+    book.signatureTrim = most;
+  }
+  return book.signatureTrim;
 }
 
 /** Samples along `width` at most `step` apart, evenly. */

@@ -40,7 +40,7 @@ node tools/make-testfiles.mjs
 | `text.test.js` | Text can't go missing: every render thread leaves out exactly the glyphs it is told; a failed render doesn't lose a text request; overprint multiplies when shown. |
 | `vectortext.test.js` | Glyph outlines to quadratic curves, coverage computed as the shader does, the render threads' choice of glyphs. |
 | `motion.test.js` | The motion resolution's steps, including real figures from a report. |
-| `checklist.test.js` | Points from designer testing that numbers can settle: endpapers, boards and the headband on the spine, side glue in Preflight, staples and creep, switching bindings on one book. |
+| `checklist.test.js` | Points from designer testing that numbers can settle: endpapers, boards and the headband on the spine, side glue in Preflight, staples and creep, signatures nesting with creep, switching bindings on one book. |
 | `panel.test.js` | The side panel, built with the app's own stylesheets at several window sizes: every control and label on whole pixels. |
 | `bundle.test.js` | The client viewer's bundle: the right modules, no import left pointing at a file. |
 | `export.test.js` | The imposed export's dialog: the sheet layout chosen in it is the one exported, even with Export pressed at once; the last choice wins. |

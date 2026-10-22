@@ -2,7 +2,7 @@
 // timeline, export it imposed. Heavy work (reading, rendering, writing PDFs) runs in
 // background threads; this file only coordinates.
 
-import { analyse, defaultSetup } from "../core/analysis.js";
+import { analyse, defaultSetup, pageSizeOf } from "../core/analysis.js";
 import { sideGlueMm, wireIsMetal } from "../core/binding.js";
 import { COVER_BASE } from "../core/document.js";
 import { coverOf, PAPER_FINISHES, paperThicknessMm, showThrough } from "../core/paper.js";
@@ -24,6 +24,7 @@ import { Filmstrip } from "./filmstrip.js";
 import { importFinish, openFinishDialog } from "./finish.js";
 import { Inspector } from "./inspector.js";
 import { forgetThumbnails, isSharp, loadAllTextures, sharpen, thumbnail, warmVisiblePages } from "./pages.js";
+import { initPlates, resetPlates } from "./plates.js";
 import { applySpine, importSpineArt, openSpinePanel, renderSpineArt, updateSpinePanel } from "./spine-panel.js";
 import { initView, setBackground, showZoom } from "./view.js";
 
@@ -165,6 +166,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     scene.clearPages();
     state.details.clear();
     forgetThumbnails();
+    resetPlates(); // every plate prints again with a new file
     $("doc-name").textContent = file.name;
     fitPill($("doc-name"), 2, 6);
     document.title = `${file.name} – ${APP_NAME}`;
@@ -226,7 +228,7 @@ async function adoptCover() {
   const cover = state.cover;
   const cf = state.analysis?.coverFile;
   if (!cover || !cf || cf.error) return;
-  if (cf.spineMm > 0.05 && cf.flapMm === 0) {
+  if (cf.spineMm > 0.05 && cf.flapMm === 0 && !cf.caseWrap) { // a case wrap's spine is the case's: the block is the paper's
     state.setup = { ...state.setup, spine: { ...state.setup.spine, widthMm: Math.round(cf.spineMm * 100) / 100 } };
     reanalyse(0);
   }
@@ -294,20 +296,22 @@ function reanalyse(opening = scene.opening) {
   state.analysis = analysis;
   state.generation++;
   const { setup, book } = analysis;
-  const size = analysis.geometry.find(Boolean)?.size ?? { width: 148, height: 210 };
+  const size = pageSizeOf(analysis) ?? { width: 148, height: 210 };
   const paper = scenePaper(setup.paper, setup, book.pages.length);
 
   const endpapers = book.pages.some((p) => p.endpaper);
   const roundSpine = setup.spineShape === "round";
+  const glueMm = sideGlueMm(setup.binding, setup.glueMm, book.pages.length); // the covers hinge at its end (model.js glueCovers)
+  const caseWrap = !!analysis.coverFile?.caseWrap && !analysis.coverFile.error; // the boards show the wrap's faces, the case its spine
   const bookKey = [book.pages.length, size.width.toFixed(1), size.height.toFixed(1), setup.binding,
-    analysis.rule.signaturePages, paper.thickness.toFixed(3), paper.coverThickness.toFixed(3), paper.gsm, paper.finish, endpapers, roundSpine].join("|");
+    analysis.rule.signaturePages, paper.thickness.toFixed(3), paper.coverThickness.toFixed(3), paper.gsm, paper.finish, endpapers, roundSpine, glueMm, caseWrap].join("|");
   if (bookKey !== state.bookKey) {
     state.bookKey = bookKey;
     state.details.clear(); // detail images are freed with the old book
     state.flapKey = ""; // new leaves: the flaps are shown again
     scene.setBook({
       pageCount: book.pages.length, pageSize: size, binding: setup.binding,
-      signaturePages: analysis.rule.signaturePages, paper, boardMm: setup.boardMm, endpapers, roundSpine,
+      signaturePages: analysis.rule.signaturePages, paper, boardMm: setup.boardMm, endpapers, roundSpine, glueMm, caseWrap,
     }); // (the page images stay: see BookScene.setPageTexture)
   } else {
     scene.setPaper(paper); // colour, finish: instant
@@ -431,6 +435,7 @@ onMenuCommand((command) => {
 });
 
 initView();
+initPlates();
 
 // Load the render workers while the app sits idle: the first import starts instantly.
 prepareSpareWorkers(300);

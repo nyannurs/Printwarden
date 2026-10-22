@@ -2,6 +2,7 @@
 // options, the backdrop and color settings, and Preflight's findings (each says what to
 // change in InDesign: pages are never added or removed here).
 
+import { pageSizeOf } from "../core/analysis.js";
 import { BINDING_LABELS, hasWire, HEADBAND_COLORS, WIRE_COLORS } from "../core/binding.js";
 import { label } from "../core/book.js";
 import { SpreadMode } from "../core/detect.js";
@@ -74,7 +75,7 @@ export class Inspector {
   }
 
   #docSection(a, docName) {
-    const size = a.geometry.find(Boolean)?.size;
+    const size = pageSizeOf(a);
     const name = size && paperName(size);
     const formats = {
       "all-single": "Single pages",

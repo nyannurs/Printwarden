@@ -18,6 +18,7 @@ What it adds is the window, the controls, and the bookkeeping of which page has 
 | `capture.js` | Screenshots and videos: the pages at the output's resolution, the MP4 encoder, ProRes through FFmpeg. |
 | `client.js` | The client viewer export (see [The client viewer](client-viewer.md)). |
 | `colour.js` | The CMYK profile and overprint choices. |
+| `plates.js` | The Separations button and window: which plates print, handed to the renderer (`setPlatesEngine`); muted without one. |
 | `spine-panel.js` | The spine's color or artwork and the Book spine panel. |
 | `finish.js` | Spot finishes. |
 | `compass.js` | The view's compass. |

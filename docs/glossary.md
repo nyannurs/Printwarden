@@ -8,6 +8,7 @@
 | Bulk | How much space a paper takes for its weight (cm³/g). Uncoated stock is bulkier than coated at the same weight. |
 | Caliper | A sheet's thickness, as printers quote it, in µm. |
 | Case binding | Hardcover: a sewn block glued into a case of boards and a spine. |
+| Case wrap | A hardcover's printed cover: the boards' faces, the joints and the spine, with a turn-in all round. |
 | Center spread | The middle opening of a saddle-stitched booklet, where one sheet shows both its inner pages side by side. |
 | Creep | In a saddle stitch, inner sheets stick out further at the fore-edge than outer ones, because each wraps round the ones inside it. Trimming then cuts more off the inner pages. Compensation moves their content toward the spine. |
 | Endpapers | A hardcover's folded sheets at each end of the block: half pasted to the board (the pastedown), half free (the flyleaf). |
@@ -34,6 +35,7 @@
 | Spot UV | A gloss varnish in chosen areas, cured with UV light. |
 | Spread | Two facing pages, or a PDF page holding both. |
 | Square (of a hardcover) | How far the boards overhang the pages at head, foot and fore-edge. |
+| Turn-in | The edge of a case wrap folded round the boards onto their insides, where the endpapers cover most of it. Usually 15 mm. |
 | Trim | The finished page edge, after cutting. |
 | Wire-o, spiral | Bindings through punched holes: a double wire loop with square holes, or a single plastic or wire coil with round ones. |
 

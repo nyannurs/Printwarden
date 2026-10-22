@@ -163,7 +163,8 @@ COLOR PROFILES
 
 vendor/icc/ISOcoated_v2_eci.icc: ISO Coated v2 (ECI), the default CMYK profile,
 so colors look the same on every computer. It ships by permission of the European
-Color Initiative and is not under the Apache License: see vendor/icc/README.txt.
+Color Initiative and is not under the GNU Affero General Public License: see
+vendor/icc/README.txt.
 A PDF with its own output intent (PDF/X) still uses that, and the CMYK profiles
 installed on the computer are offered too.
 

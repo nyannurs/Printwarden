@@ -2,6 +2,7 @@
 // whole book fits in memory with; then, once the view stops, the part of each page on
 // screen again from the PDF's vectors, as sharp as the screen needs (see sharpen).
 
+import { pageSizeOf } from "../core/analysis.js";
 import { MM_PER_PT } from "../core/units.js";
 import { baseHeight, THUMB_HEIGHT } from "../pdf/render.js";
 import { baseSuffices, planDetail } from "../viewer/detail.js";
@@ -103,7 +104,7 @@ export async function pageRegionImage(folio, rect, height, priority, options = {
  */
 function smallImage(folio, priority) {
   if (!VECTOR_TEXT) {
-    const size = state.analysis.geometry.find(Boolean)?.size ?? { width: 1, height: 1 };
+    const size = pageSizeOf(state.analysis) ?? { width: 1, height: 1 };
     return pageImage(folio, baseHeight(state.analysis.book.pages.length, size.width / size.height), priority);
   }
   return pageImage(folio, THUMB_HEIGHT * 2, priority);
@@ -124,7 +125,7 @@ export function loadAllTextures() {
   const a = state.analysis;
   const gen = state.generation;
   const n = a.book.pages.length;
-  const size = a.geometry.find(Boolean)?.size ?? { width: 1, height: 1 };
+  const size = pageSizeOf(a) ?? { width: 1, height: 1 };
   const height = baseHeight(n, size.width / size.height);
   const centre = 2 * scene.opening + 0.5;
   let pending = 0;

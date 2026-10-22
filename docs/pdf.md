@@ -100,11 +100,13 @@ Plain text is drawn on the 3D page from its glyph outlines (see [The 3D book](3d
 
 ## The pdf.js patches
 
-`tools/patch-pdfjs.py` changes five lines of pdf.js, each documented in the script, which refuses to run if pdf.js changed under it:
+`tools/patch-pdfjs.py` changes eight lines of pdf.js, each documented in the script, which refuses to run if pdf.js changed under it:
 1. **The JPEG decoder** (`pdf.worker.mjs`): pdf.js asks ours first.
 2. **Overprint** (`pdf.worker.mjs`): the keys set the blend mode, as above.
 3. **Image smoothing** (`pdf.mjs`): an image is smoothed only where it is drawn smaller than its own pixels, or where the PDF asks for it with `/Interpolate`. It is never smoothed where it is enlarged, as a print RIP draws it. pdf.js smoothed anything enlarged up to 1.33 times, so one image drew soft in a page rendered small and crisp in the same page rendered large.
 4. **A scale computed as NaN** (`pdf.mjs` and `pdf.worker.mjs`, two lines): a transform's two scale factors came from the square root of a difference that rounding made a hair negative, giving NaN, then a scale of 1. An image enlarged 11 times then counted as unscaled and was smoothed: one page of a pixel-art book came out blurry at some render sizes. The difference is now clamped at zero.
+5. **A spot image drawn as its ink** (`pdf.worker.mjs`): a one-ink DeviceN image or fill whose ink the file defines (Photoshop's monotones and spot channels) is drawn as that ink's own Separation, as Acrobat does. Its tint transform, which pdf.js used, halves the ink's saturation in Photoshop's files, so a PANTONE image over the same PANTONE came out dull.
+6. **Spot images with a Lab alternate** (`pdf.worker.mjs`, two lines): drawn with alpha (as an uncompressed or ZIP-compressed image is), pdf.js read each pixel's finished RGB back as Lab, so pink came out cyan. The RGB now goes straight to the page.
 
 ## Writing the imposed PDF
 

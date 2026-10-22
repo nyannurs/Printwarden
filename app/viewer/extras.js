@@ -4,13 +4,15 @@
 // under the book and the table it lies on.
 
 import * as THREE from "three";
-import { coilCentre, leafShape } from "./model.js";
-import { LEAF_FILL, patchShader } from "./shaders.js";
+import { CASE_COVER_MM, CASE_HOLLOW, coilCentre, leafShape, signatureSheets } from "./model.js";
+import { EDGE_INK_SHARE, EDGE_INSET_MM, LEAF_FILL, patchShader } from "./shaders.js";
 
 // Booklet stitching wire (mm): crown width, clinched leg length, flattened cross-section.
 const STAPLE = { crown: 12.7, leg: 5.2, width: 0.62, thickness: 0.42 };
 
 const lerp = (a, b, t) => a + (b - a) * t;
+// A glued spine's slab ends this far inside the book's head and foot together (mm), see layoutExtras.
+const SLAB_INSET_MM = 0.1;
 
 export function makeExtras(scene) {
   const group = new THREE.Group();
@@ -29,7 +31,7 @@ export function makeExtras(scene) {
     // where the cover folds round onto the spine, carry the spine's own tone (see
     // spineSideFrontMat): in the cover's edge colour (to 0.17.84) a white cover on a black
     // spine drew a white line along the corner, the cover stock's white before that.
-    extras.slab = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
+    extras.slab = new THREE.Mesh(spineSlabGeometry(),
       [scene.spineSideBackMat, scene.spineSideFrontMat, scene.frontWrapMat, scene.spineMat, scene.coverEdgeMat, scene.coverEdgeMat]);
     extras.slab.castShadow = extras.slab.receiveShadow = true;
     group.add(extras.slab);
@@ -39,12 +41,10 @@ export function makeExtras(scene) {
     }
   } else if (style.spine === "fold") {
     // Each sheet folds round the ones inside it: nested U's at the spine, cut paper at head
-    // and foot. The cover's outside shows the cover wrapping round the fold: drawn from the
-    // front and back cover's own page images, the strips of them the fold takes (leafShape).
-    extras.foldCover = foldCoverMaterial(scene);
-    extras.fold = new THREE.Mesh(new THREE.BufferGeometry(), [extras.foldCover, scene.coverEdgeMat, scene.edgeMat]);
-    // Before each draw, not only when the fold is laid out again: the cover's images arrive later.
-    extras.fold.onBeforeRender = () => syncFoldCover(extras.foldCover, scene, scene.model);
+    // and foot, printed as its pages are (see foldSheetMaterial): the cover round the spine,
+    // the centre spread into the fold.
+    const n = scene.model.leafCount;
+    extras.fold = foldMesh(scene, Array.from({ length: Math.floor(n / 2) }, (_, k) => [k, n - 1 - k]));
     extras.fold.castShadow = extras.fold.receiveShadow = true;
     extras.fold.frustumCulled = false;
     group.add(extras.fold);
@@ -139,6 +139,33 @@ export function makeExtras(scene) {
   return extras;
 }
 
+/**
+ * The glued spine's slab: a unit box (see makeExtras for its faces), its two narrow sides (the
+ * spine's corners, x = ±0.5) mapped onto the spine artwork's edge columns: every point of a side
+ * takes the texture coordinate the spine face (-y) has at the same x and z, so each corner shows
+ * the artwork's own edge at that height, whatever the artwork's orientation.
+ */
+function spineSlabGeometry() {
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const pos = geo.attributes.position;
+  const uv = geo.attributes.uv;
+  const spine = geo.groups[3]; // -y, the spine's outside
+  const at = new Map();
+  for (let v = spine.start; v < spine.start + spine.count; v++) {
+    const k = geo.index.getX(v);
+    at.set(`${Math.sign(pos.getX(k))},${Math.sign(pos.getZ(k))}`, [uv.getX(k), uv.getY(k)]);
+  }
+  for (const side of [geo.groups[0], geo.groups[1]]) { // +x and -x
+    for (let v = side.start; v < side.start + side.count; v++) {
+      const k = geo.index.getX(v);
+      const [u, w] = at.get(`${Math.sign(pos.getX(k))},${Math.sign(pos.getZ(k))}`);
+      uv.setXY(k, u, w);
+    }
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
 function makeCoil(scene, style) {
   const { height: h, coilRadius: R, psiFlat } = scene.model;
   const coil = new THREE.Group();
@@ -216,8 +243,10 @@ function makeCoil(scene, style) {
  * at the ends of the gutter. Paper throughout: the folds' outsides and their cut ends.
  */
 function makeSignatureFolds(scene, group) {
-  const m = new THREE.Mesh(new THREE.BufferGeometry(), scene.edgeMat);
-  m.castShadow = m.receiveShadow = true;
+  const m = foldMesh(scene, signatureSheets(scene.model));
+  // In the spine's slab or the case but for their cut ends and a signature's centre spread:
+  // nothing to shadow (a draw a sheet, saved for the shadows).
+  m.receiveShadow = true;
   m.frustumCulled = false;
   group.add(m);
   return m;
@@ -273,7 +302,10 @@ export function layoutExtras(scene) {
     const along = Q.clone().sub(P);
     ex.slab.position.set(mid.x, mid.y, 0);
     ex.slab.rotation.z = Math.atan2(along.y, along.x);
-    ex.slab.scale.set(along.length() + tc, deep, m.height);
+    // Its ends a hair inside the head and foot: the signatures' folds end exactly there, and
+    // at the same plane the slab's ends and theirs fought, the folds showing in patches through
+    // the cover's colour (the designer's sewn book, 2026-10-22).
+    ex.slab.scale.set(along.length() + tc, deep, m.height - SLAB_INSET_MM);
   }
   if (ex.fold) {
     const { outerApex, innerApex } = writeFoldGeometry(ex.fold.geometry, scene.leaves, m);
@@ -513,57 +545,114 @@ function stapleGeometry(points, BEND = 0.45) {
   return geo;
 }
 
+/** Folded sheets, one material (and one draw) each: `pairs` the sheets' halves, [first leaf, last]. */
+function foldMesh(scene, pairs) {
+  return new THREE.Mesh(new THREE.BufferGeometry(), pairs.map(([a, b]) => foldSheetMaterial(scene, a, b)));
+}
+
 /**
- * The outside of the cover's fold: the front cover's page image from its root back to the
- * fold's apex, then the back cover's from the apex to its root (the strips of them the fold
- * takes: `uFoldStart` of each, as leafShape sets their uStart). The mesh's uv is the way
- * along the fold (0 at the front cover's root, 1 at the back's) and down it (head 0). Page
- * images are stored as sRGB (see PAGE_COLOR_SPACE in scene.js): decoded here as the pages do.
+ * A folded sheet's fold (stitched and sewn books), printed: its two halves' page images where
+ * the fold takes them (the strip of each page from its root to the fold's apex, the uStart
+ * leafShape gives them). Per vertex (`fold`): x where across the page, negative on the first
+ * half (leaf `a`, root to apex), positive on the second (leaf `b`, apex to root); y down it (0
+ * at the head); z the surface: 0 the outside (a's front, b's back: a booklet's cover round its
+ * spine), 1 the inside (a's back, b's front: the centre spread running into the fold), 2 the
+ * cut at head and foot (the ink at the page's edge, both sides, as a leaf's cut shows it, see
+ * EDGE_INK). Page images are stored as sRGB (see PAGE_COLOR_SPACE in scene.js): decoded here
+ * as the pages do. (Until 1.1 only a booklet's cover was printed round its fold; every other
+ * fold was blank paper, at the centre spreads and at the cut: "print not all the way to the
+ * spine", the designer, 2026-10-22.)
  */
-function foldCoverMaterial(scene) {
+function foldSheetMaterial(scene, a, b) {
   const m = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
-  m.defines = { USE_UV: "" };
-  m.userData.uniforms = { uFoldFront: { value: scene.white }, uFoldBack: { value: scene.white }, uFoldStart: { value: 0 } };
+  const W = scene.model.width;
+  const H = scene.model.height;
+  m.userData.uniforms = {
+    uFoldFrontA: { value: scene.white }, uFoldBackA: { value: scene.white },
+    uFoldFrontB: { value: scene.white }, uFoldBackB: { value: scene.white },
+    uFoldEdge: { value: new THREE.Color() },
+    uFoldInset: { value: new THREE.Vector2(EDGE_INSET_MM / W, EDGE_INSET_MM / H) },
+    uFoldInk: { value: EDGE_INK_SHARE },
+  };
+  m.userData.fold = { a, b };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, m.userData.uniforms);
+    shader.vertexShader = patchShader(shader.vertexShader, [
+      ["void main() {", "attribute vec3 fold;\nvarying vec3 vFold;\nvoid main() {\n  vFold = fold;"],
+    ]);
     shader.fragmentShader = patchShader(shader.fragmentShader, [
-      ["void main() {", "uniform sampler2D uFoldFront;\nuniform sampler2D uFoldBack;\nuniform float uFoldStart;\nvoid main() {"],
-      ["#include <map_fragment>", `{
-  float t = vUv.x;
-  vec4 ink = t < 0.5 ? texture2D( uFoldFront, vec2( uFoldStart * ( 1.0 - 2.0 * t ), vUv.y ) )
-                     : texture2D( uFoldBack, vec2( 1.0 - uFoldStart * ( 2.0 * t - 1.0 ), vUv.y ) );
-  diffuseColor *= sRGBTransferEOTF( ink );
-}`],
+      ["void main() {", FOLD_FRAGMENT_HEADER + "void main() {"],
+      ["#include <map_fragment>", FOLD_INK],
+      ["#include <roughnessmap_fragment>", (line) => line + "\n  if ( vFold.z > 1.5 ) roughnessFactor = 1.0;"],
     ]);
   };
-  m.customProgramCacheKey = () => "bookview-fold-cover";
+  m.customProgramCacheKey = () => "bookview-fold-sheet";
+  // Before each draw, not only when the fold is laid out again: the pages' images arrive later.
+  m.onBeforeRender = () => syncFoldSheet(m, scene);
+  m.userData.disposable = true; // the scene's own (see BookScene's dispose)
   return m;
 }
 
-/** The fold's cover material takes the cover pages' images and the cover stock's look, as drawn now. */
-function syncFoldCover(m, scene, book) {
-  const front = scene.leaves[0]?.front;
-  const back = scene.leaves[scene.leaves.length - 1]?.back;
-  if (!front || !back) return;
+const FOLD_FRAGMENT_HEADER = /* glsl */ `
+uniform sampler2D uFoldFrontA;
+uniform sampler2D uFoldBackA;
+uniform sampler2D uFoldFrontB;
+uniform sampler2D uFoldBackB;
+uniform vec3 uFoldEdge;
+uniform vec2 uFoldInset;
+uniform float uFoldInk;
+varying vec3 vFold;
+`;
+// All four read every time: a texture read in a branch has no derivatives to pick its level by.
+const FOLD_INK = /* glsl */ `
+  {
+    bool first = vFold.x < 0.0;
+    vec2 at = clamp( vec2( abs( vFold.x ), vFold.y ), uFoldInset, 1.0 - uFoldInset );
+    vec2 mirrored = vec2( 1.0 - at.x, at.y );
+    vec4 frontA = sRGBTransferEOTF( texture2D( uFoldFrontA, at ) );
+    vec4 backA = sRGBTransferEOTF( texture2D( uFoldBackA, mirrored ) );
+    vec4 frontB = sRGBTransferEOTF( texture2D( uFoldFrontB, at ) );
+    vec4 backB = sRGBTransferEOTF( texture2D( uFoldBackB, mirrored ) );
+    if ( vFold.z > 1.5 ) {
+      vec3 ink = 0.5 * ( first ? frontA.rgb + backA.rgb : frontB.rgb + backB.rgb );
+      diffuseColor.rgb = uFoldEdge * mix( vec3( 1.0 ), ink, uFoldInk );
+    } else {
+      bool inside = vFold.z > 0.5;
+      diffuseColor *= first ? ( inside ? backA : frontA ) : ( inside ? frontB : backB );
+    }
+  }
+`;
+
+/** A fold takes its pages' images and stock as drawn now, and the cut edges' colour. */
+function syncFoldSheet(m, scene) {
+  const { a, b } = m.userData.fold;
+  const A = scene.leaves[a];
+  const B = scene.leaves[b];
+  if (!A || !B) return;
   const u = m.userData.uniforms;
-  u.uFoldFront.value = front.map ?? scene.white;
-  u.uFoldBack.value = back.map ?? scene.white;
-  u.uFoldStart.value = leafShape(book, 0).uStart / book.width;
-  m.color.copy(front.color);
-  m.roughness = front.roughness;
-  m.specularIntensity = front.specularIntensity;
-  m.clearcoat = front.clearcoat;
-  m.clearcoatRoughness = front.clearcoatRoughness;
+  u.uFoldFrontA.value = A.front.map ?? scene.white;
+  u.uFoldBackA.value = A.back.map ?? scene.white;
+  u.uFoldFrontB.value = B.front.map ?? scene.white;
+  u.uFoldBackB.value = B.back.map ?? scene.white;
+  u.uFoldEdge.value.copy((a === 0 ? scene.coverEdgeMat : scene.edgeMat).color);
+  const stock = A.front;
+  m.color.copy(stock.color);
+  m.roughness = stock.roughness;
+  m.specularIntensity = stock.specularIntensity;
+  m.clearcoat = stock.clearcoat;
+  m.clearcoatRoughness = stock.clearcoatRoughness;
 }
+
+/** Across the page at a fold's point j of `segs` (see foldSheetMaterial): `us` the page's share it takes. */
+const foldU = (j, segs, us) => (2 * j < segs ? -us * (1 - (2 * j) / segs) : us * ((2 * j) / segs - 1));
 
 /**
  * Saddle stitch: each sheet is one piece of paper folded round the ones inside it. Its two
  * halves are leaves k and n - 1 - k; between their roots it bends in a U, leaving each
  * root in the direction that leaf starts in, so the paper runs on without a kink. Built as
- * one mesh: outside, inside and the cut edges at head and foot of every sheet's fold.
- * Material groups: 0 the cover's outside (the spine colour), 1 the rest of the cover's
- * fold, 2 the pages'. Returns the outside of the cover's fold and the inside of the centre
- * sheet's, at their middle (for the staples' crowns and legs).
+ * one mesh: outside, inside and the cut edges at head and foot of every sheet's fold, a
+ * material group a sheet (see foldSheetMaterial). Returns the outside of the cover's fold and
+ * the inside of the centre sheet's, at their middle (for the staples' crowns and legs).
  */
 function writeFoldGeometry(geo, leaves, book) {
   const SEGS = 32;
@@ -578,36 +667,33 @@ function writeFoldGeometry(geo, leaves, book) {
   let fold = geo.userData.fold;
   if (fold?.sheets !== sheets) {
     geo.dispose();
-    const groups = [[], [], []];
+    const index = [];
+    geo.clearGroups();
     for (let k = 0; k < sheets; k++) {
       for (let st = 0; st < 4; st++) {
-        const group = k > 0 ? 2 : st === 0 ? 0 : 1;
         const base = k * SHEET + st * 2 * ROW;
         for (let j = 0; j < SEGS; j++) {
           const v = base + 2 * j;
-          groups[group].push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
+          index.push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
         }
       }
+      geo.addGroup(k * 24 * SEGS, 24 * SEGS, k);
     }
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 3), 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 3), 3));
-    geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 2), 2)); // the cover's outside (see foldCoverMaterial)
-    geo.setIndex(groups.flat());
-    geo.clearGroups();
-    let at = 0;
-    groups.forEach((list, g) => {
-      geo.addGroup(at, list.length, g);
-      at += list.length;
-    });
+    geo.setAttribute("fold", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 3), 3)); // see foldSheetMaterial
+    geo.setIndex(index);
     fold = geo.userData.fold = { sheets, roots: new Float64Array(6 * sheets).fill(NaN), box: new Float64Array(4 * sheets), apex: [], xs: new Float64Array(ROW), ys: new Float64Array(ROW), nx: new Float64Array(ROW), ny: new Float64Array(ROW) };
   }
   const pos = geo.attributes.position;
   const nor = geo.attributes.normal;
+  const fl = geo.attributes.fold;
   const { xs, ys, nx: NX, ny: NY } = fold;
   // Two rows of vertices along the fold at heights za and zb (`side`: 1 the outside surface,
   // -1 the inside), quads between them, wound so their front faces the given normal (`nz`
   // for head and foot, else the surface's own): double-sided materials light by winding.
-  const strip = (base, sa, za, sb, zb, nz, flip) => {
+  // Their place on the pages: `kind` and `us` (see foldSheetMaterial).
+  const strip = (base, sa, za, sb, zb, nz, flip, kind, us) => {
     const ax = (j, sd) => xs[j] + NX[j] * sd;
     const ay = (j, sd) => ys[j] + NY[j] * sd;
     const e1 = [ax(0, sb) - ax(0, sa), ay(0, sb) - ay(0, sa), zb - za];
@@ -626,6 +712,8 @@ function writeFoldGeometry(geo, leaves, book) {
       const my = nz ? 0 : NY[j] * flip;
       nor.setXYZ(v, mx, my, nz);
       nor.setXYZ(v + 1, mx, my, nz);
+      fl.setXYZ(v, foldU(j, SEGS, us), (z0 + h2) / (2 * h2), kind);
+      fl.setXYZ(v + 1, foldU(j, SEGS, us), (z1 + h2) / (2 * h2), kind);
     }
   };
   let first = -1;
@@ -678,30 +766,20 @@ function writeFoldGeometry(geo, leaves, book) {
     }
     fold.box.set([x0, y0, x1, y1], 4 * k);
     const base = k * SHEET;
-    strip(base, half, -h2, half, h2, 0, 1); // outside
-    if (k === 0) {
-      // Along the fold (0 at the front cover's root, 1 at the back's) and down it (0 at the head).
-      const uv = geo.attributes.uv;
-      for (let j = 0; j <= SEGS; j++) {
-        const v = base + 2 * j;
-        uv.setXY(v, j / SEGS, (pos.getZ(v) + h2) / (2 * h2));
-        uv.setXY(v + 1, j / SEGS, (pos.getZ(v + 1) + h2) / (2 * h2));
-      }
-      uv.needsUpdate = true;
-    }
-    strip(base + 2 * ROW, -half, h2, -half, -h2, 0, -1); // inside
-    strip(base + 4 * ROW, -half, -h2, half, -h2, -1, 1); // head
-    strip(base + 6 * ROW, half, h2, -half, h2, 1, 1); // foot
+    const us = leafShape(book, k).uStart / book.width;
+    strip(base, half, -h2, half, h2, 0, 1, 0, us); // outside
+    strip(base + 2 * ROW, -half, h2, -half, -h2, 0, -1, 1, us); // inside
+    strip(base + 4 * ROW, -half, -h2, half, -h2, -1, 1, 2, us); // head
+    strip(base + 6 * ROW, half, h2, -half, h2, 1, 1, 2, us); // foot
   }
   if (first >= 0) {
     const from = first * SHEET * 3;
     const count = (last - first + 1) * SHEET * 3;
-    pos.clearUpdateRanges();
-    nor.clearUpdateRanges();
-    pos.addUpdateRange(from, count);
-    nor.addUpdateRange(from, count);
-    pos.needsUpdate = true;
-    nor.needsUpdate = true;
+    for (const attr of [pos, nor, fl]) {
+      attr.clearUpdateRanges();
+      attr.addUpdateRange(from, count);
+      attr.needsUpdate = true;
+    }
     // Round every fold's box (three sorts by it each frame, and picks by it).
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (let k = 0; k < sheets; k++) {
@@ -726,10 +804,6 @@ function writeFoldGeometry(geo, leaves, book) {
  * centre was half a radius past the folds and a fifth of a radius beyond the cut: it hung in
  * the hollow, clear of the block.)
  */
-/** From the signatures' folds to the inside of the case's spine (mm): the hollow, which the bead fills. */
-const CASE_HOLLOW = 1.7;
-/** The covering over a case's thin spine board (mm), flush with the boards' outsides. */
-const CASE_COVER_MM = 1.2;
 const HEADBAND = { beadRadius: CASE_HOLLOW / 2 - 0.02, beadDrop: 0.3, beadOut: 1, tailLength: 12, tailLift: 0.06 };
 
 /** The headband's tail: a strip along `path` (the spine's width) from z0 to z1. */
@@ -763,20 +837,12 @@ function writeSignatureFolds(geo, leaves, book, out) {
   const ROW = SEGS + 1;
   const SHEET = 8 * ROW; // vertices: four strips (outside, inside, head, foot) of two rows
   const h2 = book.height / 2;
-  const n = leaves.length;
-  const sig = book.signatureLeaves;
-  // The sheets: within each signature of the block (the covers or boards, and a hardcover's
-  // flyleaves, apart), the k-th leaf from its front with the k-th from its back.
-  const pairs = [];
-  const blockFirst = book.firstBlockLeaf;
-  for (let a = blockFirst; a < n - blockFirst; a += sig) {
-    const b = Math.min(n - 1 - blockFirst, a + sig - 1);
-    for (let k = 0; a + k < b - k; k++) pairs.push([a + k, b - k]);
-  }
+  const pairs = signatureSheets(book);
   let folds = geo.userData.folds;
   if (folds?.count !== pairs.length) {
     geo.dispose();
     const index = [];
+    geo.clearGroups();
     for (let s = 0; s < pairs.length; s++) {
       for (let st = 0; st < 4; st++) {
         const base = s * SHEET + st * 2 * ROW;
@@ -785,21 +851,25 @@ function writeSignatureFolds(geo, leaves, book, out) {
           index.push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
         }
       }
+      geo.addGroup(s * 24 * SEGS, 24 * SEGS, s); // a material a sheet (see makeSignatureFolds)
     }
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pairs.length * SHEET * 3), 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(pairs.length * SHEET * 3), 3));
+    geo.setAttribute("fold", new THREE.BufferAttribute(new Float32Array(pairs.length * SHEET * 3), 3)); // see foldSheetMaterial
     geo.setIndex(index);
     folds = geo.userData.folds = { count: pairs.length, roots: new Float64Array(6 * pairs.length).fill(NaN) };
   }
   const pos = /** @type {THREE.BufferAttribute} */ (geo.attributes.position);
   const nor = /** @type {THREE.BufferAttribute} */ (geo.attributes.normal);
+  const fl = /** @type {THREE.BufferAttribute} */ (geo.attributes.fold);
   let first = -1;
   let last = -1;
   // Two rows of vertices along a half circle (radius r, centre c, from -e to e through
   // `out`) at offsets sa and sb from it and heights za and zb; quads between them, wound so
   // their front faces `nz` (head and foot) or the surface's own normal, outward (flip 1) or
-  // inward (-1): double-sided materials light by winding.
-  const strip = (base, c, e, r, sa, za, sb, zb, nz, flip) => {
+  // inward (-1): double-sided materials light by winding. Their place on the pages: `kind`
+  // and `us` (see foldSheetMaterial).
+  const strip = (base, c, e, r, sa, za, sb, zb, nz, flip, kind, us) => {
     const at = (j, sd) => {
       const t = (j / SEGS) * Math.PI;
       const ux = -e.x * Math.cos(t) + out.x * Math.sin(t);
@@ -826,6 +896,8 @@ function writeSignatureFolds(geo, leaves, book, out) {
       pos.setXYZ(v + 1, bx, by, z1);
       nor.setXYZ(v, nz ? 0 : ux * flip, nz ? 0 : uy * flip, nz);
       nor.setXYZ(v + 1, nz ? 0 : ux * flip, nz ? 0 : uy * flip, nz);
+      fl.setXYZ(v, foldU(j, SEGS, us), (z0 + h2) / (2 * h2), kind);
+      fl.setXYZ(v + 1, foldU(j, SEGS, us), (z1 + h2) / (2 * h2), kind);
     }
   };
   for (let s = 0; s < pairs.length; s++) {
@@ -845,20 +917,20 @@ function writeSignatureFolds(geo, leaves, book, out) {
     const r = d / 2;
     const half = Math.min(r, book.thickness[i] * LEAF_FILL / 2);
     const base = s * SHEET;
-    strip(base, c, e, r, half, -h2, half, h2, 0, 1); // outside
-    strip(base + 2 * ROW, c, e, r, -half, h2, -half, -h2, 0, -1); // inside
-    strip(base + 4 * ROW, c, e, r, -half, -h2, half, -h2, -1, 1); // head
-    strip(base + 6 * ROW, c, e, r, half, h2, -half, h2, 1, 1); // foot
+    const us = leafShape(book, i).uStart / book.width;
+    strip(base, c, e, r, half, -h2, half, h2, 0, 1, 0, us); // outside
+    strip(base + 2 * ROW, c, e, r, -half, h2, -half, -h2, 0, -1, 1, us); // inside
+    strip(base + 4 * ROW, c, e, r, -half, -h2, half, -h2, -1, 1, 2, us); // head
+    strip(base + 6 * ROW, c, e, r, half, h2, -half, h2, 1, 1, 2, us); // foot
   }
   if (first >= 0) {
     const from = first * SHEET * 3;
     const count = (last - first + 1) * SHEET * 3;
-    pos.clearUpdateRanges();
-    nor.clearUpdateRanges();
-    pos.addUpdateRange(from, count);
-    nor.addUpdateRange(from, count);
-    pos.needsUpdate = true;
-    nor.needsUpdate = true;
+    for (const attr of [pos, nor, fl]) {
+      attr.clearUpdateRanges();
+      attr.addUpdateRange(from, count);
+      attr.needsUpdate = true;
+    }
   }
 }
 
@@ -979,6 +1051,8 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const sign = -mid.ty * ox + mid.tx * oy >= 0 ? 1 : -1;
   const len = [0];
   for (let j = 1; j <= SEGS; j++) len.push(len[j - 1] + Math.hypot(pts[j].x - pts[j - 1].x, pts[j].y - pts[j - 1].y));
+  // Its outside's lengths (mm, along the centre line): each joint's run, and all of it.
+  geo.userData.lengths = { front: len[10], back: len[SEGS] - len[SEGS - 10], all: len[SEGS] };
   const h2 = height / 2;
   const pos = [];
   const nor = [];
@@ -1003,7 +1077,10 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
     }
   };
   const JOINT_SEGS = 10; // each joint run is 11 points (see joint)
-  const outsideGroup = (j) => (j < JOINT_SEGS ? 3 : j >= SEGS - JOINT_SEGS ? 4 : 0);
+  // From a case wrap (book.caseWrap) the outside is the wrap's middle from board to board, joints
+  // included (its artwork, see caseWrapPages in analysis.js); else the joints take the covers'
+  // spine-edge colours and the artwork the spine panel.
+  const outsideGroup = book.caseWrap ? () => 0 : (j) => (j < JOINT_SEGS ? 3 : j >= SEGS - JOINT_SEGS ? 4 : 0);
   // The inside: kraft across the panel and round its corners, endpaper across the joints.
   const insideGroup = (j) => (j >= panelFrom - 7 && j < panelTo + 7 ? 5 : 1);
   const outer = [];
@@ -1026,12 +1103,14 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
     nIn.push([-nx, -ny, 0]);
   }
   const at = (row, z) => row.map(([x, y]) => [x, y, z]);
-  // v: 0 at the head of the page (the squares beyond repeat the artwork's edge rows).
-  const vHead = (h2 - book.height / 2) / -book.height;
-  const vFoot = 1 + (h2 - book.height / 2) / book.height;
-  // u: across the flat spine, measured on its outside (the corners' outsides included).
-  const u0 = len[panelFrom] - (R + tc / 2) * 0.5;
-  const u1 = len[panelTo] + (R + tc / 2) * 0.5;
+  // v: 0 at the head of the page (the squares beyond repeat the artwork's edge rows); a case
+  // wrap's artwork is the boards' height, squares included.
+  const vHead = book.caseWrap ? 0 : (h2 - book.height / 2) / -book.height;
+  const vFoot = book.caseWrap ? 1 : 1 + (h2 - book.height / 2) / book.height;
+  // u: across the flat spine, measured on its outside (the corners' outsides included); a case
+  // wrap's across the whole outside, from the front board's edge to the back's.
+  const u0 = book.caseWrap ? 0 : len[panelFrom] - (R + tc / 2) * 0.5;
+  const u1 = book.caseWrap ? len[SEGS] : len[panelTo] + (R + tc / 2) * 0.5;
   const uAt = (j) => Math.min(1, Math.max(0, (len[j] - u0) / ((u1 - u0) || 1)));
   const uvOut = len.map((_, j) => [[uAt(j), vHead], [uAt(j), vFoot]]);
   strip(outsideGroup, at(outer, -h2), at(outer, h2), nOut, uvOut);

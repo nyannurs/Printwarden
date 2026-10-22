@@ -83,8 +83,8 @@ In manual mode, `resizePage` then makes the page the size you set. The content i
 | Perfect binding | the signature size (default 4) | yes | yes: 4 pages | warns under 32 pages |
 | Sewn binding | the signature size (default 16) | yes | yes | |
 | Hardcover | the signature size (default 16) | yes | yes, the case | adds 4 endpaper pages |
-| Spiral binding | 1 | no | no | punch takes ~9 mm; coil holds ~44 mm |
-| Wire-o binding | 1 | no | no | punch takes ~9 mm; wire holds ~28 mm |
+| Spiral binding | 1 | no | no | punch takes ~9 mm; coil holds ~40 mm |
+| Wire-o binding | 1 | no | no | punch takes ~9 mm; wire holds ~27 mm |
 
 Signature sizes must be a multiple of 4. For perfect, sewn and hardcover books, the PDF's first two and last two pages are the cover's outside and inside. Only the pages between them fold into signatures, and the multiple applies to those.
 
@@ -99,6 +99,8 @@ Signature sizes must be a multiple of 4. For perfect, sewn and hardcover books, 
 - **C2** and **C3**, the inside, from page 2. Without page 2, they are blank paper.
 
 The spine is what is left of the cover's width beyond two pages, up to 80 mm. Wider than that, the cover has flaps: the spine is taken as set (or calculated), and what is left beyond it is two flaps of equal width. The cover's spine is compared with the calculated one in Preflight. Its spine strip becomes the spine's artwork, and its width the spine's.
+
+**A hardcover's cover is a case wrap** (`caseWrapPages`). It is bigger than what shows: a turn-in on every side wraps round the boards' edges and ends under the endpapers. The turn-in is half of what the file's height has beyond the boards' (the pages' height and a 3 mm square above and below, `CASE_SQUARE_MM`). Inside the turn-ins, the boards' faces (the page's width, a square, less the 7 mm joint, `CASE_JOINT_MM`) sit at each end; between them are the joints and the case spine, which is the rest. Preflight compares that spine with the calculated one (within 1 mm) and names the turn-ins. A hardcover's page size is taken from the document, never from the cover (`pageSizeOf`).
 
 ## Imposition: which page goes where
 

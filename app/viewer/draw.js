@@ -148,4 +148,23 @@ export function drawOrder(scene) {
     scene.leaves[i].mesh.renderOrder = -1000 + rank;
     scene.leaves[i].first.renderOrder = -1000 - order.length + rank; // before them all (see makeLeaf)
   });
+  showFlaps(scene);
+}
+
+/**
+ * A cover file's flaps (makeFlap in leaf.js) lie on the insides of the covers, a paper's
+ * thickness off them: just where the first or last page lies on that cover too. Shown only
+ * while their cover's inside is uncovered (the book open at it, or the page beside it in the
+ * air, or the cover itself turning): under the pages the two shared a place and the flap showed
+ * through them, "floating on top a few pages into the book" (the designer, 2026-10-22). (Shown
+ * only for the page beside turning, the flap went while its own cover turned: the author.)
+ */
+function showFlaps(scene) {
+  for (const [folio, mesh] of scene.flaps ?? []) {
+    const k = Math.ceil(folio / 2) - 1; // the cover's leaf; even folios its back, odd its front
+    const back = folio % 2 === 0;
+    const beside = scene.leaves[back ? k + 1 : k - 1];
+    const uncovered = !scene.isClosed && scene.opening === (back ? k + 1 : k);
+    mesh.visible = !!beside && (uncovered || beside.start != null || scene.leaves[k]?.start != null);
+  }
 }

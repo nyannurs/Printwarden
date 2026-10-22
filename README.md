@@ -77,6 +77,6 @@ All the projects Printwarden uses code from are listed in [`CREDITS.md`](CREDITS
 
 ## License
 
-Printwarden is licensed under the Apache License 2.0 (see `LICENSE` and `NOTICE`). The third-party code it includes keeps its own licenses, which are listed in `CREDITS.md`.
+Printwarden is licensed under the GNU Affero General Public License, version 3 or later (see `LICENSE` and `NOTICE`). Releases 1.0.0 and 1.0.1 were under the Apache License 2.0. The third-party code it includes keeps its own licenses, which are listed in `CREDITS.md`.
 
 The release builds include FFmpeg 9.0.2 for ProRes video. It's compiled from the official source with only the parts Printwarden needs and nothing under the GPL, so it's licensed under the LGPL 2.1 or later. Printwarden runs it as a separate program and doesn't modify it. Its license and build notes sit next to it, and the FFmpeg source is attached to each release. FFmpeg is a trademark of Fabrice Bellard. Printwarden is not affiliated with the FFmpeg project.

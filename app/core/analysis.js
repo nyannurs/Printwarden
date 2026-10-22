@@ -7,7 +7,7 @@ import { COVER_BASE } from "./document.js";
 import { layoutFor } from "./imposition.js";
 import { facingPairs } from "./pairing.js";
 import { defaultPaper, paperThicknessMm } from "./paper.js";
-import { calculatedSpine, defaultSpine } from "./spine.js";
+import { calculatedSpine, CASE_JOINT_MM, CASE_SQUARE_MM, defaultSpine } from "./spine.js";
 import { bleedRectFor, setupFromPdf, trimRectFor } from "./setup.js";
 import { rectSize, rotated } from "./units.js";
 import { validate } from "./validate.js";
@@ -72,6 +72,7 @@ function coverPages(cover, page, setup, bookPages) {
   const heightMm = trim.y1 - trim.y0;
   const extra = widthMm - 2 * W;
   const calculatedSpineMm = calculatedSpine(bookPages, setup.paper, setup.binding, setup.boardMm).widthMm;
+  if (setup.binding === Binding.HARDCOVER) return caseWrapPages(cover, c, trim, W, H, widthMm, heightMm, calculatedSpineMm);
   let error = null;
   let spineMm = 0;
   let flapMm = 0;
@@ -106,6 +107,55 @@ function coverPages(cover, page, setup, bookPages) {
   };
 }
 const formatWidth = (v) => (Math.round(v * 10) / 10).toString();
+
+/**
+ * A hardcover's cover file is a case wrap, made bigger than the book: what shows outside (the
+ * boards, the joints and the case spine) with a turn-in all round, which wraps round the
+ * boards' edges and ends under the endpapers. Read as such: the turn-in is half the wrap's
+ * height beyond the boards' (the pages' height and a square above and below), the same on
+ * every side; within it, from the right, the front board's face (from its spine edge, a joint
+ * from the spine, to the square beyond the fore-edge: the page's width, a square, less a
+ * joint), the joints and the case spine between the boards, the back board's face. So the
+ * visible width is two pages, two squares and the case spine, which gives the case spine the
+ * wrap was made for (`spineMm`, checked against the block and boards; the block's thickness is
+ * the paper's, never the wrap's). C1 and C4 are the boards' faces, the spine's artwork the
+ * joints and spine together (`spineRect`); the insides are the endpapers, not the wrap. (Read as
+ * a paperback's cover until 1.1: the turn-ins and joints made a spine 50 mm too wide, the
+ * block as thick, and the boards' print stopped short of their edges.)
+ */
+function caseWrapPages(cover, c, trim, W, H, widthMm, heightMm, calculatedSpineMm) {
+  const boardH = H + 2 * CASE_SQUARE_MM;
+  const turnInMm = Math.max(0, (heightMm - boardH) / 2);
+  const visibleW = widthMm - 2 * turnInMm;
+  const board = W + CASE_SQUARE_MM - CASE_JOINT_MM;
+  const spineMm = visibleW - 2 * W - 2 * CASE_SQUARE_MM;
+  let error = null;
+  if (c.rotation % 360) error = "The cover page is rotated. Export the cover unrotated.";
+  else if (visibleW < 2 * board) error = `The case wrap is ${formatWidth(widthMm)} mm wide, too narrow for two boards of ${formatWidth(W)} mm pages.`;
+  const y0 = trim.y0 + turnInMm;
+  const y1 = trim.y1 - turnInMm;
+  const region = (x, w) => ({ x0: x, y0, x1: x + w, y1 });
+  const back = region(trim.x0 + turnInMm, board);
+  const front = region(trim.x1 - turnInMm - board, board);
+  const spineRect = error ? null : region(trim.x0 + turnInMm + board, visibleW - 2 * board);
+  const cut = (index, rect, label) => ({ ...c, index: COVER_BASE + index, trimBox: rect, bleedBox: c.bleedBox, file: "cover", label });
+  return {
+    pages: [cut(0, front, "C1"), null, null, cut(0, back, "C4")],
+    info: { name: cover.name ?? "cover", pageCount: cover.pages.length, inside: false, widthMm, heightMm, pageHeightMm: H,
+      spineMm, calculatedSpineMm, flapMm: 0, spineRect, frontFlapRect: null, backFlapRect: null, error,
+      caseWrap: true, turnInMm },
+  };
+}
+
+/**
+ * The book's page size (mm): the first page of the document's own that has one. Not a cover
+ * file's: a hardcover's case wrap gives the boards' faces, bigger than the pages.
+ * @param {{geometry: ({size: {width: number, height: number}} | null)[], book: {pages: {source?: {file?: string | null} | null}[]}}} analysis
+ */
+export function pageSizeOf(analysis) {
+  const i = analysis.geometry.findIndex((g, k) => g && analysis.book.pages[k]?.source?.file !== "cover");
+  return (i >= 0 ? analysis.geometry[i] : analysis.geometry.find(Boolean))?.size ?? null;
+}
 
 /**
  * @param {{pages: import("./document.js").SourcePage[], name?: string,

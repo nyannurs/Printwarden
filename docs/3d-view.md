@@ -128,11 +128,15 @@ Pages are shaded as ink on paper (shaders.js):
 
 | Binding | Parts |
 |---|---|
-| Staple binding | Every sheet's fold at the spine, a U drawn from its two halves' roots, each kept inside the fold round it. Two staples: the crown outside, the legs inside, shown only where the center spread's crease opens. The cover's fold carries the cover's print. |
-| Perfect, sewn | A slab at the spine: the outside in the spine's color or artwork, its narrow sides in the spine's tone at each corner, its ends the cover's cut edge. Side glue on the first and last page. |
-| Sewn, hardcover | Signature folds at head and foot: each sheet a U round the ones inside it. A sewn book also shows the threads through each signature's center; a hardcover doesn't draw them. |
-| Hardcover | The case spine: the covering across the joints (a pressed groove), round the corners, across the spine board; the joints in the covers' colors, the spine in its artwork or color, kraft lining inside. Rounded board edges. Headbands: a cord and its cloth tail at head and foot, filling the hollow's mouth. Square or rounded back. |
-| Spiral, wire-o | The coil through the holes, bare metal or coated. |
+| Staple binding | Every sheet's fold at the spine, a U drawn from its two halves' roots, each kept inside the fold round it. Two staples: the crown outside, the legs inside, shown only where the center spread's crease opens. Every fold carries its pages' print (see below). |
+| Perfect, sewn | A slab at the spine, a hair inside the head and foot: the outside in the spine's color or artwork, printed on the cover's stock; its narrow sides take the artwork's edge columns at each corner; its ends the cover's cut edge. Side glue: the cover's first strip lies on the first and last page wherever they go, and the cover hinges where the glue ends. |
+| Sewn, hardcover | Signature folds at head and foot: each sheet a U round the ones inside it. Each signature nests as a booklet does: its pages are printed from the fold, and the block is trimmed as one at the fore-edge (creep). Every fold carries its pages' print. A sewn book also shows the threads through each signature's center; a hardcover doesn't draw them. |
+| Hardcover | The case spine: the covering across the joints (a pressed groove), round the corners, across the spine board, kraft lining inside. From a case wrap (a cover file with turn-ins), its artwork runs from one board's edge to the other's, joints included; otherwise the joints take the covers' colors and the spine its artwork or color. Inside each board, the endpaper pasted down with the cover's turn-in round it. Boards are opaque. Rounded board edges. Headbands: a cord and its cloth tail at head and foot, filling the hollow's mouth. Square or rounded back. |
+| Spiral, wire-o | The coil through the holes, bare metal or coated, sized for the block: about 1.2 mm of coil a millimeter of spiral block, 1.1 of wire-o. |
+
+**Printed folds** (`foldSheetMaterial`): each folded sheet's fold has a material of its own, one draw a sheet, reading its two halves' page images where the fold takes them (the strip of each page between its root and the fold's apex). Its outside shows the first half's front and the second half's back (a booklet's cover round its spine), its inside the first half's back and the second half's front (a center spread running into the fold), and its cut ends at head and foot take the ink at the pages' edge, as a leaf's cut edges do. Sewn folds cast no shadow: they lie inside the slab or the case.
+
+**Flaps** are drawn only while their cover is open to them or turning: folded in, they would stand over the pages beside them.
 
 Meshes rebuilt every frame are written into their own buffers in place (`commitGeometry`). New buffers each frame got new graphics memory that three.js never freed.
 

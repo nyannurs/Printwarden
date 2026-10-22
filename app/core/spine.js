@@ -13,6 +13,14 @@ export const hasSpine = (binding) => binding === Binding.PERFECT || binding === 
 /** Bindings whose spine can carry printed artwork (a stitched fold only a colour). */
 export const spineTakesArtwork = (binding) => binding === Binding.PERFECT || binding === Binding.SEWN || binding === Binding.HARDCOVER;
 
+/**
+ * A hardcover's case (mm), bookbinding's usual: the boards overhang the pages by the square at
+ * head, foot and fore-edge, and their spine edges lie a joint's width from the block's spine.
+ * The 3D book is built with these (model.js) and a case wrap file read with them (analysis.js).
+ */
+export const CASE_SQUARE_MM = 3;
+export const CASE_JOINT_MM = 7;
+
 /** A hardcover's boards (mm) unless set: 2 mm greyboard, the usual weight, plus its covering. */
 export const BOARD_MM = 2.5;
 

@@ -68,7 +68,8 @@ const DEFAULT_SIGNATURE = { perfect: 4, sewn: 16, hardcover: 16 };
  *   minPagesHint?: number, maxPagesHint?: number, maxThicknessMm?: number, innerEdgeLossMm: number,
  * }} BindingRule
  * maxThicknessMm: the thickest block the largest coil made takes (plastic spiral 50 mm
- * across, about 44 mm of block; wire-o 1 1/4 inch, about 28 mm).
+ * across, about 40 mm of block; wire-o 1 1/4 inch, about 27 mm: the size charts, as the 3D
+ * coil is sized, see model.js).
  * @returns {BindingRule}
  */
 export function ruleFor(binding, signaturePages = null) {
@@ -95,9 +96,9 @@ export function ruleFor(binding, signaturePages = null) {
       };
     }
     case Binding.SPIRAL:
-      return { binding, pageMultiple: 1, signaturePages: null, coverPages: 0, innerEdgeLossMm: 9, maxThicknessMm: 44 };
+      return { binding, pageMultiple: 1, signaturePages: null, coverPages: 0, innerEdgeLossMm: 9, maxThicknessMm: 40 };
     case Binding.WIRE_O:
-      return { binding, pageMultiple: 1, signaturePages: null, coverPages: 0, innerEdgeLossMm: 9, maxThicknessMm: 28 };
+      return { binding, pageMultiple: 1, signaturePages: null, coverPages: 0, innerEdgeLossMm: 9, maxThicknessMm: 27 };
     default:
       throw new Error(`Unknown binding ${binding}`);
   }

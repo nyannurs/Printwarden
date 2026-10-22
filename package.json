@@ -1,7 +1,7 @@
 {
   "name": "printwarden-dev",
   "private": true,
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-or-later",
   "description": "Development checks only (lint, types). The app itself has no build step; the desktop shell is in _build/.",
   "type": "module",
   "scripts": {

@@ -357,7 +357,7 @@ export class BookScene {
   /**
    * Build the book.
    * @param {{pageCount: number, pageSize: {width: number, height: number}, binding: string,
-   *          signaturePages?: number | null, boardMm?: number | null, endpapers?: boolean, roundSpine?: boolean,
+   *          signaturePages?: number | null, boardMm?: number | null, endpapers?: boolean, roundSpine?: boolean, glueMm?: number, caseWrap?: boolean,
    *          paper: {color: string, roughness: number, clearcoat: number, show: number,
    *                  thickness: number, coverThickness: number, specular?: number, gsm?: number,
    *                  finish?: string, cover?: object}}} spec
@@ -378,6 +378,8 @@ export class BookScene {
       boardMm: spec.boardMm ?? null,
       endpapers: !!spec.endpapers,
       roundSpine: !!spec.roundSpine,
+      glueMm: spec.glueMm ?? 0,
+      caseWrap: !!spec.caseWrap,
     });
     this.pageCount = spec.pageCount;
     this.signatureLeaves = Math.max(1, (spec.signaturePages ?? 16) / 2);
@@ -436,7 +438,14 @@ export class BookScene {
       const flyleaf = cased && this.model.firstBlockLeaf === 2 && (leaf.i === 1 || leaf.i === n - 2);
       apply(leaf.front, flyleaf || (inside && leaf.i > 0) ? endpaper : stock);
       apply(leaf.back, flyleaf || (inside && leaf.i === 0) ? endpaper : stock);
+      if (inside) {
+        // A board is greyboard: nothing printed on one side shows on the other (the cover's
+        // print showed faintly on the endpaper inside, the designer's hardcover).
+        leaf.front.userData.uniforms.uShow.value = 0;
+        leaf.back.userData.uniforms.uShow.value = 0;
+      }
     }
+    this.#syncTurnIns();
     this.edgeMat.color.set(this.paper.color).multiplyScalar(0.9);
     this.sheetFiller.color.set(this.paper.color);
     for (const leaf of this.leaves ?? []) for (const f of leaf.fillers ?? []) f.color.copy(this.sheetFiller.color).multiplyScalar(0.9);
@@ -445,6 +454,7 @@ export class BookScene {
     this.liningMat.color.set(endpaper.color).multiplyScalar(0.95); // the endpaper across a hardcover's joint, in its shade
     this.liningMat.roughness = this.paper.roughness;
     this.#syncSheetEdges();
+    this.#syncSpineStock(); // artwork on the spine is printed on the cover stock
     this.dirty = true;
   }
 
@@ -606,9 +616,6 @@ export class BookScene {
     this.backWrapMat.color.set(backEdge);
     this.#syncSheetEdges();
     const old = this.spineMat.map;
-    const [frontTone, backTone] = artwork ? edgeTones(artwork) : [color, color];
-    this.spineSideFrontMat.color.set(frontTone);
-    this.spineSideBackMat.color.set(backTone);
     if (artwork) {
       // The same artwork as shown (spineFace draws it once per artwork and turn): kept on the GPU.
       if (old?.image !== artwork) {
@@ -618,16 +625,53 @@ export class BookScene {
         tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
         this.spineMat.map = tex;
       }
-      this.spineMat.color.set(0xffffff);
     } else {
       this.spineMat.map = null;
-      this.spineMat.color.set(color);
     }
+    this.spineColor = color;
+    // The spine's corners, where the cover folds round onto it: the artwork's own edge there,
+    // row by row (the slab's side faces take its edge columns, see makeExtras), or the colour.
+    // One averaged tone (to 1.0) drew a spine teal at the head and olive at the foot as a
+    // green line the length of the corner (the designer's book).
+    for (const m of [this.spineSideFrontMat, this.spineSideBackMat]) {
+      const had = m.map;
+      m.map = this.spineMat.map;
+      if (!had !== !m.map) m.needsUpdate = true;
+    }
+    this.#syncSpineStock();
+    this.#syncTurnIns();
     if (old !== this.spineMat.map) {
       old?.dispose();
       this.spineMat.needsUpdate = true; // with or without a map: a different shader
     }
     this.dirty = true;
+  }
+
+  /**
+   * A hardcover board's inside: the endpaper pasted down, the page's size; round it on the
+   * squares, the cover's turn-in, in the cover's colour at its spine edge (the wrap colours).
+   * Without it the board's inside was endpaper to its edges: "naked" (the designer).
+   */
+  #syncTurnIns() {
+    const cased = this.model?.style.spine === "case" && this.leaves.length > 1;
+    const n = this.leaves.length;
+    for (const leaf of this.leaves ?? []) {
+      for (const [m, wrap] of [[leaf.front, cased && leaf.i === n - 1 ? this.backWrapMat : null], [leaf.back, cased && leaf.i === 0 ? this.frontWrapMat : null]]) {
+        const t = m.userData.uniforms.uTurnIn?.value;
+        if (!t) continue;
+        if (wrap) t.set(wrap.color.r, wrap.color.g, wrap.color.b, 1);
+        else t.set(0, 0, 0, 0);
+      }
+    }
+  }
+
+  /**
+   * Spine artwork is printed on the cover's stock: its paper shows the cover colour (a pink
+   * cover's unprinted spine is pink, as the cover's own pages are). A spine colour is as set.
+   */
+  #syncSpineStock() {
+    const stock = this.spineMat.map ? this.paper.cover.color : this.spineColor ?? this.paper.cover.color;
+    for (const m of [this.spineMat, this.spineSideFrontMat, this.spineSideBackMat]) m.color.set(stock);
   }
 
   /** Closed, or closing (including via opening first, to close on the other cover). */
@@ -1327,7 +1371,11 @@ export class BookScene {
     this.sheets = null;
     if (this.extras) {
       this.block.remove(this.extras.group);
-      this.extras.group.traverse((o) => /** @type {THREE.Mesh} */ (o).geometry?.dispose());
+      this.extras.group.traverse((o) => {
+        const mesh = /** @type {THREE.Mesh} */ (o);
+        mesh.geometry?.dispose();
+        for (const m of [mesh.material ?? []].flat()) if (m.userData.disposable) m.dispose(); // a fold's (see foldSheetMaterial)
+      });
       this.extras = null;
     }
   }
@@ -1742,15 +1790,6 @@ function isAppleMetal(renderer) {
  * The mean colour of an artwork's first and last columns (u 0: the front cover's side of a
  * spine, u 1: the back's), as CSS colours: the spine's tone where it folds round each corner.
  */
-function edgeTones(artwork) {
-  const c = new OffscreenCanvas(2, 1);
-  const ctx = c.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(artwork, 0, 0, 1, artwork.height, 0, 0, 1, 1);
-  ctx.drawImage(artwork, artwork.width - 1, 0, 1, artwork.height, 1, 0, 1, 1);
-  const d = ctx.getImageData(0, 0, 2, 1).data;
-  return [0, 4].map((k) => `rgb(${d[k]}, ${d[k + 1]}, ${d[k + 2]})`);
-}
-
 /** An 8-bit sRGB value's linear light (see sampleUnder). */
 const SRGB_TO_LINEAR = Float32Array.from({ length: 256 }, (_, i) => {
   const c = i / 255;

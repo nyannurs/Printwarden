@@ -5,7 +5,7 @@
 import * as THREE from "three";
 import { HOLE_OFFSET_MM, leafShape } from "./model.js";
 import {
-  EDGE_FRAGMENT_HEADER, EDGE_INK,
+  EDGE_FRAGMENT_HEADER, EDGE_INK, EDGE_INK_SHARE, EDGE_INSET_MM,
   FINISH_FRAGMENT, FINISH_HIGHLIGHT, FINISH_REFLECTION, HOLE_DISCARD, LEAF_FILL, LEAF_ROWS, MAX_DETAIL, MID_ROW,
   OTHER_ROWS, PAGE_FRAGMENT_HEADER, PAGE_MAP_FRAGMENT, PAPER_ROLLOFF, patchShader, sheetShader, SHOW_THROUGH,
 } from "./shaders.js";
@@ -59,13 +59,26 @@ export function makeLeaf(scene, i) {
   const uv = new Float32Array(vCount * 2);
   const w = scene.model.width;
   const h = scene.model.height;
+  // A hardcover board's outside from a case wrap (model.caseWrap): the image is the board's whole
+  // face (from its spine edge to the square beyond the fore-edge, head to foot with the squares,
+  // see caseWrapPages in analysis.js), over the rigid board and the rounded edges round it. The
+  // front board's outside is its front, the back board's its back; their insides keep the page's
+  // place (the endpaper pasted down, see the turn-in in the page shader).
+  const st = scene.model.style;
+  const wrapped = size.board && scene.model.caseWrap;
+  const faceW = scene.model.width + st.square - st.joint;
+  const faceH = scene.model.height + 2 * st.square;
+  const outsideFront = wrapped && i === 0;
+  const outsideBack = wrapped && i === scene.model.leafCount - 1;
   for (let k = 0; k < n; k++) {
     const u = (size.uStart + size.s[k]) / w;
+    const uw = size.s[k] / faceW;
     for (let r = 0; r < R; r++) {
       // v = 0 at the head: page images are ImageBitmaps, uploaded without flipping.
       const v = (size.height * (r / (R - 1)) - (size.height - h) / 2) / h;
-      uv.set([u, v], (k * R + r) * 2); // front
-      uv.set([1 - u, v], (n * R + k * R + r) * 2); // back, mirrored to read from its side
+      const vw = (size.height * (r / (R - 1)) + (faceH - size.height) / 2) / faceH;
+      uv.set(outsideFront ? [uw, vw] : [u, v], (k * R + r) * 2); // front
+      uv.set(outsideBack ? [1 - uw, vw] : [1 - u, v], (n * R + k * R + r) * 2); // back, mirrored to read from its side
     }
   }
   geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
@@ -299,6 +312,7 @@ function pageMaterial(scene, isFront, holesOf = null) {
     uSmallOn: { value: 0 },
     uGlue: { value: 0 }, // side glue and the score: see setPageGlue, setCoverScore
     uScore: { value: 0 },
+    uTurnIn: { value: new THREE.Vector4(0, 0, 0, 0) }, // a board's inside: the cover's turn-in round the endpaper (setPaper)
   };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, m.userData.uniforms, scene.shared);
@@ -491,10 +505,6 @@ export function pageHit(model, leaf, ray, front, near = 0, far = Infinity) {
   }
   return hit;
 }
-
-// How far in from the page's edge its ink is read (mm), and how much of it the cut shows.
-const EDGE_INSET_MM = 0.3;
-const EDGE_INK_SHARE = 0.85;
 
 /**
  * A sheet's cut edges (head, foot, fore-edge): the paper's edge colour (`base`, the shared

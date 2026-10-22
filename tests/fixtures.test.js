@@ -117,6 +117,14 @@ const px = (f, xMm, yMmFromTop) => {
   return [f.data[k], f.data[k + 1], f.data[k + 2]];
 };
 
+test("fixtures: spot-image.pdf: an image in a spot ink is drawn as the ink, as bright as the flat fill beside it", async () => {
+  const f = await draw("spot-image.pdf", 0, false);
+  const [fr, fg, fb] = px(f, 40, 210 - 110);
+  const [ir, ig, ib] = px(f, 108, 210 - 110);
+  ok(fr > 200 && fg < 130, `the flat fill is pink (${fr}, ${fg}, ${fb})`);
+  ok(Math.abs(ir - fr) <= 3 && Math.abs(ig - fg) <= 3 && Math.abs(ib - fb) <= 3, `the image the same (${ir}, ${ig}, ${ib}), not the tint transform's mauve`);
+});
+
 test("fixtures: overprint.pdf: shown, the overprinting yellow box turns green on the cyan panel; ignored, it stays yellow; the knockout box yellow either way", async () => {
   const shown = await draw("overprint.pdf", 0, true);
   const ignored = await draw("overprint.pdf", 0, false);

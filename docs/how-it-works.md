@@ -37,7 +37,7 @@ Outside `app/`:
 |---|---|
 | `index.html` | The window's markup and its strict content policy. |
 | `app/styles.css`, `app/theme.css` | The look. |
-| `vendor/` | The outside libraries, exactly as released, plus their licenses. pdf.js is patched in five lines by `tools/patch-pdfjs.py` (see [PDFs](pdf.md)). |
+| `vendor/` | The outside libraries, exactly as released, plus their licenses. pdf.js is patched in eight lines by `tools/patch-pdfjs.py` (see [PDFs](pdf.md)). |
 | `_build/` | The Electron shell and the build scripts. |
 | `tests/` | The browser test suite. |
 | `tools/` | Development tools: smoke runs, the geometry proof, render comparisons, the test documents' generators. |

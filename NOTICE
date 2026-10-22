@@ -3,10 +3,18 @@ Copyright 2026 Ramin Strauss
 
 Designed by Ramin Strauss. Built with Claude.
 
+Printwarden is free software: you can redistribute it and/or modify it under the
+terms of the GNU Affero General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. See LICENSE for the license, or <https://www.gnu.org/licenses/>.
+(Releases 1.0.0 and 1.0.1 were under the Apache License 2.0.)
+
 Printwarden includes software from others under their own licenses: see CREDITS.md,
 and in the app, About > Licenses.
 
 Printwarden includes the ISO Coated v2 (ECI) color profile (vendor/icc/):
 Copyright 2026 by European Color Initiative, www.eci.org. Distributed by permission
-of the European Color Initiative; not covered by the Apache License (see
+of the European Color Initiative; not covered by the GNU Affero General Public License (see
 vendor/icc/README.txt).

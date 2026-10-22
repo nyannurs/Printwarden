@@ -122,6 +122,8 @@ async function clientBook(analysis, heightPx, progress) {
       boardMm: m.boardMm ?? null,
       endpapers: !!m.endpapers,
       roundSpine: !!m.roundSpine,
+      glueMm: m.glueMm ?? 0,
+      caseWrap: !!m.caseWrap,
       paper: {
         ...scene.paper,
         thickness: m.thickness.find((_, i) => i > 0 && i < m.leafCount - 1) ?? m.thickness[0],

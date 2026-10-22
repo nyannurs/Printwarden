@@ -5,7 +5,7 @@ Copyright 2026 by European Color Initiative, www.eci.org
 
 Distributed with Printwarden by permission of the European Color Initiative (ECI),
 granted to Ramin Strauss on 2026-10-13. This file is not covered by Printwarden's
-Apache License: the ECI's terms apply. The ECI gives no warranty that the profile
+GNU Affero General Public License: the ECI's terms apply. The ECI gives no warranty that the profile
 meets any requirements and accepts no liability for its use.
 
 Source:    European Color Initiative, https://www.eci.org (Downloads)

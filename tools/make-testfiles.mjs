@@ -12,10 +12,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   cmyk, degrees, PDFDocument, PDFName, popGraphicsState, pushGraphicsState, rgb, setGraphicsState, StandardFonts,
-  concatTransformationMatrix, drawObject,
+  concatTransformationMatrix, drawObject, PDFNumber, PDFOperator,
 } from "pdf-lib";
 import { defaultPaper } from "../app/core/paper.js";
-import { BOARD_MM, calculatedSpine } from "../app/core/spine.js";
+import { BOARD_MM, calculatedSpine, CASE_JOINT_MM, CASE_SQUARE_MM } from "../app/core/spine.js";
 import { mmToPt } from "../app/core/units.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -191,6 +191,38 @@ async function coverFile({ spineMm, flapMm = 0, inside = true, height = H, name,
   return doc.save();
 }
 
+/**
+ * A hardcover's case wrap, as a printer wants it: the boards, the joints and the case spine
+ * that show outside, with a turn-in all round (it wraps round the boards' edges and ends under
+ * the endpapers). Visible: two boards' faces (the page's width, a square, less a joint each),
+ * the joints and spine between (the case spine and a joint on either side), the boards' height
+ * (the pages' and a square above and below). See caseWrapPages in app/core/analysis.js.
+ */
+async function caseWrap({ spineMm, turnInMm = 15, name, note }) {
+  const doc = await newDoc();
+  const fonts = await fontsOf(doc);
+  const board = W + CASE_SQUARE_MM - CASE_JOINT_MM;
+  const visibleW = 2 * W + 2 * CASE_SQUARE_MM + spineMm;
+  const visibleH = H + 2 * CASE_SQUARE_MM;
+  const width = visibleW + 2 * turnInMm;
+  const height = visibleH + 2 * turnInMm;
+  const page = addPage(doc, { width, height });
+  const t = turnInMm;
+  box(page, 0, 0, width, height, cmyk(0, 0, 0, 0.3)); // the turn-ins
+  box(page, t, t, board, visibleH, cmyk(0, 0.7, 0.6, 0.1)); // the back board
+  box(page, t + board, t, visibleW - 2 * board, visibleH, cmyk(0, 0, 0, 0.9)); // joints and spine
+  box(page, t + visibleW - board, t, board, visibleH, cmyk(0.7, 0.2, 0, 0.1)); // the front board
+  text(page, fonts.bold, "BACK BOARD (C4)", t + 14, t + visibleH / 2, 18, { color: PAPER });
+  text(page, fonts.bold, "FRONT BOARD (C1)", t + visibleW - board + 14, t + visibleH / 2, 18, { color: PAPER });
+  text(page, fonts.regular, name, t + visibleW - board + 14, t + visibleH / 2 - 10, 9, { color: PAPER });
+  text(page, fonts.regular, note, t + visibleW - board + 14, t + visibleH / 2 - 16, 7, { color: PAPER });
+  const sx = t + W + CASE_SQUARE_MM + spineMm / 2;
+  text(page, fonts.bold, `SPINE ${spineMm} mm, head this way >`, sx + 1.4, t + visibleH - 20, Math.min(10, spineMm * 3), { color: PAPER, rotate: -90 });
+  text(page, fonts.regular, `turn-in ${turnInMm} mm`, 4, 4, 7, { color: INK });
+  headMark(page, fonts.regular, width, height);
+  return doc.save();
+}
+
 /** Spine artwork on its own: the spine's size, an arrow to the head, text reading down. */
 async function spineArt(widthMm, heightMm, name) {
   const doc = await newDoc();
@@ -260,6 +292,55 @@ async function overprint() {
   text(page, fonts.regular, "black", 16, 74, 6, { color: PAPER });
   text(page, fonts.regular, "black either way", W / 2 + 6, 74, 6, { color: PAPER });
   text(page, fonts.regular, "The choice is remembered: quit and start again, it should be as left.", 10, 50, 7);
+  for (let n = 2; n <= 4; n++) bookPage(doc, fonts, n, 4, { label: n === 4 ? "Back cover (page 4)" : null });
+  return doc.save();
+}
+
+/**
+ * A spot colour twice: left a flat fill, right an image in the same ink, as Photoshop exports a
+ * monotone or a spot channel (a one-ink DeviceN, NChannel, the ink defined under /Colorants)
+ * with Photoshop's tint transform, which halves the ink's chroma. Drawn as the ink (Acrobat,
+ * and pdf.js as patched, see tools/patch-pdfjs.py), both halves are the same pink; by the tint
+ * transform the image is dull mauve (the designer's spot test).
+ */
+async function spotImage() {
+  const doc = await newDoc();
+  const fonts = await fontsOf(doc);
+  const ctx = doc.context;
+  const lab = ctx.obj([PDFName.of("Lab"), { WhitePoint: [0.9642, 1, 0.8249], Range: [-128, 127, -128, 127] }]);
+  const ink = PDFName.of("Rubine Test");
+  const separation = ctx.register(ctx.obj([PDFName.of("Separation"), ink, lab,
+    { FunctionType: 2, Domain: [0, 1], C0: [100, 0, 0], C1: [60.39, 57, 10], N: 1, Range: [0, 100, -128, 127, -128, 127] }]));
+  // Photoshop's: L as the ink's, a and b each half of it ({t} -> {100 - 39.6t, 28.5t, 5t}).
+  const tint = ctx.register(ctx.stream("{ dup -39.61 mul 100 add exch dup 28.5 mul exch 5 mul }",
+    { FunctionType: 4, Domain: [0, 1], Range: [0, 100, -128, 127, -128, 127] }));
+  const nchannel = ctx.obj({ Subtype: "NChannel", Colorants: ctx.obj({ "Rubine Test": separation }) });
+  const deviceN = ctx.obj([PDFName.of("DeviceN"), ctx.obj([ink]), lab, tint, nchannel]);
+  const image = ctx.register(ctx.stream(new Uint8Array(64).fill(255), {
+    Type: "XObject", Subtype: "Image", Width: 8, Height: 8, BitsPerComponent: 8, ColorSpace: deviceN,
+  }));
+  const page = addPage(doc);
+  page.node.setXObject(PDFName.of("ImSpot"), image);
+  const res = page.node.Resources();
+  res.set(PDFName.of("ColorSpace"), ctx.obj({ CSspot: separation }));
+  const at = (mm) => mmToPt(mm);
+  page.pushOperators(
+    pushGraphicsState(),
+    PDFOperator.of("cs", [PDFName.of("CSspot")]),
+    PDFOperator.of("scn", [PDFNumber.of(1)]),
+    PDFOperator.of("re", [at(10), at(60), at(60), at(100)].map((v) => PDFNumber.of(v))),
+    PDFOperator.of("f"),
+    popGraphicsState(),
+    pushGraphicsState(),
+    concatTransformationMatrix(at(60), 0, 0, at(100), at(78), at(60)),
+    drawObject("ImSpot"),
+    popGraphicsState(),
+  );
+  text(page, fonts.bold, "spot-image", 10, H - 25, 20);
+  text(page, fonts.regular, "Left: the spot colour as a flat fill. Right: an image in the same ink, as Photoshop exports a monotone.", 10, H - 33, 7);
+  text(page, fonts.regular, "Both halves should be the same bright pink, as Acrobat shows them; a dull right half is the ink's tint transform.", 10, H - 39, 7);
+  text(page, fonts.bold, "FLAT", 12, 52, 9);
+  text(page, fonts.bold, "IMAGE", 80, 52, 9);
   for (let n = 2; n <= 4; n++) bookPage(doc, fonts, n, 4, { label: n === 4 ? "Back cover (page 4)" : null });
   return doc.save();
 }
@@ -343,15 +424,20 @@ async function main() {
     "cover-36-flaps.pdf": () => coverFile({ spineMm: spinePerfect, flapMm: 80, name: "cover-36-flaps: 80 mm flaps", note: "flaps fold in over the inside covers (C2, C3)" }),
     "cover-36-wrong-spine.pdf": () => coverFile({ spineMm: 6, name: "cover-36-wrong-spine: a 6 mm spine", note: `the book needs ${spinePerfect} mm: Preflight should say so` }),
     "cover-36-outside-only.pdf": () => coverFile({ spineMm: spinePerfect, inside: false, name: "cover-36-outside-only: one page", note: "no inside page: C2 and C3 unprinted" }),
-    "cover-36-hardcover.pdf": () => coverFile({ spineMm: spineHardcover, height: H + 6, name: "cover-36-hardcover: for book-36 as a hardcover, 2.5 mm boards", note: `spine ${spineHardcover} mm, 6 mm taller (3 mm squares)` }),
+    "cover-36-hardcover.pdf": () => caseWrap({ spineMm: spineHardcover, name: "cover-36-hardcover: a case wrap for book-36, 2.5 mm boards", note: `case spine ${spineHardcover} mm, 15 mm turn-ins, 3 mm squares` }),
     "spine-36.pdf": () => spineArt(spineArtMm, H, "spine-36"),
     "spine-36-too-wide.pdf": () => spineArt(12, H, "spine-36-too-wide (12 mm)"),
     "finish-covers.pdf": finishCovers,
     "overprint.pdf": overprint,
+    "spot-image.pdf": spotImage,
     "colour-profiles.pdf": () => colourProfiles({ intent: false }),
     "colour-profiles-intent.pdf": () => colourProfiles({ intent: true }),
   };
+  // `node tools/make-testfiles.mjs a.pdf b.pdf`: only those (every file is dated, so making all
+  // of them changes all of them).
+  const only = process.argv.slice(2);
   for (const [name, make] of Object.entries(files)) {
+    if (only.length && !only.includes(name)) continue;
     const bytes = await make();
     await fs.writeFile(path.join(OUT, name), bytes);
     console.log(`${name.padEnd(28)} ${(bytes.length / 1024).toFixed(0).padStart(6)} KB`);

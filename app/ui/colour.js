@@ -2,6 +2,7 @@
 // last chosen, for every file until another is; until one is, the PDF's output intent if it has
 // one, else the one included.
 
+import { pageSizeOf } from "../core/analysis.js";
 import { listCmykProfiles, readProfile } from "../platform.js";
 import { filmstrip, inspector, scene, startRenderers, state } from "./app.js";
 import { forgetThumbnails, loadAllTextures } from "./pages.js";
@@ -111,7 +112,7 @@ function rerender() {
       applySpine();
     }, (err) => console.error(err));
   }
-  filmstrip.render(state.analysis, state.analysis.geometry.find(Boolean)?.size ?? { width: 148, height: 210 });
+  filmstrip.render(state.analysis, pageSizeOf(state.analysis) ?? { width: 148, height: 210 });
   filmstrip.setActive(scene.opening);
   loadAllTextures();
 }

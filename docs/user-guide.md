@@ -22,7 +22,7 @@ The **Import PDF** dialog asks three things.
 2. **This PDF contains:**
    - **Pages**: single pages or spreads, in reading order. This is a normal InDesign export.
    - **Imposed sheets**: printer spreads in press order, for example from InDesign's Print Booklet or from Printwarden's own export. Printwarden folds them back into a book, so a wrong imposition shows as pages out of place. For imposed sheets, choose how they are **Folded as** (a binding) and the **Signatures** size.
-3. **Cover** (perfect, sewn and hardcover books): an optional separate cover file, as it goes to the printer. Page 1 is the outside as one spread: back cover, spine, front cover, and flaps beyond them if it has any. An optional page 2 is the inside. Printwarden takes the spine width from it and shows the flaps folded in.
+3. **Cover** (perfect, sewn and hardcover books): an optional separate cover file, as it goes to the printer. Page 1 is the outside as one spread: back cover, spine, front cover, and flaps beyond them if it has any. An optional page 2 is the inside. Printwarden takes the spine width from it and shows the flaps folded in. A hardcover's cover is the case wrap as the printer wants it, turn-ins included: Printwarden puts the boards' faces and the spine on the case, and the turn-ins round the endpapers inside.
 
 A file exported by Printwarden carries its imposition settings, so the dialog fills itself in.
 
@@ -53,6 +53,7 @@ The buttons over the view:
 - **Left page / Spread / Right page** centers the view on one page or the whole spread. Each press shows the next choice. It has nothing to do while one page shows, closed or at a cover.
 - **Close / Open** closes the book, turning back to the front cover first, or opens it.
 - **Screenshot** and **Video** open their dialogs (see Exports).
+- **Separations** opens a small window beside it, as Acrobat's Output Preview has them: a row per plate (Process plates, Cyan, Magenta, Yellow, Black) with its ink's circle. Click a row to leave that plate out or print it again; Process plates switches the four at once. The rows are muted until the renderer can separate the document into plates (pdf.js can't; the coming MuPDF renderer will).
 
 Below them:
 - **The zoom slider** steps through 50, 75, 100, 125, 150, 200, 300, 400, 600 and 800 %. 100 % is the preset's framing. A preset and a zoom step always frame the book the same way, so mockups are comparable. The wheel zooms freely in between.

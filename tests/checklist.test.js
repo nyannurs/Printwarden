@@ -6,9 +6,9 @@ import { analyse } from "../app/core/analysis.js";
 import { Binding } from "../app/core/binding.js";
 import { defaultPaper } from "../app/core/paper.js";
 import { defaultExportOptions, planSheets } from "../app/core/sheets.js";
-import { calculatedSpine } from "../app/core/spine.js";
+import { calculatedSpine, CASE_JOINT_MM, CASE_SQUARE_MM } from "../app/core/spine.js";
 import { rect } from "../app/core/units.js";
-import { leafShape, makeBook } from "../app/viewer/model.js";
+import { leafShape, makeBook, signatureSheets } from "../app/viewer/model.js";
 import { BookScene } from "../app/viewer/scene.js";
 import { eq, near, ok, test } from "./harness.js";
 
@@ -142,6 +142,52 @@ test("staple: thin booklets get a flatter staple that stays inside the paper; th
     ok(u <= last + 1e-9, `sheet ${i} takes more than the one outside it`);
     last = u;
   }
+});
+
+test("hardcover: the case's covering doesn't stretch as the boards open and close", () => {
+  const { scene, box } = makeScene();
+  try {
+    scene.setBook({ pageCount: 36, pageSize: { width: 148, height: 210 }, binding: "hardcover", paper });
+    const lengths = () => scene.extras.caseSpine.geometry.userData.lengths;
+    scene.clock = 1e6;
+    scene.goTo(0, { animate: false });
+    scene.setClosed(true, { animate: false });
+    scene.debugStep();
+    const shut = lengths().all;
+    let least = shut, most = shut;
+    scene.clock = 1e6 + 500;
+    scene.open();
+    for (let t = 0; t <= 1200; t += 1000 / 120) {
+      scene.clock = 1e6 + 500 + t;
+      scene.debugStep();
+      least = Math.min(least, lengths().all);
+      most = Math.max(most, lengths().all);
+    }
+    ok(most - least < 1.2, `the outside ${least.toFixed(2)} to ${most.toFixed(2)} mm (shut ${shut.toFixed(2)})`);
+  } finally {
+    scene.clock = null;
+    box.remove();
+  }
+});
+
+test("sewn and hardcover: each signature folds as a booklet does, printed from its fold, trimmed together", () => {
+  for (const binding of ["sewn", "hardcover"]) {
+    const book = makeBook({ pageCount: 64, binding, thickness: 0.1, coverThickness: 0.3, width: 148, height: 210, signaturePages: 16 });
+    const sheets = signatureSheets(book);
+    eq(sheets.length, (book.leafCount - 2 * book.firstBlockLeaf) / 2, `${binding}: every block leaf in one sheet`);
+    const [a, b] = sheets[0]; // the first signature's outermost sheet
+    const [c] = sheets[book.signatureLeaves / 2 - 1]; // and its centre
+    const outer = leafShape(book, a);
+    ok(outer.uStart > 0.4, `${binding}: the outer fold takes ${outer.uStart.toFixed(2)} mm of the page`);
+    ok(leafShape(book, c).uStart < outer.uStart / 3, `${binding}: the centre fold less`);
+    near(leafShape(book, b).uStart, outer.uStart, 1e-9, `${binding}: both halves of a sheet alike`);
+    near(outer.uStart + outer.width, 148, 1e-6, `${binding}: the outermost pages reach the trim`);
+    near(leafShape(book, c).width, outer.width, 1e-9, `${binding}: every page as wide (the creep cut off)`);
+    if (binding === "sewn") near(leafShape(book, 0).width, outer.width, 1e-9, "the cover trimmed with the block");
+  }
+  const cased = makeBook({ pageCount: 64, binding: "hardcover", thickness: 0.1, coverThickness: 0.3, width: 148, height: 210 });
+  eq([cased.style.square, cased.style.joint], [CASE_SQUARE_MM, CASE_JOINT_MM], "the case's squares and joints as a case wrap is read");
+  eq(signatureSheets(makeBook({ pageCount: 64, binding: "perfect", thickness: 0.1, coverThickness: 0.3, width: 148, height: 210 })).length, 0, "a glued block has no folds");
 });
 
 test("one book through every binding, deep in it: no error, the opening kept, the shape right", () => {

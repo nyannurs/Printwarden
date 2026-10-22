@@ -77,6 +77,10 @@ float pvSoftShadow( sampler2D map, vec2 mapSize, vec4 sc ) {
 // mirrored), slightly softened (the cut is a fraction of a millimetre, seen edge-on), from
 // the page images as stored (sRGB, see PAGE_COLOR_SPACE in scene.js), and laid on the
 // paper's edge colour as ink is: white leaves it as it is.
+// How far in from the page's edge its ink is read (mm), and how much of it the cut shows.
+export const EDGE_INSET_MM = 0.3;
+export const EDGE_INK_SHARE = 0.85;
+
 export const EDGE_FRAGMENT_HEADER = /* glsl */ `
 uniform sampler2D uEdgeFront;
 uniform sampler2D uEdgeBack;
@@ -221,6 +225,9 @@ uniform float uGlue;
 // (A flap over a page is a sheet of its own, see makeFlap in leaf.js: the page shader is at
 // the texture units a GPU gives a shader, so a flap can't be one more image in it.)
 uniform float uScore;
+// A hardcover board's inside: the endpaper pasted down is the page's size; round it, on the
+// squares at head, foot and fore-edge, the cover's turn-in shows (rgb, its colour; a 1 on).
+uniform vec4 uTurnIn;
 uniform sampler2D uBack;
 uniform sampler2D uSmall;
 uniform float uSmallOn;
@@ -288,6 +295,9 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
   if ( uGlue > 0.0 && glueFrom < uGlue ) sampledDiffuseColor = vec4( 1.0 );
   sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor ); // filtered as stored, see PAGE_COLOR_SPACE
   diffuseColor *= sampledDiffuseColor;
+  if ( uTurnIn.a > 0.5 && ( vMapUv.y < 0.0 || vMapUv.y > 1.0 || ( uSpineAtU0 > 0.5 ? vMapUv.x > 1.0 : vMapUv.x < 0.0 ) ) ) {
+    diffuseColor.rgb = uTurnIn.rgb;
+  }
   // The crease at the glue's edge, the score's groove.
   if ( uGlue > 0.0 ) {
     float d = ( glueFrom - uGlue ) / 0.4;

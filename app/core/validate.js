@@ -201,10 +201,22 @@ function* checkCoverFile({ coverFile: c, setup }) {
     return;
   }
   const off = c.spineMm - c.calculatedSpineMm;
+  if (c.caseWrap) {
+    // A case wrap's spine, against the block and boards (the 3D book keeps the paper's).
+    if (Math.abs(off) > 1) {
+      yield finding("warning", "cover-spine",
+        `The case wrap's spine is ${formatMm(c.spineMm)} mm; the pages, paper and boards add up to ${formatMm(c.calculatedSpineMm)} mm. ` +
+        "Set the paper thickness and board to the printer's, or build the wrap for the printer's spine width.");
+    }
+    yield finding("info", "cover-case-wrap",
+      `A case wrap with ${formatMm(c.turnInMm)} mm turn-ins: its boards, joints and spine are shown, the turn-ins round the boards' edges.`);
+    return;
+  }
   if (c.spineMm > 0.05 && Math.abs(off) > 0.5) {
     yield finding("warning", "cover-spine",
       `The cover file's spine is ${formatMm(c.spineMm)} mm; the pages and paper add up to ${formatMm(c.calculatedSpineMm)} mm. ` +
-      "Set the paper thickness to the printer's, or build the cover for the printer's spine width.");
+      "Set the paper thickness to the printer's, or build the cover for the printer's spine width. " +
+      (c.flapMm > 0.5 ? "A cover with flaps: set the printer's spine width under Book spine, so the flaps are cut where they are." : ""));
   }
   if (setup.binding !== Binding.HARDCOVER && Math.abs(c.heightMm - c.pageHeightMm) > 0.5) {
     yield finding("warning", "cover-height", `The cover is ${formatMm(c.heightMm)} mm tall, the pages ${formatMm(c.pageHeightMm)} mm.`);

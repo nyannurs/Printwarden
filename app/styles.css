@@ -192,8 +192,8 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
   border-left: var(--stroke) solid var(--wire);
 }
 .viewport canvas { display: block; touch-action: none; }
-/* Camera, Left page/Spread/Right page, Open/Close, Screenshot, Video: top right, stacked, a square
-   each; the camera menu to its left. */
+/* Camera, Left page/Spread/Right page, Open/Close, Screenshot, Video, Separations: top right,
+   stacked, a square each; the camera menu and the separations window to their left. */
 .viewport-hud { position: absolute; top: calc(-1 * var(--stroke)); right: calc(-1 * var(--stroke)); display: flex; flex-direction: column; align-items: flex-end; }
 /* Icon pills: a square, the icon's square artboard (app/icons/, 1000 × 1000) at 70 % of it,
    centered, as drawn. Its white is the pill's type colour, its black lets the fill through (a
@@ -240,6 +240,9 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .pill.icon[data-icon="spread"]::before { mask-image: url("icons/spread.svg"); }
 .pill.icon[data-icon="screenshot"]::before { mask-image: url("icons/screenshot.svg"); }
 .pill.icon[data-icon="video"]::before { mask-image: url("icons/video.svg"); }
+/* Separations: no icon yet (the author's, to come: app/icons/plates.svg, then a mask-image line
+   as above); until then the pill is empty. */
+.pill.icon[data-icon="plates"]::before { display: none; }
 .menu { position: relative; }
 .menu-list { position: absolute; top: 0; right: calc(100% - var(--stroke)); display: flex; flex-direction: column; z-index: 5; }
 /* Reading order / Press sheets: bottom left (see filmstrip.js). */
@@ -644,6 +647,67 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .select-item[aria-selected="true"].active { background: var(--ink); color: var(--wire); box-shadow: inset 0 0 0 var(--stroke) var(--wire), inset calc(var(--stroke) + var(--round-extra)) 0 var(--wire), inset calc(-1 * (var(--stroke) + var(--round-extra))) 0 var(--wire); }
 .select-item:disabled { color: var(--wire-muted); cursor: default; }
 .select-item:focus-visible { outline: none; }
+
+/* ---------- separations (plates.js) ---------- */
+/* A window to the Separations button's left, on the grid: its top on the button's line, its
+   right edge on the button's left line (shared, as the camera menu's), four squares wide, a
+   square a row, the rows sharing lines as the HUD's buttons do (so each row's middle is a
+   button's middle). Rounded as a pill, outlined (the outline drawn over the rows, so a row's
+   hover runs to it); rows as a dropdown's items: the one under the pointer a lighter black pill.
+   A row: its ink's circle in the middle of its first square, its name from the second square,
+   in the pills' type. Printing, the circle is filled with the ink (ringed, as the swatches, so
+   black shows on the black); left out, it is an outline in the ink and the name is muted.
+   Process plates: an empty circle, ringed white. */
+.plates-panel {
+  position: absolute;
+  top: 0;
+  right: calc(100% - var(--stroke));
+  z-index: 5;
+  width: calc(4 * var(--u));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ink);
+  border-radius: calc(var(--u) / 2);
+}
+.plates-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: var(--stroke) solid var(--wire);
+  border-radius: inherit;
+  box-shadow: inset var(--round-extra) 0 var(--wire), inset calc(-1 * var(--round-extra)) 0 var(--wire); /* see theme.css */
+  pointer-events: none;
+}
+.plates-panel[hidden] { display: none; }
+.plate-item {
+  --h: var(--u);
+  --dot: var(--control); /* as large as the panel's swatches */
+  position: relative;
+  height: var(--h);
+  padding-left: var(--u);
+  padding-right: round(calc(var(--u) * 0.1), 1px);
+  font-size: var(--type-pill);
+}
+.plates-panel > .plate-item + .plate-item { margin-top: calc(-1 * var(--stroke)); }
+.plate-item:focus-visible { background: var(--ink-raised); }
+/* The circle placed on the square (both even: whole pixels), not by the type's baseline shift,
+   which put it a fraction of a pixel off. */
+.plate-dot {
+  position: absolute;
+  left: calc((var(--u) - var(--dot)) / 2);
+  top: calc((var(--h) - var(--dot)) / 2);
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  border: var(--stroke) solid rgba(0, 0, 0, 0.4); /* ringed as the swatches */
+  background: var(--plate);
+  box-shadow: 0 0 0 var(--stroke) var(--wire-muted);
+}
+.plate-dot.process { border: 0; background: none; box-shadow: inset 0 0 0 var(--stroke) var(--wire); }
+.plate-item[aria-checked="false"] { color: var(--wire-muted); }
+.plate-item[aria-checked="false"] .plate-dot:not(.process) { background: none; box-shadow: inset 0 0 0 calc(2 * var(--stroke)) var(--plate), 0 0 0 var(--stroke) var(--wire-muted); }
+.plate-item[aria-checked="false"] .plate-dot.process { box-shadow: inset 0 0 0 var(--stroke) var(--wire-muted); }
 
 /* ---------- scrollbars ---------- */
 /* An outlined pill along the scroller's edge, a circle for its head (addScrollbar, dom.js),

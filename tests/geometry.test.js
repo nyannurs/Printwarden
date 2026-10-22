@@ -218,8 +218,10 @@ export function states(book) {
   return out;
 }
 
-// A hardcover with a rounded back and its endpaper leaves, as the app makes one, as well.
-const VARIANTS = [...BINDINGS.map((binding) => [binding, {}]), ["hardcover, rounded", { binding: "hardcover", roundSpine: true, endpapers: true }]];
+// A hardcover with a rounded back and its endpaper leaves, as the app makes one, as well; and
+// side-glued paperbacks (the covers hinge at the glue line, see glueCovers in model.js).
+const VARIANTS = [...BINDINGS.map((binding) => [binding, {}]), ["hardcover, rounded", { binding: "hardcover", roundSpine: true, endpapers: true }],
+  ["perfect, side glue", { binding: "perfect", glueMm: 6 }], ["sewn, side glue", { binding: "sewn", glueMm: 6 }]];
 for (const [name, variant] of VARIANTS) {
   for (const pageCount of [16, 44, 120]) {
     test(`geometry: ${name}, ${pageCount} pages: no sheet passes through another`, () => {

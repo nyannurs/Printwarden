@@ -667,7 +667,7 @@ export function aboutDialog({ name, version }) {
 // license, the license text (a file in the app, from its root), or where it is instead.
 // CREDITS.md says what each is used for.
 const LICENSES = [
-  ["Printwarden", "Apache License 2.0", ["NOTICE", "LICENSE"]], // its own, then the others'
+  ["Printwarden", "GNU Affero General Public License 3.0 or later", ["NOTICE", "LICENSE"]], // its own, then the others'
   ["Electron", "MIT", "vendor/licenses/electron.txt"],
   ["Chromium", "BSD 3-Clause and others", null, "Chromium's licenses, and those of the projects it includes, ship with the app: LICENSES.chromium.html (Windows: next to Printwarden.exe; macOS: in Printwarden.app/Contents/Resources/licenses)."],
   ["three.js", "MIT", "vendor/LICENSE.three.txt"],
