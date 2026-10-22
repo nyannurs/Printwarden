@@ -233,12 +233,25 @@ export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 
     const pile = s > 0 ? total - split : split; // paper on that side
     const lift = Math.max(0, book.ground + pile - book.coilOpen.y) * flat;
     const holeY = book.coilOpen.y + R * Math.cos(psi) + Math.sin(t0) * off + lift;
-    const above = Math.max(0, holeY - book.coilOpen.y); // over the centre: the ring is inside its side there
-    const onRing = Math.max(HOLE_OFFSET_MM + 1, Math.sqrt(Math.max(0, R * R - above * above)));
+    // Above or below the centre the ring is inside its side: the hole goes where the wire is at
+    // that height. (Below the centre it stayed at the side until 2026-10-23: a thick pile resting
+    // on the table had the wire through up to 4 mm of paper beside the holes of its lower pages.)
+    // Kept clear of the centre while the other pile has paper (the two piles' strips mustn't meet).
+    const dyRing = Math.min(R, Math.abs(holeY - book.coilOpen.y));
+    const other = s > 0 ? split : total - split;
+    const onRing = Math.max(other > 1e-6 ? HOLE_OFFSET_MM + 1 : 0, Math.sqrt(Math.max(0, R * R - dyRing * dyRing)));
     const holeX = book.coilOpen.x + s * (R - flat * (R - onRing)) + (R * Math.sin(psi) - s * R) - Math.cos(t0) * off;
     const openA = { x: holeX - Math.sin(t0) * HOLE_OFFSET_MM, y: holeY - Math.cos(t0) * HOLE_OFFSET_MM };
     // Closed front up, the first leaf on top; back up (flipped through to the end), the last.
-    const closedA = { x: 0, y: side > 0 ? ground + total - cum[i] : ground + cum[i] };
+    // Each page hangs on the wire: its hole where the ring is at the page's height. The ring
+    // meets the hole line at the covers only; between them it bulges in towards the fore-edge,
+    // so the pages there sit further in (a thick spiral book's spine side is a curve, its
+    // fore-edge bulges). With the spine edges in line, as until 2026-10-23, the wire ran
+    // through up to 4 mm of paper in the middle of an 18 mm block.
+    const closedY = side > 0 ? ground + total - cum[i] : ground + cum[i];
+    const dy = Math.min(R, Math.abs(closedY - book.coilClosed.y));
+    const ringIn = book.coilClosed.x + Math.sqrt(Math.max(0, R * R - dy * dy)); // the ring's inner side at that height
+    const closedA = { x: side * Math.max(0, ringIn - HOLE_OFFSET_MM), y: closedY };
     ax = lerp(openA.x, closedA.x, c);
     ay = lerp(openA.y, closedA.y, c);
     alpha = th;

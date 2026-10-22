@@ -152,6 +152,39 @@ test("closed book: leaves stack flat with the cover on top, thickness adds up", 
   near(top.x[s.length - 1] - top.x[0], 148, 0.01); // full width
 });
 
+test("REGRESSION: closed coil book: every page's hole sits on the wire, closed (either cover up) and open at rest (240 pages, 18 mm block)", async () => {
+  const { coilCentre, HOLE_OFFSET_MM, restingAngle } = await import("../app/viewer/model.js");
+  for (const binding of ["spiral", "wire-o"]) {
+    const book = makeBook({ pageCount: 240, binding, thickness: 0.15, coverThickness: 0.15, width: 148, height: 210 });
+    const s = Float32Array.from([0, HOLE_OFFSET_MM, 20, 148]);
+    for (const side of [1, -1]) {
+      const centre = coilCentre(book, 1, side);
+      let worst = 0;
+      for (let i = 0; i < book.leafCount; i++) {
+        const p = leafProfile(book, i, side * 90, 1, 0, 0, s, undefined, side);
+        const off = Math.hypot(p.x[1] - centre.x, p.y[1] - centre.y) - book.coilRadius; // the hole from the wire's centre line
+        worst = Math.max(worst, Math.abs(off));
+        // The wire inside the ring never reaches past the hole into the page.
+        ok(side * (p.x[0] - centre.x) >= -book.coilRadius - 1e-6, `${binding} leaf ${i}: spine edge outside the ring`);
+      }
+      ok(worst < 0.05, `${binding}, side ${side}: a hole ${worst.toFixed(2)} mm off the wire`);
+    }
+    // Open at rest, at the front cover, a quarter in, the middle and the back: every page's hole
+    // within reach of the wire (its radius less the wire's), none pierced beside it.
+    const reach = book.style.holeRadius - book.style.wire;
+    for (const opening of [0, 1, Math.round(book.leafCount / 4), Math.round(book.leafCount / 2), book.leafCount - 1, book.leafCount]) {
+      const split = opening === 0 ? 0 : book.cum[opening - 1] + book.thickness[opening - 1] / 2;
+      const centre = coilCentre(book, 0);
+      let worst = 0;
+      for (let i = 0; i < book.leafCount; i++) {
+        const p = leafProfile(book, i, restingAngle(book, i, opening), 0, split, 0, s);
+        worst = Math.max(worst, Math.abs(Math.hypot(p.x[1] - centre.x, p.y[1] - centre.y) - book.coilRadius));
+      }
+      ok(worst <= reach, `${binding}, open at ${opening}: a hole ${worst.toFixed(2)} mm off the wire (the hole leaves ${reach.toFixed(2)})`);
+    }
+  }
+});
+
 test("closed at the back cover: back cover on top, lying left of the spine", () => {
   const book = makeBook({ pageCount: 44, binding: "saddle", thickness: 0.15, coverThickness: 0.3, width: 148, height: 210 });
   const s = samples(148);
