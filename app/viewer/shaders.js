@@ -264,8 +264,16 @@ const float PV_TILE_BORDER = ${TILE_BORDER.toFixed(1)};
 const float PV_TILE_SUPER = ${TILE_SUPERSAMPLE.toFixed(3)};
 bool pvTile( vec2 uv, vec2 dx, vec2 dy, out vec4 color ) {
   if ( uTileOn < 0.5 ) return false;
-  float r0 = max( length( dx * uTilePage.xy ), length( dy * uTilePage.xy ) ); // level-0 texels a pixel
-  int need = int( ceil( log2( PV_TILE_SUPER / max( r0, 1e-6 ) ) ) );
+  // Level-0 texels a pixel along the screen's two axes. The level is chosen by the finer of
+  // the two (a page seen at a slant is squeezed one way only: chosen by the squeezed axis, as
+  // until 2026-10-23, the far part fell back to the base image and a hard line ran across the
+  // page where the tiles began), within what the tile's two mips and 8 × anisotropic filtering
+  // can take along the other (4 × 8 = 32 texels a pixel).
+  float ra = length( dx * uTilePage.xy );
+  float rb = length( dy * uTilePage.xy );
+  float rMinor = max( min( ra, rb ), 1e-6 );
+  float rMajor = max( max( ra, rb ), 1e-6 );
+  int need = min( int( ceil( log2( PV_TILE_SUPER / rMinor ) ) ), int( floor( log2( 32.0 / rMajor ) ) ) );
   if ( need < 1 ) return false;
   need = min( need, int( uTilePage.z ) );
   vec2 cuv = clamp( uv, 0.0, 1.0 );
