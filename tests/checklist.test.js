@@ -8,7 +8,7 @@ import { defaultPaper } from "../app/core/paper.js";
 import { defaultExportOptions, planSheets } from "../app/core/sheets.js";
 import { calculatedSpine, CASE_JOINT_MM, CASE_SQUARE_MM } from "../app/core/spine.js";
 import { rect } from "../app/core/units.js";
-import { leafShape, makeBook, signatureSheets } from "../app/viewer/model.js";
+import { HOLE_OFFSET_MM, leafShape, makeBook, signatureSheets } from "../app/viewer/model.js";
 import { BookScene } from "../app/viewer/scene.js";
 import { eq, near, ok, test } from "./harness.js";
 
@@ -194,6 +194,151 @@ test("REGRESSION: a thick hardcover's covering doesn't stretch either (244 pages
     // (Not yet: the whole block flung to the back spread at once, the board riding on the
     // turning first page, stretches the front joint to 17 mm for a tenth of a second.)
     ok(most - least < 1.5, `the outside ${least.toFixed(2)} to ${most.toFixed(2)} mm (shut ${shut.toFixed(2)}; worst ${where})`);
+  } finally {
+    scene.clock = null;
+    box.remove();
+  }
+});
+
+/**
+ * The coil as drawn against every page as drawn: the wire (the coil's tube, sampled every
+ * 0.1 mm or so) never touches paper outside a punched hole, and every hole of every page has the
+ * wire through it. Holes as the page shader cuts them (HOLE_DISCARD): round, or Wire-O's
+ * squares, `pitch` apart, centred on the height, HOLE_OFFSET_MM from the spine edge.
+ * @returns {string[]} what's wrong, at most a few
+ */
+const wireSamples = new WeakMap(); // a coil's path -> its samples (the coil's shape is the book's)
+export function coilFaults(scene, { restingOnly = false } = {}) {
+  const m = scene.model;
+  const style = m.style;
+  const tube = scene.extras.coil.children.find((c) => c.geometry?.parameters?.path);
+  const path = tube.geometry.parameters.path;
+  const at = scene.extras.coil.position;
+  const wire = m.wireRadius;
+  const h = m.height;
+  const loops = Math.max(1, Math.floor((h - 6) / style.pitch));
+  const margin = (h - loops * style.pitch) / 2;
+  const square = !!style.squareHoles;
+  const room = style.holeRadius - wire; // how far the wire's centre may stray from a hole's centre
+  // Evenly in the curve's own parameter, densely (three's arc-length spacing leaves gaps of 1.5 mm
+  // on the Wire-O's joined parts), then thinned to no closer than 0.1 mm.
+  let local = wireSamples.get(path);
+  if (!local) {
+    local = [];
+    for (const q of path.getPoints(Math.ceil(path.getLength() / 0.03))) {
+      const l = local[local.length - 1];
+      if (!l || Math.hypot(q.x - l.x, q.y - l.y, q.z - l.z) >= 0.1) local.push({ x: q.x, y: q.y, z: q.z });
+    }
+    wireSamples.set(path, local);
+  }
+  const pts = local.map((q) => ({ x: q.x + at.x, y: q.y + at.y, z: q.z }));
+  const faults = [];
+  const threaded = new Map(); // `${leaf}:${hole}` -> best offset from the hole's centre
+  const skip = new Set();
+  scene.leaves.forEach((leaf, i) => {
+    // (restingOnly: a page in mid-turn crosses the top of the ring, where a spiral climbs to its
+    // next hole: a real page slides along the wire there, which the model doesn't; the wire is
+    // up to 0.6 mm outside its hole for those frames.)
+    if (restingOnly && Math.abs(leaf.theta - leaf.to) > 0.5) { skip.add(i); return; }
+    const p = leaf.profile;
+    const s = leaf.s;
+    const half = m.thickness[i] / 2;
+    // The page near its spine edge: segments up to 12 mm in.
+    const segs = [];
+    for (let k = 0; k + 1 < s.length && s[k] < 12; k++) segs.push(k);
+    let last = null; // the previous sample's side of this page and hole, for crossings
+    // Only the wire near this page's spine strip (its first 12 mm) can touch it.
+    const k12 = segs.length;
+    const cx0 = (p.x[0] + p.x[k12]) / 2, cy0 = (p.y[0] + p.y[k12]) / 2;
+    const reach = Math.hypot(p.x[k12] - p.x[0], p.y[k12] - p.y[0]) / 2 + wire + half + 0.5;
+    for (const w of pts) {
+      if (Math.abs(w.z) > h / 2 || Math.abs(w.x - cx0) > reach || Math.abs(w.y - cy0) > reach) { last = null; continue; }
+      let best = null;
+      for (const k of segs) {
+        const ax = p.x[k], ay = p.y[k], bx = p.x[k + 1], by = p.y[k + 1];
+        const dx = bx - ax, dy = by - ay;
+        const L2 = dx * dx + dy * dy || 1;
+        const t = Math.min(1, Math.max(0, ((w.x - ax) * dx + (w.y - ay) * dy) / L2));
+        const cx = ax + dx * t, cy = ay + dy * t;
+        const d = Math.hypot(w.x - cx, w.y - cy);
+        if (!best || d < best.d) best = { d, along: s[k] + (s[k + 1] - s[k]) * t, ends: (k === 0 && t === 0), side: Math.sign((w.x - ax) * -dy + (w.y - ay) * dx) };
+      }
+      if (!best || best.ends || best.d > half + wire + 0.3) { last = null; continue; } // clear of this page
+      // The wire is in the paper's plane here: inside a hole?
+      const zFromHead = w.z + h / 2;
+      const hole = Math.min(loops - 1, Math.max(0, Math.floor((zFromHead - margin) / style.pitch)));
+      const zc = margin + (hole + 0.5) * style.pitch;
+      const ds = best.along - HOLE_OFFSET_MM, dz = zFromHead - zc;
+      const off = square ? Math.max(Math.abs(ds), Math.abs(dz)) : Math.hypot(ds, dz);
+      // Threaded: the wire crosses the page's plane (between this sample and the last) within the hole.
+      if (last && last.hole === hole && last.side !== best.side && Math.max(off, last.off) <= room + 0.05) {
+        const key = `${i}:${hole}`;
+        threaded.set(key, Math.min(threaded.get(key) ?? Infinity, off));
+      }
+      last = { side: best.side, hole, off };
+      if (best.d > half + wire) continue;
+      if (off > room + 0.05) {
+        if (faults.length < 6) faults.push(`leaf ${i}: the wire through the paper ${off.toFixed(2)} mm from hole ${hole}'s centre (room ${room.toFixed(2)}), ${best.along.toFixed(1)} mm from the spine edge`);
+      }
+    }
+  });
+  for (let i = 0; i < scene.leaves.length && faults.length < 6; i++) {
+    if (skip.has(i)) continue;
+    for (let k = 0; k < loops; k++) {
+      if (!threaded.has(`${i}:${k}`)) { faults.push(`leaf ${i}: no wire through hole ${k}`); break; }
+    }
+  }
+  return faults;
+}
+
+test("COIL: the wire goes through every punched hole of every page and touches paper nowhere else (spiral, Wire-O; 44 and 240 pages; at rest, closed, and the pages at rest while others turn)", () => {
+  const { scene, box } = makeScene();
+  try {
+    for (const binding of ["spiral", "wire-o"]) {
+      for (const pageCount of [44, 240]) {
+        scene.setBook({ pageCount, pageSize: { width: 148, height: 210 }, binding, paper: { ...paper, thickness: 0.15, coverThickness: 0.15 } });
+        const N = scene.model.leafCount;
+        const check = (label, restingOnly = false) => {
+          const f = coilFaults(scene, { restingOnly });
+          ok(!f.length, `${binding}, ${pageCount} pages, ${label}: ${f.join("; ")}`);
+          return f.length;
+        };
+        scene.clock = 1e6;
+        for (const opening of [0, 1, Math.round(N / 4), Math.round(N / 2), N - 1, N]) {
+          scene.setClosed(false, { animate: false });
+          scene.goTo(opening, { animate: false });
+          scene.debugStep();
+          check(`open at ${opening}`);
+        }
+        scene.goTo(0, { animate: false }); scene.setClosed(true, { animate: false }); scene.debugStep();
+        check("closed, front up");
+        // Opening, then turning to the middle: a frame checked every 100 ms (stop at the first fault).
+        let clock = 1e6 + 500;
+        let prev = null;
+        // Every frame: no page at rest and not the coil jumps (they "spazzed", the author: the coil
+        // turned round by up to 177° in a frame, 2026-10-23). A frame checked every 100 ms.
+        const run = (label, ms) => {
+          for (let t = 0; t <= ms; t += 1000 / 120) {
+            scene.clock = clock + t;
+            scene.debugStep();
+            const c = scene.extras.coil;
+            const cur = { coil: [c.position.x, c.position.y, c.rotation.z], leaves: scene.leaves.map((l) => [l.profile.x[0], l.profile.y[0]]) };
+            if (prev) {
+              const jump = Math.max(...cur.leaves.map((q, i) => (Math.abs(scene.leaves[i].theta - scene.leaves[i].to) > 0.5 ? 0 : Math.hypot(q[0] - prev.leaves[i][0], q[1] - prev.leaves[i][1]))));
+              const coil = Math.hypot(cur.coil[0] - prev.coil[0], cur.coil[1] - prev.coil[1]) + 10 * Math.abs(cur.coil[2] - prev.coil[2]);
+              ok(jump < 0.8 && coil < 1.5, `${binding}, ${pageCount} pages, ${label}, ${Math.round(t)} ms: a page at rest moved ${jump.toFixed(2)} mm in a frame, the coil ${coil.toFixed(2)}`);
+            }
+            prev = cur;
+            if (Math.round(t) % 100 < 9 && check(`${label}, ${Math.round(t)} ms`, true)) return;
+          }
+          clock += ms + 10;
+          prev = null;
+        };
+        scene.clock = clock; scene.open(); run("opening", 1200);
+        scene.clock = clock; scene.goTo(Math.round(N / 2)); run("turning to the middle", 1500);
+        scene.clock = clock; scene.goTo(N); scene.close?.(); run("to the back", 2000);
+      }
+    }
   } finally {
     scene.clock = null;
     box.remove();

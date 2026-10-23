@@ -4,7 +4,7 @@
 // under the book and the table it lies on.
 
 import * as THREE from "three";
-import { CASE_COVER_MM, CASE_HOLLOW, coilCentre, coilClimb, coilTurn, leafShape, signatureSheets } from "./model.js";
+import { CASE_COVER_MM, CASE_HOLLOW, COIL_CLIMB_CENTRE, COIL_CLIMB_WIDTH, COIL_LOOP_START, coilCentre, coilClimb, leafShape, signatureSheets } from "./model.js";
 import { EDGE_INK_SHARE, EDGE_INSET_MM, INK_GLSL, inkUniforms, LEAF_FILL, patchShader } from "./shaders.js";
 
 // Booklet stitching wire (mm): crown width, clinched leg length, flattened cross-section.
@@ -167,7 +167,7 @@ function spineSlabGeometry() {
 }
 
 function makeCoil(scene, style) {
-  const { height: h, coilRadius: R, psiFlat } = scene.model;
+  const { height: h, coilRadius: R } = scene.model;
   const coil = new THREE.Group();
   const loops = Math.max(1, Math.floor((h - 6) / style.pitch));
   const margin = (h - loops * style.pitch) / 2;
@@ -176,10 +176,10 @@ function makeCoil(scene, style) {
   if (scene.model.binding === "wire-o") {
     // One continuous wire, as Wire-O is made: through each hole a hairpin (two parallel
     // loops joined by a U at one end), and from each hairpin a bend along the spine to
-    // the next. The bends sit at the underside of the ring, under the spine.
+    // the next. The bends sit at the top of the ring, where no page hangs.
     const d = 0.85; // half the spacing of a hairpin's two loops
     const gap = (style.pitch - 2 * d) / 2; // half the length of a bend to the next hairpin
-    const seam = -Math.PI / 2;
+    const seam = COIL_CLIMB_CENTRE; // the bends over the top, where no page hangs (see coilClimb)
     // The hairpins' tips and the bends to the next hairpin meet at the seam: kept apart.
     const aS = seam + 0.35;
     const aE = seam + 2 * Math.PI - 0.35;
@@ -213,15 +213,13 @@ function makeCoil(scene, style) {
     tube.castShadow = true;
     coil.add(tube, ...wireEnds(curve, wire, scene.wireMat));
   } else {
-    // A coil level with its holes over half the ring, so all pages line up at head and foot,
-    // climbing to the next hole over the other half (coilClimb). Turned about its axis as the
-    // pages move so its level half is where they hang (coilTurn, in layoutExtras).
-    const a0 = Math.PI / 2 - psiFlat; // flat right as a standard angle; flat left is a0 + π
-    const start = a0 - Math.PI / 2;
+    // A coil level with its holes all round but over the top, where it climbs to the next
+    // (coilClimb): the pages hang at the ring's sides and below. Its ends at the top.
     const turns = loops;
-    const zAt = (a) => holeZ(Math.floor((a - a0) / (2 * Math.PI))) + coilClimb(a - a0) * style.pitch;
+    const span = turns * 2 * Math.PI - COIL_CLIMB_WIDTH;
+    const zAt = (a) => holeZ(Math.floor((a - COIL_LOOP_START) / (2 * Math.PI))) + coilClimb(a) * style.pitch;
     const curve = curveOf((t, target) => {
-      const a = start + t * turns * 2 * Math.PI;
+      const a = COIL_LOOP_START + t * span;
       return target.set(R * Math.cos(a), R * Math.sin(a), zAt(a));
     });
     const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, turns * 128, wire, 14, false), scene.wireMat);
@@ -406,8 +404,6 @@ export function layoutExtras(scene) {
   if (ex.coil) {
     const c = coilCentre(m, scene.closed, scene.closedSide);
     ex.coil.position.set(c.x, c.y, 0);
-    // Its level half where the pages are (Wire-O: its seam opposite them, likewise).
-    ex.coil.rotation.z = coilTurn(scene.leaves.map((l) => l.profile), c);
   }
   layoutContact(scene);
   // A closed coil book rests on its coil at the spine and on its fore-edge: tilted about

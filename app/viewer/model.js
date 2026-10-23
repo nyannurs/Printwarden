@@ -174,10 +174,26 @@ export function restingAngle(book, i, opening) {
  * and (width − hole offset) sin σ along the page. (Figured from the page's length alone,
  * a 540-page book's thin side ran 3 mm under the table beside its 22 mm ring.)
  */
+/**
+ * How far below the ring's centre a page's hole may sit (radians, at the ring): lower, the wire
+ * runs nearly flat there and a page lying flat is crossed at a glancing angle, the wire through
+ * the paper beside the hole (1.8 mm on a 240-page book, 2026-10-23). A real thick spiral book's
+ * ring holds the bottom of its pile up at the spine the same way.
+ */
+const COIL_LOWEST_HOLE = 60 * DEG;
+
+/** Where a coil pile of `pile` mm has its top page's hole: the ring's centre height, or as high as its bottom page's hole needs. */
+function coilPileTop(book, pile) {
+  const cy = book.coilOpen.y;
+  return Math.max(cy, cy - book.coilRadius * Math.sin(COIL_LOWEST_HOLE) + pile);
+}
+
 function coilRestingAngle(book, left, opening) {
   const split = opening === 0 ? 0 : book.cum[opening - 1] + book.thickness[opening - 1] / 2;
   const sideThickness = left ? split : book.total - split;
-  const drop = book.coilOpen.y - (book.ground + sideThickness);
+  // Its top page's hole at the ring's centre height, or higher for a pile taller than the ring
+  // lets hang below that (see COIL_LOWEST_HOLE): down from there to the fore-edge, on the table.
+  const drop = coilPileTop(book, sideThickness) - (book.ground + sideThickness);
   const slope = Math.asin(Math.min(1, Math.max(0, drop) / (book.coilRadius + book.width - HOLE_OFFSET_MM))) / DEG;
   const a = 90 + slope;
   return left ? -a : a;
@@ -231,7 +247,7 @@ export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 
     const s = Math.sin(psi) >= 0 ? 1 : -1; // the pile it lies in: right of the ring, or left
     const flat = Math.abs(Math.sin(psi));
     const pile = s > 0 ? total - split : split; // paper on that side
-    const lift = Math.max(0, book.ground + pile - book.coilOpen.y) * flat;
+    const lift = (coilPileTop(book, pile) - book.coilOpen.y) * flat;
     const holeY = book.coilOpen.y + R * Math.cos(psi) + Math.sin(t0) * off + lift;
     // Above or below the centre the ring is inside its side: the hole goes where the wire is at
     // that height. (Below the centre it stayed at the side until 2026-10-23: a thick pile resting
@@ -1228,46 +1244,27 @@ function openShape(book, rise) {
 }
 
 /**
- * A spiral coil's climb, 0 to 1, at angle `a` (radians) in the coil's own frame: level (0)
- * over the half from 0 to π, where the pages hang, then easing up a pitch to the next hole
- * over the other half (the wire is a coil, it has to advance somewhere). The coil is turned
- * (coilTurn) so that its level half lies where the pages are.
+ * Where a spiral coil climbs to its next hole: over the top of the ring (book frame, standard
+ * angle, radians), across COIL_CLIMB_WIDTH; level with its hole everywhere else. Measured over
+ * every opening and closed either way (44 to 240 pages), the pages' holes sit at the ring's
+ * sides and below, never between 48° and 132°: a real spiral's wire runs diagonally over the
+ * top too. (2026-10-23: it climbed along the underside, where a thick book's pages hang, 3 mm
+ * beside their holes; then it turned with the pages, which flipped it round by up to 177° in a
+ * frame.)
  */
-export function coilClimb(a) {
-  const u = ((((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) / Math.PI); // 0..2
-  return u <= 1 ? 0 : (1 - Math.cos((u - 1) * Math.PI)) / 2;
-}
+export const COIL_CLIMB_CENTRE = Math.PI / 2;
+export const COIL_CLIMB_WIDTH = 1.3;
+/** The angle a coil's loop starts at (the end of the climb before it). */
+export const COIL_LOOP_START = COIL_CLIMB_CENTRE + COIL_CLIMB_WIDTH / 2;
 
-/**
- * How far to turn the coil about its axis (radians) so the middle of its level half faces
- * the middle of where the pages' holes are on the ring now: open in the middle, they hang
- * low on both sides and the wire climbs over the top, as on a real spiral book; closed or
- * open at a cover, they sit at one side. (Until 2026-10-23 the coil climbed along the
- * underside, always: a thick book's pages hang there, and the wire ran up to half a pitch,
- * 3 mm, beside their holes, through the paper.) A real coil turns too as pages are turned.
- * @param {{x: ArrayLike<number>, y: ArrayLike<number>}[]} profiles the leaves' cross-sections
- * @param {{x: number, y: number}} centre the ring's (coilCentre)
- */
-export function coilTurn(profiles, centre) {
-  // The middle of the arc the holes span: the circle less its widest gap between holes (the
-  // holes' average was pulled toward the side with more pages: a cover alone on the other
-  // side fell on the climb).
-  const angles = [];
-  for (const p of profiles) {
-    const dx = p.x[1] - p.x[0], dy = p.y[1] - p.y[0];
-    const len = Math.hypot(dx, dy) || 1;
-    angles.push(Math.atan2(p.y[0] + (dy / len) * HOLE_OFFSET_MM - centre.y, p.x[0] + (dx / len) * HOLE_OFFSET_MM - centre.x));
-  }
-  if (!angles.length) return 0;
-  angles.sort((x, y) => x - y);
-  let gap = -1, after = 0;
-  for (let i = 0; i < angles.length; i++) {
-    const next = i + 1 < angles.length ? angles[i + 1] : angles[0] + 2 * Math.PI;
-    if (next - angles[i] > gap) { gap = next - angles[i]; after = i; }
-  }
-  const start = angles[(after + 1) % angles.length]; // the arc runs from here...
-  const span = 2 * Math.PI - gap; // ...this far round
-  return start + span / 2 - Math.PI / 2;
+/** A spiral coil's climb at angle `a` (book frame), 0 (level with its hole) to 1 (the next hole's). */
+export function coilClimb(a) {
+  const twoPi = 2 * Math.PI;
+  const phase = (((a - COIL_LOOP_START) % twoPi) + twoPi) % twoPi;
+  const level = twoPi - COIL_CLIMB_WIDTH;
+  if (phase <= level) return 0;
+  const t = (phase - level) / COIL_CLIMB_WIDTH;
+  return (1 - Math.cos(t * Math.PI)) / 2;
 }
 
 /** Centre of the coil ring for a given closedness. */

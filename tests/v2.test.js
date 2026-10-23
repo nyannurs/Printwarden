@@ -185,8 +185,8 @@ test("REGRESSION: closed coil book: every page's hole sits on the wire, closed (
   }
 });
 
-test("REGRESSION: a spiral's wire runs through every page's hole along the spine too (the coil turned so it climbs where no page is; 240 pages)", async () => {
-  const { coilCentre, coilClimb, coilTurn, HOLE_OFFSET_MM, restingAngle } = await import("../app/viewer/model.js");
+test("REGRESSION: a spiral's wire runs through every page's hole along the spine too (it climbs over the top, where no page hangs; 44 to 240 pages)", async () => {
+  const { coilCentre, coilClimb, HOLE_OFFSET_MM, restingAngle } = await import("../app/viewer/model.js");
   for (const pageCount of [44, 96, 240]) {
     const book = makeBook({ pageCount, binding: "spiral", thickness: 0.15, coverThickness: 0.15, width: 148, height: 210 });
     const s = Float32Array.from([0, HOLE_OFFSET_MM, 20, 148]);
@@ -202,10 +202,9 @@ test("REGRESSION: a spiral's wire runs through every page's hole along the spine
         profiles.push(leafProfile(book, i, th, closed, split, 0, s, undefined, side));
       }
       const c = coilCentre(book, closed, side);
-      const turn = coilTurn(profiles, c);
       let worst = 0;
       for (const p of profiles) {
-        const a = Math.atan2(p.y[1] - c.y, p.x[1] - c.x) - turn; // in the coil's own frame
+        const a = Math.atan2(p.y[1] - c.y, p.x[1] - c.x);
         const climb = coilClimb(a);
         worst = Math.max(worst, Math.min(climb, 1 - climb) * book.style.pitch);
       }
