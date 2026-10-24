@@ -26,6 +26,7 @@ export const tileStats = { asked: 0, landed: 0, cancelled: 0, lastMs: 0, updates
 let pages = new Map();
 let pagesFor = -1;
 let lastUpdate = -Infinity;
+let again = 0; // a further request at rest, pending (see request)
 
 /** A page's pyramid: its base image's density (the document's base height) over its trim. */
 function pageOf(folio) {
@@ -76,6 +77,8 @@ export function updateTiles(now, { settled = false } = {}) {
   cache.nextFrame();
   /** @type {Map<string, {folio: number, level: number, ix: number, iy: number, priority: number}>} */
   const wanted = new Map();
+  /** @type {{folio: number, level: number, u: number, v: number, priority: number}[]} what this view needs, for the spreads either side */
+  const ahead = [];
   const want = (folio, page, level, u, v, priority) => {
     if (u < 0 || u > 1 || v < 0 || v > 1) return;
     const { ix, iy } = tileAt(page, level, u, v);
@@ -102,10 +105,32 @@ export function updateTiles(now, { settled = false } = {}) {
       }
       if (level >= 2) want(folio, p.page, level - 1, s.u, s.v, priority + 0.5);
       if (settled && level < TILE_MAX_LEVEL) want(folio, p.page, level + 1, s.u, s.v, priority + 0.8);
+      if (settled) ahead.push({ folio, level, u: s.u, v: s.v, priority });
+    }
+  }
+  // At rest, the spreads either side too, at the levels this view needs: they come to the same
+  // place on screen with a turn, so the pages a turn reveals are sharp as they appear (they were
+  // their base image until their tiles came: "things get blurry, then sharpen up", the author,
+  // 2026-10-24). Only while the cache has room for them besides what's on screen.
+  if (settled && ahead.length) {
+    const n = state.analysis.book.pages.length;
+    const keys = new Map();
+    for (const a of ahead) {
+      for (const f of [a.folio + 2, a.folio - 2]) {
+        if (f < 1 || f > n) continue;
+        const q = pageOf(f);
+        if (!q) continue;
+        const { ix, iy } = tileAt(q.page, a.level, a.u, a.v);
+        keys.set(tileKey(f, a.level, ix, iy), { folio: f, page: q.page, level: a.level, u: a.u, v: a.v, priority: a.priority + 0.7 });
+      }
+    }
+    // (Ahead of the next finer level, +0.8: a turn is likelier than a zoom.)
+    if (wanted.size + keys.size <= 0.8 * (cache.capacity || Infinity)) {
+      for (const t of keys.values()) want(t.folio, t.page, t.level, t.u, t.v, t.priority);
     }
   }
   let requested = 0;
-  for (const [key, t] of wanted) {
+  for (const [key, t] of [...wanted].sort((a, b) => a[1].priority - b[1].priority)) {
     if (cache.has(key)) { cache.touch(key); continue; }
     if (inFlight.has(key) || requested >= REQUESTS_PER_UPDATE || inFlight.size >= IN_FLIGHT_MAX) continue;
     requested++;
@@ -132,6 +157,11 @@ function request(key, t) {
       if (tileStats.latencies.push(tileStats.lastMs) > 64) tileStats.latencies.shift();
       if (gen !== state.generation) return tile.close?.();
       scene.tiles.queueTile(folio, level, ix, iy, p.page, tile);
+      // At rest, the view asked once for at most REQUESTS_PER_UPDATE: ask again as they land,
+      // until everything it wants (the spreads either side included) is in.
+      if (scene.settled && !again && inFlight.size < IN_FLIGHT_MAX / 2) {
+        again = setTimeout(() => { again = 0; if (scene.settled) updateTiles(performance.now(), { settled: true }); }, 0);
+      }
       scene.dirty = true; // a frame: the tile goes up (flush) and shows
     }, () => { inFlight.delete(key); tileStats.cancelled++; }); // cancelled, or the renderer closed
 }

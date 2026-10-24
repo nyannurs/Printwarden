@@ -25,6 +25,15 @@ export function motionState() {
  * fps while panning, and its performance check showed any one saving enough (0.17.93).
  * Judged by the slowest frames instead (0.17.93), every step down looked as if it didn't
  * help (the slowest frames are noisy) and it stayed at full size: worse.
+ *
+ * Why the card's time alone never steps down (2026-10-24): on the same M4 Pro the timer read
+ * 8.7 ms a frame at full size against a 7.4 ms refresh, and every frame still reached the
+ * screen on time, 120 fps, at full size and at half alike; motion was drawn at 50 % for
+ * nothing, every turn and drag soft, sharp again at rest ("it just feels bad", the author).
+ * With the timer, a step down needs frames actually late too; a step up, the card's time
+ * scaled to the next size within the refresh (from 50 % the old rule, under 0.4 of the
+ * refresh, was never met: it stayed small).
+ * @param {number} late
  * @returns {number} the scale to draw motion at
  */
 export function motionStep(state, mean, refreshMs, timed, late = 0) {
@@ -38,11 +47,11 @@ export function motionStep(state, mean, refreshMs, timed, late = 0) {
     state.floor = stepped.k;
     state.k = stepped.k;
     state.fast = 0;
-  } else if ((mean > slow || late > 0.1) && state.k < state.floor) {
+  } else if (((timed ? mean > slow && late > 0.05 : mean > slow) || late > 0.1) && state.k < state.floor) {
     state.stepped = { k: state.k, mean, late };
     state.k++;
     state.fast = 0;
-  } else if (mean < easy && late < 0.02 && state.k > 0) {
+  } else if ((timed ? mean * (MOTION_SCALES[state.k - 1] / MOTION_SCALES[state.k]) ** 2 < refresh * 0.9 : mean < easy) && late < 0.02 && state.k > 0) {
     if (++state.fast >= 4) {
       state.k--;
       state.fast = 0;

@@ -18,19 +18,20 @@ function run(state, rounds, full, { fixed = 0, refresh = HZ120, timed = true, la
 
 test("motion: a graphics card too slow for the screen draws motion smaller until it keeps up", () => {
   const s = motionState();
-  const scales = run(s, 8, 16); // 16 ms a frame at full size, a 120 Hz screen
+  // 16 ms a frame at full size, a 120 Hz screen: frames late whenever the drawing outlasts a refresh.
+  const scales = run(s, 8, 16, { late: (scale) => (16 * scale * scale > HZ120 ? 0.5 : 0) });
   const last = scales[scales.length - 1];
-  ok(last < 1 && 16 * last * last <= HZ120 * 0.7, `settled at ${last}`);
+  ok(last < 1 && 16 * last * last <= HZ120, `settled at ${last}, where frames are on time`);
   eq(new Set(scales.slice(-3)).size, 1, "and stays there");
 });
 
 test("motion: a step down that doesn't help (not the drawing) is taken back, and no further tried", () => {
   const s = motionState();
-  const scales = run(s, 6, 0, { fixed: 20 }); // 20 ms whatever the size
+  const scales = run(s, 6, 0, { fixed: 20, late: () => 0.5 }); // 20 ms whatever the size, as late
   eq(scales.slice(0, 2), [0.85, 1]);
   eq(scales.slice(2), [1, 1, 1, 1]);
   motionReset(s);
-  eq(run(s, 1, 0, { fixed: 20 }), [0.85], "a new window size: tried again");
+  eq(run(s, 1, 0, { fixed: 20, late: () => 0.5 }), [0.85], "a new window size: tried again");
 });
 
 test("motion: keeping up easily, back to full size, a step at a time", () => {
@@ -43,7 +44,16 @@ test("motion: keeping up easily, back to full size, a step at a time", () => {
 
 test("motion: screens faster than 120 Hz aren't chased with a smaller picture", () => {
   eq(run(motionState(), 4, 5.5, { refresh: 1000 / 165 }), [1, 1, 1, 1]);
-  eq(run(motionState(), 1, 9, { refresh: 1000 / 165 }), [0.85]);
+  eq(run(motionState(), 1, 9, { refresh: 1000 / 165, late: () => 0.3 }), [0.85]);
+});
+
+test("motion: REGRESSION: frames on time stay full size, whatever the card's timer says (the author's M4 Pro: 8.7 ms timed, a 7.4 ms refresh, 120 fps at any size)", () => {
+  eq(run(motionState(), 6, 8.7, { refresh: 1000 / 135 }), [1, 1, 1, 1, 1, 1]);
+  // And back up from 50 % once frames are on time (they had stayed there).
+  const s = motionState();
+  s.k = MOTION_SCALES.length - 1;
+  const scales = run(s, 40, 8.7, { refresh: 1000 / 135 });
+  ok(scales[scales.length - 1] >= 0.85, `back up to ${scales[scales.length - 1]}`);
 });
 
 test("motion: frames reaching the screen late count, though the card's drawing looks in time (the author's M4 Pro, 0.17.93)", () => {
