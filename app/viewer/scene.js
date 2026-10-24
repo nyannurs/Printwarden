@@ -39,6 +39,7 @@ const SETTLE_MS = 120; // quiet time before the view counts as settled
 // PDF and sent to the GPU, four times the pixels on a Retina screen) as the next click comes.
 const TURN_SETTLE_MS = 350;
 const UPLOADS_PER_FRAME = 2;
+const MOTION_DOWNSCALE = false; // see #adaptResolution
 const TILES_PER_FRAME = 3; // tiles to the GPU a frame (5.5 MB each with its mips: a frame at 130 Hz takes about three)
 // Sharp strips arriving on a page that had none fade in over the base image this long: the
 // swap no longer reads as the page's pixels shifting as it comes to rest.
@@ -1591,6 +1592,12 @@ export class BookScene {
       }
     }
     if (this.clock != null || m.frozen || !(dt > 0 && dt < 200)) return; // frozen: see probe.js
+    // Motion is drawn at full size, always (2026-10-24): drawn smaller when frames came late, the
+    // pages went soft the moment a turn or a drag began and sharp again at rest, and the frames
+    // that came late were mostly a document loading or tiles going up, not a slow card (the
+    // author's M4 Pro: 120 fps at full size; "the contents blur heavily" on every click). The
+    // sharpness of the pages is what the app is for. (motion.js keeps the rule, unused.)
+    if (!MOTION_DOWNSCALE) return;
     if (!drawingInMotion && !wasDrawing) {
       m.refresh.push(dt);
       if (m.refresh.length > 120) m.refresh.shift();

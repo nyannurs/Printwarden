@@ -58,7 +58,7 @@ The buttons over the view:
 Below them:
 - **The zoom slider** steps through 50, 75, 100, 125, 150, 200, 300, 400, 600 and 800 %. 100 % is the preset's framing. A preset and a zoom step always frame the book the same way, so mockups are comparable. The wheel zooms freely in between.
 - **The compass** shows the world's X, Y and Z as the camera sees them: X across the book, Y up from the table, Z along the spine.
-- **The frame counter** in the top left shows frames per second while anything moves. It also shows the time each frame takes and, when the graphics card can't keep up, the resolution motion is drawn at. At rest nothing is drawn, so it shows nothing.
+- **The frame counter** in the top left shows frames per second while anything moves. It also shows the time each frame takes. At rest nothing is drawn, so it shows nothing.
 
 The counter and the zoom value switch between black and white type, whichever reads better on what is under them.
 

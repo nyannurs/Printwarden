@@ -14,7 +14,7 @@ World space is millimeters. The book lies on a table, the spine along z, the hea
 | `scene.js` | The scene: lights, camera, animations, page images, the frame loop, motion resolution. The `BookScene` class is the 3D view's whole interface to the rest of the app. |
 | `camera.js` | The camera presets and the camera's two modes. |
 | `input.js` | Mouse and keyboard on the view. |
-| `motion.js` | How small to draw while things move on a slow graphics card. |
+| `motion.js` | How small to draw while things move on a slow graphics card (not used: motion is drawn at full size). |
 | `draw.js` | Drawing a frame: shadows only when needed, sheets nearest first. |
 | `tiles.js` | The tile cache: the pages' sharper levels kept on the graphics card as a map keeps its tiles. |
 | `detail.js` | Planning a capture's sharp strips. |
@@ -175,7 +175,7 @@ Multisampling is 4× on a high-density screen, 8× otherwise, as far as the card
 
 ### Motion resolution
 
-A graphics card too slow for the screen draws motion a step smaller: 100, 85, 70, 60 or 50 % (motion.js). Still frames, screenshots and videos are always full size.
+Motion is drawn at full size, like still frames, screenshots and videos. (A rule in motion.js that drew motion a step smaller when frames came late is switched off: the frames that came late were mostly a document loading or tiles going up, and the pages went soft the moment anything moved.)
 - **What it measures**: over 30 frames in motion, the card's own time per frame where it can be timed (else the time between frames), and the share of frames that reached the screen a refresh or more late.
 - **Stepping down**: when the drawing takes over 70 % of a refresh, or more than a tenth of frames are late.
 - **Stepping up**: after four easy rounds, under 40 % with almost no late frames.
