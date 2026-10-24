@@ -208,7 +208,7 @@ test("REGRESSION: a thick hardcover's covering doesn't stretch either (244 pages
  * @returns {string[]} what's wrong, at most a few
  */
 const wireSamples = new WeakMap(); // a coil's path -> its samples (the coil's shape is the book's)
-export function coilFaults(scene, { restingOnly = false } = {}) {
+export function coilFaults(scene, { turningAlongOnly = false } = {}) {
   const m = scene.model;
   const style = m.style;
   const tube = scene.extras.coil.children.find((c) => c.geometry?.parameters?.path);
@@ -234,12 +234,11 @@ export function coilFaults(scene, { restingOnly = false } = {}) {
   const pts = local.map((q) => ({ x: q.x + at.x, y: q.y + at.y, z: q.z }));
   const faults = [];
   const threaded = new Map(); // `${leaf}:${hole}` -> best offset from the hole's centre
-  const skip = new Set();
   scene.leaves.forEach((leaf, i) => {
-    // (restingOnly: a page in mid-turn crosses the top of the ring, where a spiral climbs to its
-    // next hole: a real page slides along the wire there, which the model doesn't; the wire is
-    // up to 0.6 mm outside its hole for those frames.)
-    if (restingOnly && Math.abs(leaf.theta - leaf.to) > 0.5) { skip.add(i); return; }
+    // (turningAlongOnly: a page in mid-turn, its hole only along the spine from the wire. As a
+    // thick book's pile lifts off the table, a page in the air leaves the ring across the page
+    // by up to 2 mm, a fault of its own, found 2026-10-24 once the turning pages were checked.)
+    const along = turningAlongOnly && Math.abs(leaf.theta - leaf.to) > 0.5;
     const p = leaf.profile;
     const s = leaf.s;
     const half = m.thickness[i] / 2;
@@ -252,7 +251,7 @@ export function coilFaults(scene, { restingOnly = false } = {}) {
     const cx0 = (p.x[0] + p.x[k12]) / 2, cy0 = (p.y[0] + p.y[k12]) / 2;
     const reach = Math.hypot(p.x[k12] - p.x[0], p.y[k12] - p.y[0]) / 2 + wire + half + 0.5;
     for (const w of pts) {
-      if (Math.abs(w.z) > h / 2 || Math.abs(w.x - cx0) > reach || Math.abs(w.y - cy0) > reach) { last = null; continue; }
+      if (Math.abs(w.z - leaf.rise) > h / 2 || Math.abs(w.x - cx0) > reach || Math.abs(w.y - cy0) > reach) { last = null; continue; }
       let best = null;
       for (const k of segs) {
         const ax = p.x[k], ay = p.y[k], bx = p.x[k + 1], by = p.y[k + 1];
@@ -265,11 +264,11 @@ export function coilFaults(scene, { restingOnly = false } = {}) {
       }
       if (!best || best.ends || best.d > half + wire + 0.3) { last = null; continue; } // clear of this page
       // The wire is in the paper's plane here: inside a hole?
-      const zFromHead = w.z + h / 2;
+      const zFromHead = w.z - leaf.rise + h / 2; // (a spiral's page as far up as it hangs on the wire)
       const hole = Math.min(loops - 1, Math.max(0, Math.floor((zFromHead - margin) / style.pitch)));
       const zc = margin + (hole + 0.5) * style.pitch;
       const ds = best.along - HOLE_OFFSET_MM, dz = zFromHead - zc;
-      const off = square ? Math.max(Math.abs(ds), Math.abs(dz)) : Math.hypot(ds, dz);
+      const off = along ? Math.abs(dz) : square ? Math.max(Math.abs(ds), Math.abs(dz)) : Math.hypot(ds, dz);
       // Threaded: the wire crosses the page's plane (between this sample and the last) within the hole.
       if (last && last.hole === hole && last.side !== best.side && Math.max(off, last.off) <= room + 0.05) {
         const key = `${i}:${hole}`;
@@ -283,7 +282,6 @@ export function coilFaults(scene, { restingOnly = false } = {}) {
     }
   });
   for (let i = 0; i < scene.leaves.length && faults.length < 6; i++) {
-    if (skip.has(i)) continue;
     for (let k = 0; k < loops; k++) {
       if (!threaded.has(`${i}:${k}`)) { faults.push(`leaf ${i}: no wire through hole ${k}`); break; }
     }
@@ -291,15 +289,15 @@ export function coilFaults(scene, { restingOnly = false } = {}) {
   return faults;
 }
 
-test("COIL: the wire goes through every punched hole of every page and touches paper nowhere else (spiral, Wire-O; 44 and 240 pages; at rest, closed, and the pages at rest while others turn)", () => {
+test("COIL: the wire goes through every punched hole of every page and touches paper nowhere else (spiral, Wire-O; 44 and 240 pages; at rest, closed, and while pages turn, the turning ones along the spine)", () => {
   const { scene, box } = makeScene();
   try {
     for (const binding of ["spiral", "wire-o"]) {
       for (const pageCount of [44, 240]) {
         scene.setBook({ pageCount, pageSize: { width: 148, height: 210 }, binding, paper: { ...paper, thickness: 0.15, coverThickness: 0.15 } });
         const N = scene.model.leafCount;
-        const check = (label, restingOnly = false) => {
-          const f = coilFaults(scene, { restingOnly });
+        const check = (label, turningAlongOnly = false) => {
+          const f = coilFaults(scene, { turningAlongOnly });
           ok(!f.length, `${binding}, ${pageCount} pages, ${label}: ${f.join("; ")}`);
           return f.length;
         };

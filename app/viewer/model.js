@@ -377,7 +377,10 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
     // and the table's footprint shadow showed on it as a band with a sharp edge.) At rest the
     // same as the opening's.
     const split = leaves.reduce((sum, _, i) => sum + thickness[i] * Math.min(1, Math.max(0, (90 - theta[i]) / 180)), 0);
-    for (const [i, l] of leaves.entries()) leafProfile(book, i, theta[i], closed, split, tip[i] - theta[i], l.s, l.profile, side);
+    for (const [i, l] of leaves.entries()) {
+      leafProfile(book, i, theta[i], closed, split, tip[i] - theta[i], l.s, l.profile, side);
+      l.rise = coilRise(book, l.profile, closed, side);
+    }
     return;
   }
   const boards = style.spine === "case" && n > 2;
@@ -1299,27 +1302,33 @@ function openShape(book, rise) {
 }
 
 /**
- * Where a spiral coil climbs to its next hole: over the top of the ring (book frame, standard
- * angle, radians), across COIL_CLIMB_WIDTH; level with its hole everywhere else. Measured over
- * every opening and closed either way (44 to 240 pages), the pages' holes sit at the ring's
- * sides and below, never between 48° and 132°: a real spiral's wire runs diagonally over the
- * top too. (2026-10-23: it climbed along the underside, where a thick book's pages hang, 3 mm
- * beside their holes; then it turned with the pages, which flipped it round by up to 177° in a
- * frame.)
+ * Where a coil's loops begin and end on its ring (book frame, standard angle, radians): at the
+ * bottom. Measured over every state the geometry proof lays out (open at every kind of
+ * opening, turning, flicking, closing and opening either way; 16 to 240 pages), no page's
+ * hole comes between 240° and 300°: over the top is where every turning page's hole passes.
+ * A spiral's helix starts there, so no page ever sits where one loop gives way to the next;
+ * Wire-O's bends from one hairpin to the next sit there too. (Until 2026-10-24 both were over
+ * the top, where no page rests: a spiral's wire stayed level with its hole all round and
+ * climbed to the next there, a staircase, the author's view report; Wire-O's seam showed at
+ * the front of the closed book.)
  */
-export const COIL_CLIMB_CENTRE = Math.PI / 2;
-export const COIL_CLIMB_WIDTH = 1.3;
-/** The angle a coil's loop starts at (the end of the climb before it). */
-export const COIL_LOOP_START = COIL_CLIMB_CENTRE + COIL_CLIMB_WIDTH / 2;
+export const COIL_SEAM = -Math.PI / 2;
 
-/** A spiral coil's climb at angle `a` (book frame), 0 (level with its hole) to 1 (the next hole's). */
-export function coilClimb(a) {
+/**
+ * How far up a spiral page sits (mm, along the spine) where its hole is on the ring: the wire
+ * is an even helix, a pitch a turn from COIL_SEAM, through each hole at the top of the ring
+ * (the hole's own height there); a page hangs on it wherever its hole is, so the pages of the
+ * right pile sit lower than the left by up to half a pitch, as a real spiral notebook's do,
+ * and a turning page rides up the wire as it goes over. 0 for other bindings.
+ */
+export function coilRise(book, profile, closed, side = 1) {
+  if (book.binding !== "spiral") return 0;
+  const c = coilCentre(book, closed, side);
+  const hx = profile.x[0] + Math.sin(profile.phi[0]) * HOLE_OFFSET_MM;
+  const hy = profile.y[0] + Math.cos(profile.phi[0]) * HOLE_OFFSET_MM;
   const twoPi = 2 * Math.PI;
-  const phase = (((a - COIL_LOOP_START) % twoPi) + twoPi) % twoPi;
-  const level = twoPi - COIL_CLIMB_WIDTH;
-  if (phase <= level) return 0;
-  const t = (phase - level) / COIL_CLIMB_WIDTH;
-  return (1 - Math.cos(t * Math.PI)) / 2;
+  const around = (((Math.atan2(hy - c.y, hx - c.x) - COIL_SEAM) % twoPi) + twoPi) % twoPi;
+  return book.style.pitch * (around / twoPi - 0.5);
 }
 
 /** Centre of the coil ring for a given closedness. */

@@ -4,7 +4,7 @@
 // Each leaf is its cross-section (a ribbon as thick as it is drawn); every pair that could
 // meet is tested for crossing outlines.
 
-import { layoutBook, leafProfile, leafShape, makeBook, restingAngle, rowTurn, turnCurl } from "../app/viewer/model.js";
+import { COIL_SEAM, coilCentre, HOLE_OFFSET_MM, layoutBook, leafProfile, leafShape, makeBook, restingAngle, rowTurn, turnCurl } from "../app/viewer/model.js";
 import { crossingPairs } from "./crossings.js";
 import { ok, test } from "./harness.js";
 
@@ -293,6 +293,33 @@ test("geometry: a hardcover's board follows its own turn when opening and closin
         const diff = Math.abs(leaves[bi].profile.phi[0] * 180 / Math.PI - thetas[bi]);
         ok(diff < 8, `${pageCount} pages, ${label}, ${p.toFixed(2)}: the board is ${diff.toFixed(0)}° off its turn`);
       }
+    }
+  }
+});
+
+// A coil's loops begin and end at its seam (COIL_SEAM): a spiral's helix starts there, Wire-O's
+// bends sit there. A page whose hole came there would hang a whole pitch higher or lower from
+// one frame to the next, or a bend would run through its hole: no hole may come within 25° of
+// it (Wire-O's hairpins end 20° either side, a hole is some 5° wide on the ring), in any state,
+// open, turning, flicking, closing and opening, thin books and thick. (The nearest: 30°, a
+// 240-page spiral open at its cover.)
+test("geometry: no page's hole comes to a coil's seam (spiral and Wire-O, 16 to 240 pages, every state)", () => {
+  for (const binding of ["spiral", "wire-o"]) {
+    for (const pageCount of [16, 44, 120, 240]) {
+      const book = makeBook({ pageCount, binding, thickness: 0.1, coverThickness: 0.3, width: 148, height: 210 });
+      let nearest = Infinity, where = "";
+      for (const [label, state] of states(book)) {
+        const leaves = shaped(book, state);
+        layoutBook(book, leaves, { closed: state.closed, side: state.side ?? 1, opening: state.opening }, { cache: {}, turning: new Set(state.turning ?? []) });
+        const c = coilCentre(book, state.closed, state.side ?? 1);
+        for (const [i, l] of leaves.entries()) {
+          const p = l.profile;
+          const a = Math.atan2(p.y[0] + Math.cos(p.phi[0]) * HOLE_OFFSET_MM - c.y, p.x[0] + Math.sin(p.phi[0]) * HOLE_OFFSET_MM - c.x);
+          const off = Math.abs(Math.atan2(Math.sin(a - COIL_SEAM), Math.cos(a - COIL_SEAM))) * 180 / Math.PI;
+          if (off < nearest) { nearest = off; where = `${label}, leaf ${i}`; }
+        }
+      }
+      ok(nearest >= 25, `${binding}, ${pageCount} pages: a hole ${nearest.toFixed(1)}° from the seam (${where})`);
     }
   }
 });

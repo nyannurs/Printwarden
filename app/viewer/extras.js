@@ -4,7 +4,7 @@
 // under the book and the table it lies on.
 
 import * as THREE from "three";
-import { CASE_COVER_MM, CASE_HOLLOW, COIL_CLIMB_CENTRE, COIL_CLIMB_WIDTH, COIL_LOOP_START, coilCentre, coilClimb, leafShape, signatureSheets } from "./model.js";
+import { CASE_COVER_MM, CASE_HOLLOW, COIL_SEAM, coilCentre, leafShape, signatureSheets } from "./model.js";
 import { EDGE_INK_SHARE, EDGE_INSET_MM, INK_GLSL, inkUniforms, LEAF_FILL, patchShader } from "./shaders.js";
 import { noSpotInk } from "./uploads.js";
 
@@ -177,10 +177,12 @@ function makeCoil(scene, style) {
   if (scene.model.binding === "wire-o") {
     // One continuous wire, as Wire-O is made: through each hole a hairpin (two parallel
     // loops joined by a U at one end), and from each hairpin a bend along the spine to
-    // the next. The bends sit at the top of the ring, where no page hangs.
+    // the next. The bends sit at the bottom of the ring, where no page's hole ever comes
+    // (COIL_SEAM), under the book. (Over the top until 2026-10-24: closed, the seam faced
+    // the reader at the front of the spine, the author's view report.)
     const d = 0.85; // half the spacing of a hairpin's two loops
     const gap = (style.pitch - 2 * d) / 2; // half the length of a bend to the next hairpin
-    const seam = COIL_CLIMB_CENTRE; // the bends over the top, where no page hangs (see coilClimb)
+    const seam = COIL_SEAM;
     // The hairpins' tips and the bends to the next hairpin meet at the seam: kept apart.
     const aS = seam + 0.35;
     const aE = seam + 2 * Math.PI - 0.35;
@@ -214,14 +216,16 @@ function makeCoil(scene, style) {
     tube.castShadow = true;
     coil.add(tube, ...wireEnds(curve, wire, scene.wireMat));
   } else {
-    // A coil level with its holes all round but over the top, where it climbs to the next
-    // (coilClimb): the pages hang at the ring's sides and below. Its ends at the top.
+    // An even helix, a pitch a turn, from the bottom of the ring (COIL_SEAM, where no hole
+    // ever comes) to the bottom: through each hole at the top of the ring, beside it elsewhere,
+    // where the page hangs that much lower or higher (coilRise in model.js). (Until 2026-10-24
+    // level with its holes all round and climbing to the next over the top: a staircase, the
+    // author's view report.)
     const turns = loops;
-    const span = turns * 2 * Math.PI - COIL_CLIMB_WIDTH;
-    const zAt = (a) => holeZ(Math.floor((a - COIL_LOOP_START) / (2 * Math.PI))) + coilClimb(a) * style.pitch;
+    const span = turns * 2 * Math.PI;
     const curve = curveOf((t, target) => {
-      const a = COIL_LOOP_START + t * span;
-      return target.set(R * Math.cos(a), R * Math.sin(a), zAt(a));
+      const a = COIL_SEAM + t * span;
+      return target.set(R * Math.cos(a), R * Math.sin(a), holeZ(0) - style.pitch / 2 + (style.pitch * (a - COIL_SEAM)) / (2 * Math.PI));
     });
     const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, turns * 128, wire, 14, false), scene.wireMat);
     tube.castShadow = true;

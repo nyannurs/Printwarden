@@ -171,7 +171,7 @@ export function makeLeaf(scene, i) {
   // The faces between a flying stack's sheets (see layoutLeaves): each its page's image,
   // unlit (see inkFiller).
   const fillers = [inkFiller(scene, front), inkFiller(scene, back)];
-  const leaf = { i, mesh, geo, front, back, fillers, profile, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
+  const leaf = { i, mesh, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
@@ -489,7 +489,7 @@ export function pageHit(model, leaf, ray, front, near = 0, far = Infinity) {
     const facing = d.x * Math.cos(f) - d.y * Math.sin(f) > 0;
     if (front !== null && facing !== front) continue;
     const z = o.z + d.z * t;
-    const v = (z + model.height / 2) / model.height;
+    const v = (z - (leaf.rise ?? 0) + model.height / 2) / model.height;
     if (v < -0.05 || v > 1.05) continue;
     const u = (leaf.uStart + s[k] + (s[k + 1] - s[k]) * a) / model.width;
     best = t;
@@ -585,7 +585,8 @@ export function packSheet(leaf, sheets, thickness) {
   // Every sheet's edges flush with the others'. (Until 1.1 each stood a fixed hair off, at
   // the fore-edge and along the spine, "as paper never lines up": it looked ragged, and a
   // stitched book's spine, drawn as one solid, didn't meet its sheets; the author, 2026-10-24.)
-  data[o + 10] = -leaf.height / 2;
+  // A spiral's page as far up as it hangs on the wire (coilRise in model.js).
+  data[o + 10] = -leaf.height / 2 + (leaf.rise ?? 0);
   data[o + 11] = leaf.height;
   data[o + 12] = leaf.rowsActive ? 1 : 0;
   data[o + 13] = n;
@@ -618,7 +619,7 @@ function sheetBounds(leaf, thickness) {
     }
   }
   const out = (thickness * LEAF_FILL) / 2 + Math.max(...leaf.bows.map(Math.abs));
-  _bounds.center.set((x0 + x1) / 2, (y0 + y1) / 2, 0);
+  _bounds.center.set((x0 + x1) / 2, (y0 + y1) / 2, leaf.rise ?? 0);
   _bounds.radius = Math.hypot(x1 - x0, y1 - y0, leaf.height) / 2 + out;
   return _bounds;
 }
@@ -671,7 +672,7 @@ function writeLeafGeometry(leaf, geo, t) {
   // Each row its own cross-section while the leaf turns by a corner (see layoutRows).
   const rowOf = (r) => (leaf.rowsActive ? leaf.rows[r] : leaf.profile);
   const half = t * LEAF_FILL / 2;
-  const z0 = -height / 2;
+  const z0 = -height / 2 + (leaf.rise ?? 0);
   const set = (v, px, py, pz) => {
     pos[3 * v] = px;
     pos[3 * v + 1] = py;

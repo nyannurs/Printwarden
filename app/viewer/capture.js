@@ -135,7 +135,7 @@ function bookPoints(scene, visit) {
     for (const [p, z] of ends) {
       const last = p.x.length - 1;
       for (const k of [0, last >> 2, last >> 1, (3 * last) >> 2, last]) {
-        v.set(p.x[k], p.y[k], z).applyMatrix4(m).sub(t);
+        v.set(p.x[k], p.y[k], z + leaf.rise).applyMatrix4(m).sub(t);
         visit(v.x * e[0] + v.y * e[1] + v.z * e[2], v.x * e[4] + v.y * e[5] + v.z * e[6], v.x * e[8] + v.y * e[9] + v.z * e[10]);
       }
     }

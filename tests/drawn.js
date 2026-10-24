@@ -147,7 +147,8 @@ export function readbackError(scene, sheets) {
         const v = base + k * R + MID_ROW;
         const x = p.x[k] + nx * (side * half + d);
         const y = p.y[k] + ny * (side * half + d);
-        worst = Math.max(worst, Math.hypot(verts[3 * v] - x, verts[3 * v + 1] - y));
+        const z = -leaf.height / 2 + leaf.rise + (leaf.height * MID_ROW) / (R - 1); // (a spiral's page as far up as it hangs)
+        worst = Math.max(worst, Math.hypot(verts[3 * v] - x, verts[3 * v + 1] - y, verts[3 * v + 2] - z));
       }
     }
   }
@@ -212,7 +213,7 @@ export function solids(scene, sheets) {
   return out;
 }
 
-/** Where the paper is punched at z (block space), per hole a range of s; [] without holes. */
+/** Where the paper is punched at z (the page's own, from its middle), per hole a range of s; [] without holes. */
 function holesAt(scene, z) {
   const st = scene.model.style;
   if (st.spine !== "coil") return [];
@@ -363,7 +364,7 @@ export function crossings(scene, parts, { between = 3, moved = null } = {}) {
   const R = LEAF_ROWS;
   const zs = new Set();
   for (const leaf of scene.leaves) {
-    const z0 = -leaf.height / 2;
+    const z0 = -leaf.height / 2 + leaf.rise;
     for (let r = 0; r < R; r++) {
       for (let q = 0; q <= (r < R - 1 ? between : 0); q++) zs.add(z0 + (leaf.height * (r + q / (between + 1))) / (R - 1));
     }
@@ -397,10 +398,11 @@ export function crossings(scene, parts, { between = 3, moved = null } = {}) {
     && (!moved || moved.has(a) || moved.has(b)) && !stacked(a, b);
   const faults = new Map();
   for (const z of [...zs].sort((a, b) => a - b)) {
-    const holes = holesAt(scene, z);
     const segs = parts.map((p, k) => {
       const out = [];
-      slice(p.tris, z, p.kind === "sheet" ? holes : [], bands[k].get(Math.floor(z / BAND)) ?? [], out);
+      // (A spiral's pages each as far up as they hang on the wire, their holes with them.)
+      const holes = p.kind === "sheet" ? holesAt(scene, z - scene.leaves[p.leaf].rise) : [];
+      slice(p.tris, z, holes, bands[k].get(Math.floor(z / BAND)) ?? [], out);
       return out;
     });
     for (const [a, b, x, y] of crossingsAmong(segs, owners, wanted)) {
@@ -421,7 +423,7 @@ export function crossings(scene, parts, { between = 3, moved = null } = {}) {
 
 // --- the coil ----------------------------------------------------------------------------------
 
-/** How far into a punched hole (mm) a point of the page is (s, z: the page's own mm): > 0 inside. */
+/** How far into a punched hole (mm) a point of the page is (s, z: the page's own mm, from its middle): > 0 inside. */
 function intoHole(scene, sPage, zBlock) {
   const st = scene.model.style;
   const h = scene.model.height;
@@ -533,7 +535,7 @@ export function coilClearance(scene, sheets, { samples = 4000 } = {}) {
             const dist = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
             if (dist > reach) continue;
             const sPage = wa * t.s[0] + wb * t.s[1] + wc * t.s[2];
-            const inside = intoHole(scene, sPage, q[2]);
+            const inside = intoHole(scene, sPage, q[2] - scene.leaves[t.leaf].rise);
             // The paper's nearest: this point, or (inside a hole) the hole's edge beyond it.
             const paper = inside > 0 ? Math.hypot(dist, inside) : dist;
             const clearance = paper - wire;
