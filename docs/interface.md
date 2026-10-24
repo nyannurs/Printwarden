@@ -19,7 +19,7 @@ What it adds is the window, the controls, and the bookkeeping of which page has 
 | `capture.js` | Screenshots and videos: the pages at the output's resolution, the MP4 encoder, ProRes through FFmpeg. |
 | `client.js` | The client viewer export (see [The client viewer](client-viewer.md)). |
 | `colour.js` | The CMYK profile choice, and the plates that print: both switches of the ink table, instant. |
-| `plates.js` | The Separations button and window: which plates print (`setPlates` in colour.js); muted until the document's renderer is ready. |
+| `plates.js` | The Separations button and its column of pills: which plates print (`setPlates` in colour.js); muted until the document's renderer is ready. |
 | `inkview.js` | The timeline's thumbnails from their inks: a small WebGL program with the ink table and the plates as the 3D view has them. |
 | `spine-panel.js` | The spine's color or artwork and the Book spine panel. |
 | `finish.js` | Spot finishes. |

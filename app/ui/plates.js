@@ -1,7 +1,7 @@
 // Separations, as Acrobat's Output Preview has them: which of the press's plates print,
 // switched on and off live, to check overprint and what each ink carries. A button under Video
-// opens a small window to its left, in the manner of a dropdown's open list: a row per plate with
-// its ink's circle and name; a click prints the plate or leaves it out. Process plates switches
+// opens a column of pills to its left, as the camera menu's: a pill a plate, with its ink's circle
+// and name; a click prints the plate or leaves it out. Process plates switches
 // the four at once; the document's spot colours follow, a row each, once the renderer has listed
 // them. A process plate is switched where the inks are shown (setPlates in colour.js): every page
 // is its inks, and a plate left out is ink that isn't there, from the next frame, raster images
@@ -38,7 +38,8 @@ let spotsShown = null; // the spot list the rows were made for
 function makeRow(name, dot, onClick) {
   const b = document.createElement("button");
   b.type = "button";
-  b.className = "select-item plate-item";
+  b.className = "pill plate-item";
+  b.style.setProperty("--w", "4");
   b.role = "menuitemcheckbox";
   const circle = document.createElement("span");
   circle.className = "plate-dot";
@@ -48,8 +49,6 @@ function makeRow(name, dot, onClick) {
   label.textContent = name;
   b.append(circle, label);
   b.addEventListener("click", onClick);
-  b.addEventListener("pointerenter", () => mark(b));
-  b.addEventListener("pointerleave", () => b.classList.remove("active"));
   panel.append(b);
   rows.push(b);
   return b;
@@ -74,11 +73,6 @@ export function initPlates() {
     }
   });
   show();
-}
-
-/** The row under the pointer: a lighter black, as a dropdown's. */
-function mark(row) {
-  for (const r of rows) r.classList.toggle("active", r === row);
 }
 
 function toggle(open = panel.hidden) {
