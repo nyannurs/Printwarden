@@ -1,9 +1,12 @@
 // Pages drawn for a press (tools/mupdf/printwarden.c, pdf/mupdf-render.js): plain CMYK taken as
 // it is in the chosen profile, RGB content converted through it, however the PDF sets its
-// colour spaces; the spot colours listed and left out by name; a render thread that fails
-// replaced (pdf/render.js).
+// colour spaces; the spot colours listed, drawn as channels of their own and mixed in as MuPDF
+// composites them, left out by name; a render thread that fails replaced (pdf/render.js).
 
+import * as mupdf from "../vendor/mupdf/mupdf.js";
+import { InkDocument } from "../app/pdf/mupdf-render.js";
 import { createRenderer } from "../app/pdf/render.js";
+import { mixImage } from "../app/viewer/inklut.js";
 import { eq, near, ok, test } from "./harness.js";
 
 const PT = 72 / 25.4;
@@ -19,7 +22,9 @@ const eci = async () => new Uint8Array(await (await fetch("../vendor/icc/ISOcoat
 /**
  * Page 1: black (K 100), cyan (C 100) and an RGB blue, side by side, then a strip of the spot
  * "Spot A". Page 2: "Spot B" then "Spot A" (the other order on the page), then an image in
- * "Spot A" (as Photoshop exports a spot channel). `intent`: an output
+ * "Spot A" (as Photoshop exports a spot channel). Page 3, overprint: cyan all over; Spot A
+ * overprinting it, Spot B knocking it out, and 50 % black overprinting Spot A. Page 4: five
+ * spots side by side (one more than an ink image has channels for). `intent`: an output
  * intent too (the ECI profile), which MuPDF applies over a draw device's own defaults.
  */
 async function pressPdf({ intent = null } = {}) {
@@ -49,6 +54,24 @@ async function pressPdf({ intent = null } = {}) {
   p2.pushOperators(...fill("B", 0), ...fill("A", 100),
     PDFOperator.of("q"), PDFOperator.of("cm", [100, 0, 0, 20, 200, 0].map((v) => PDFNumber.of(v))),
     PDFOperator.of("Do", [PDFName.of("ImA")]), PDFOperator.of("Q"));
+  const p3 = doc.addPage([W, H]);
+  p3.node.Resources().set(PDFName.of("ColorSpace"), ctx.obj({ B: b, A: a }));
+  p3.node.Resources().set(PDFName.of("ExtGState"), ctx.obj({ OP: ctx.obj({ OP: true, op: true, OPM: 1 }) }));
+  const n = (...v) => v.map((x) => PDFNumber.of(x));
+  p3.pushOperators(
+    PDFOperator.of("k", n(1, 0, 0, 0)), PDFOperator.of("re", n(0, 0, W, H)), PDFOperator.of("f"),
+    PDFOperator.of("q"), PDFOperator.of("gs", [PDFName.of("OP")]), ...fill("A", 0), PDFOperator.of("Q"),
+    ...fill("B", 100),
+    PDFOperator.of("q"), PDFOperator.of("gs", [PDFName.of("OP")]), PDFOperator.of("k", n(0, 0, 0, 0.5)),
+    PDFOperator.of("re", n(50, 10, 100, 60)), PDFOperator.of("f"), PDFOperator.of("Q"),
+  );
+  const p4 = doc.addPage([W, H]);
+  const five = ["S1", "S2", "S3", "S4", "S5"];
+  p4.node.Resources().set(PDFName.of("ColorSpace"), ctx.obj(Object.fromEntries(five.map((name, i) => [name, spot(name, [0.2 * i, 0.1, 0, 0.1])]))));
+  p4.pushOperators(...five.flatMap((name, i) => [
+    PDFOperator.of("q"), PDFOperator.of("cs", [PDFName.of(name)]), PDFOperator.of("scn", n(1)),
+    PDFOperator.of("re", n(60 * i, 0, 60, H)), PDFOperator.of("f"), PDFOperator.of("Q"),
+  ]));
   if (intent) {
     const profile = ctx.register(ctx.flateStream(intent, { N: 4 }));
     doc.catalog.set(PDFName.of("OutputIntents"), ctx.obj([ctx.obj({
@@ -88,27 +111,120 @@ test("PRESS: plain CMYK exact in the chosen profile, RGB converted through it, a
   }
 });
 
-test("SPOTS: the document's spots by name, their CMYK look and pages; one left out by name isn't drawn, whatever its order on a page", async () => {
-  const r = await createRenderer(await pressPdf());
+/**
+ * Page `index` of `bytes` as MuPDF composites it (every spot into the process inks, or left out:
+ * `off`), in `profile`: the reference the views' mixing is held to. Drawn with the renderer's own
+ * calls on the main thread, every spot set to be composited.
+ */
+function composited(bytes, index, profile, off = []) {
+  const lib = mupdf.libmupdfModule;
+  const doc = new InkDocument(bytes);
+  try {
+    doc.setProfile(profile);
+    doc.setSpotsOff(off);
+    const p = doc.page(index);
+    const channels = p.spots.length; // the ink image's would-be channels: composited instead
+    p.spots.forEach((name, i) => lib._wasm_pw_set_separation_behavior(p.seps, i, off.includes(name) ? 2 : 0));
+    const scale = H / (p.page.getBounds()[3] - p.page.getBounds()[1]);
+    const at = (floats) => {
+      const ptr = lib._wasm_malloc(4 * floats.length);
+      lib.HEAPF32.set(floats, ptr >> 2);
+      return ptr;
+    };
+    const pix = new mupdf.Pixmap(lib._wasm_pw_new_pixmap_from_page(p.page.pointer, at([scale, 0, 0, scale, 0, 0]),
+      at([0, 0, W, H]), doc.profile.pointer, p.seps, 0, doc.profile.pointer));
+    const data = pix.getPixels().slice();
+    pix.destroy();
+    ok(channels > 0 && data.length === W * H * 4, "composited: the four process inks only");
+    return data;
+  } finally {
+    doc.destroy();
+  }
+}
+
+test("SPOTS: the document's spots by name, their look and pages; each page's (up to four) as channels of their own", async () => {
+  const bytes = await pressPdf();
+  const r = await createRenderer(bytes);
   try {
     const spots = await r.spots();
-    eq(spots.map((s) => [s.name, s.pages]), [["Spot A", [0, 1]], ["Spot B", [1]]]);
-    spots[0].cmyk.forEach((v, i) => near(v, [0, 0.5, 1, 0][i], 1e-3, "Spot A's look"));
-    const strip = async () => {
-      const ink = await r.render(1, whole, H, 0, { mode: "ink", cache: false });
-      return { b: inkAt(ink, 50, 90), a: inkAt(ink, 150, 90), image: inkAt(ink, 250, 90) };
+    const byName = new Map(spots.map((s) => [s.name, s]));
+    eq(byName.get("Spot A").pages, [0, 1, 2]);
+    eq(byName.get("Spot B").pages, [1, 2]);
+    byName.get("Spot A").cmyk.forEach((v, i) => near(v, [0, 0.5, 1, 0][i], 1e-3, "Spot A's look"));
+    // Page 4's five: four as channels, one composited (which one is the page's own order).
+    const five = ["S1", "S2", "S3", "S4", "S5"].map((name) => byName.get(name));
+    eq(five.map((s) => s.pages), [[3], [3], [3], [3], [3]]);
+    eq(five.filter((s) => s.composited.length).map((s) => s.composited), [[3]], "one of five composited");
+    // Page 2: Spot A in a channel of its own, fill and image alike; no process ink under it.
+    const ink = await r.render(1, whole, H, 0, { mode: "ink", cache: false });
+    const ch = ink.spotNames.indexOf("Spot A");
+    ok(ch >= 0 && ink.spotNames.includes("Spot B"), `its spots' channels: ${ink.spotNames}`);
+    const spotAt = (x, y = 90) => ink.spots[(y * ink.width + x) * 4 + ch];
+    eq([inkAt(ink, 150, 90), spotAt(150)], [[0, 0, 0, 0], 255], "the fill: Spot A at full tint, no CMYK");
+    eq([inkAt(ink, 250, 90), spotAt(250)], [[0, 0, 0, 0], 255], "the image in Spot A: the same");
+  } finally {
+    r.destroy();
+  }
+});
+
+// (MuPDF's composite with a spot left out knocked out what an overprinting fill in it lay on:
+// tools/mupdf/overprint-disabled-separations.patch.)
+test("SPOTS MIXED: the channels mixed in as the views do (CMYK + tint × look) are MuPDF's composite, overprint and a spot left out included", async () => {
+  const bytes = await pressPdf();
+  const profile = await eci();
+  const r = await createRenderer(bytes, profile);
+  try {
+    const looks = new Map((await r.spots()).map((s) => [s.name, s.cmyk]));
+    for (const off of [[], ["Spot A"], ["Spot B", "S2"]]) {
+      r.setSpotsOff(off); // (the composited fifth on page 4, if it is one of these)
+      const printing = new Map([...looks].filter(([name]) => !off.includes(name)));
+      for (const index of [0, 1, 2, 3]) {
+        const ink = await r.render(index, whole, H, 0, { mode: "ink", cache: false });
+        const mixed = mixImage(ink, [true, true, true, true], printing);
+        const reference = composited(bytes, index, profile, off);
+        let worst = 0;
+        for (let i = 0; i < mixed.length; i++) worst = Math.max(worst, Math.abs(mixed[i] - reference[i]));
+        ok(worst <= 1, `page ${index + 1}, ${off.join(", ") || "every spot"} printing: off by ${worst} of 255 at most`);
+      }
+    }
+    // What a plate left out means on page 3: its ink isn't there, the others are as printed.
+    const page3 = await r.render(2, whole, H, 0, { mode: "ink", cache: false });
+    const mixedAt = (off, x, y) => {
+      const m = mixImage(page3, [true, true, true, true], new Map([...looks].filter(([name]) => !off.includes(name))));
+      return [...m.subarray((y * W + x) * 4, (y * W + x) * 4 + 4)];
     };
-    const all = await strip();
-    ok(all.a.some((v) => v > 0) && all.b.some((v) => v > 0), "both spots drawn");
-    eq(all.image, all.a, "the image in Spot A: the same ink as the fill");
+    eq(mixedAt(["Spot A"], 50, 90), [255, 0, 0, 0], "Spot A overprinting cyan, left out: the cyan under it");
+    eq(mixedAt(["Spot B"], 150, 90), [0, 0, 0, 0], "Spot B knocking cyan out, left out: paper");
+    eq(mixedAt(["Spot A"], 100, 60), [255, 0, 0, 127], "black overprinting Spot A, Spot A left out: cyan and black");
+  } finally {
+    r.destroy();
+  }
+});
+
+test("SPOTS LEFT OUT: a spot left out by name isn't drawn in sRGB images (fills and images in it), nor where composited", async () => {
+  const bytes = await pressPdf();
+  const r = await createRenderer(bytes);
+  try {
+    const shot = async (index) => {
+      const img = await r.render(index, whole, H, 0, { cache: false });
+      const c = new OffscreenCanvas(img.width, img.height).getContext("2d");
+      c.drawImage(img, 0, 0);
+      return (x, y = 90) => [...c.getImageData(x, y, 1, 1).data.slice(0, 3)];
+    };
+    const before = await shot(1);
+    ok(before(150).some((v) => v < 200), "Spot A drawn");
     r.setSpotsOff(["Spot A"]);
-    const without = await strip();
-    eq(without.a, [0, 0, 0, 0], "Spot A left out: paper");
+    const after = await shot(1);
+    eq(after(150), [255, 255, 255], "the fill: paper");
     // (MuPDF drew it through its alternate colour space: tools/mupdf/separation-disabled-images.patch.)
-    eq(without.image, [0, 0, 0, 0], "Spot A left out of the image too");
-    eq(without.b, all.b, "Spot B as it was");
-    r.setSpotsOff([]);
-    eq((await strip()).a, all.a, "Spot A back");
+    eq(after(250), [255, 255, 255], "the image in it: paper");
+    eq(after(50), before(50), "Spot B as it was");
+    const fifth = (await r.spots()).find((s) => s.composited.length).name;
+    const strip = 60 * ["S1", "S2", "S3", "S4", "S5"].indexOf(fifth) + 30;
+    const withIt = await r.render(3, whole, H, 0, { mode: "ink", cache: false });
+    ok(inkAt(withIt, strip).some((v) => v > 0), "the composited spot in the process inks");
+    r.setSpotsOff([fifth]);
+    eq(inkAt(await r.render(3, whole, H, 0, { mode: "ink", cache: false }), strip), [0, 0, 0, 0], "left out: paper");
   } finally {
     r.destroy();
   }

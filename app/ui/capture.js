@@ -4,6 +4,7 @@
 
 import { chooseSaveLocation, proResAvailable } from "../platform.js";
 import { planDetail, videoImageHeight } from "../viewer/detail.js";
+import { mixImage } from "../viewer/inklut.js";
 import { MAX_DETAIL } from "../viewer/shaders.js";
 import { onOpeningChanged, scene, state } from "./app.js";
 import { mp4Bitrate, screenshotDialog, videoDialog, videoLength } from "./dialogs.js";
@@ -78,6 +79,12 @@ export async function prepareCaptureTile(visible) {
       x0: tr.x0 + region.u0 * pageMm.width, x1: tr.x0 + region.u1 * pageMm.width,
       y0: tr.y1 - region.v1 * pageMm.height, y1: tr.y1 - region.v0 * pageMm.height,
     }, heightPx, CAPTURE_PRIORITY, { mode: "ink", cache: false, flex: true })));
+    // As they print, the plates as they are: strips have no spot channels in the page shader.
+    for (const image of images) {
+      image.data = mixImage(image, state.colour.inks, state.spotInks);
+      image.spots = null;
+      image.spotNames = [];
+    }
     scene.setPageDetails(folio, images.map((image, i) => ({ image, region: plan[i].region })), { immediate: true });
     // Known, so the capture's strips go with the others once it ends (until 0.17.79 the strips
     // of a page that had none before stayed on it after a screenshot, at the capture's size).

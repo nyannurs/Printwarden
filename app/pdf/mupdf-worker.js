@@ -39,7 +39,8 @@ self.onmessage = async ({ data }) => {
         if (!doc) throw new Error("no document");
         const drawn = doc.draw(data.index, data.rect, data.height, data.mode ?? "rgb", { mips: data.mips ?? 0 });
         if (data.mode === "ink") {
-          self.postMessage({ type: "done", id: data.id, ink: drawn }, [drawn.data.buffer, ...(drawn.mips ?? []).map((m) => m.buffer)]);
+          const buffers = [drawn.data, drawn.spots, ...(drawn.mips ?? []), ...(drawn.spotMips ?? [])].filter(Boolean).map((b) => b.buffer);
+          self.postMessage({ type: "done", id: data.id, ink: drawn }, buffers);
         } else {
           const bitmap = await toBitmap(drawn);
           self.postMessage({ type: "done", id: data.id, bitmap }, [bitmap]);

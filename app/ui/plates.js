@@ -133,7 +133,9 @@ function syncSpotRows() {
  * ready. The button inverted while any plate is left out, so it can't be forgotten.
  */
 export function refreshPlates() {
+  const listed = spotsShown;
   show();
+  if (spotsShown !== listed) setInks(inkOn); // a new list: its spots to the views
 }
 
 function show() {

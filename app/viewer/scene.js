@@ -185,6 +185,13 @@ export class BookScene {
     // images, white. And the ink table the shaders read the inks through (setInkLut).
     this.noInk = makeInkPaper();
     this.blank = this.white;
+    // The spots: a page image's spot channels where it has none (no ink), the look in CMYK of
+    // each spot that prints, by name (setSpotInks), and which spot each page's channels hold.
+    this.noSpots = makeInkPaper();
+    /** @type {Map<string, number[]>} */
+    this.spotInks = new Map();
+    /** @type {Map<number, string[]>} folio -> its spot channels' names (see uploads.js showPage) */
+    this.spotNames = new Map();
     this.inkLut = makeInkLut(naiveLut());
     /** @type {Map<number, THREE.Mesh>} folio -> a flap lying on that page (see setPageFlap) */
     this.flaps = new Map();
@@ -375,6 +382,22 @@ export class BookScene {
   setInksOn(on) {
     this.shared.uInkOn.value.set(on[0] ? 1 : 0, on[1] ? 1 : 0, on[2] ? 1 : 0, on[3] ? 1 : 0);
     this.dirty = true;
+  }
+
+  /**
+   * The spots that print, by name, each with its look in CMYK (0..1, in the profile: what MuPDF
+   * composites it as); a spot left out is not in the map. Every page's spot channels are mixed
+   * in by it from the next frame, as the process plates are switched (uploads.js refreshSpots).
+   * @param {Map<string, number[]>} inks
+   */
+  setSpotInks(inks) {
+    this.spotInks = inks;
+    uploads.refreshSpots(this);
+  }
+
+  /** See uploads.js queueTile. */
+  queueTile(folio, level, ix, iy, page, tile, stamp) {
+    uploads.queueTile(this, folio, level, ix, iy, page, tile, stamp);
   }
 
   /**

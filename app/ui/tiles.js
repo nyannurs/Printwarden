@@ -172,7 +172,7 @@ function request(key, t) {
       tileStats.lastMs = performance.now() - asked;
       if (tileStats.latencies.push(tileStats.lastMs) > 64) tileStats.latencies.shift();
       if (gen !== state.generation || stamp !== folioStamp(folio)) return tile.close?.();
-      scene.tiles.queueTile(folio, level, ix, iy, p.page, tile, stamp);
+      scene.queueTile(folio, level, ix, iy, p.page, tile, stamp);
       // At rest, the view asked once for at most REQUESTS_PER_UPDATE: ask again as they land,
       // until everything it wants (the spreads either side included) is in.
       if (scene.settled && !again && inFlight.size < IN_FLIGHT_MAX / 2) {

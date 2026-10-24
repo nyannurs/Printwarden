@@ -4,10 +4,12 @@
 // Output Preview shows a file. Used in the render threads (mupdf-worker.js) and, where threads
 // can't start, on the main thread (render.js).
 //
-// Two kinds of image. `ink`: the page's inks, a byte a channel (Cyan, Magenta, Yellow, Black;
-// its spot colours composited into them), in the chosen profile: plain CMYK as it is, RGB
-// content converted into it. What the 3D view and the timeline draw through the ink table
-// (`lut`: the profile as a grid, see viewer/inklut.js) with the process plates switched there.
+// Two kinds of image. `ink`: the page's inks, a byte a channel (Cyan, Magenta, Yellow, Black),
+// in the chosen profile: plain CMYK as it is, RGB content converted into it; and its spot colours
+// as channels of their own (up to SPOT_CHANNELS of them; any further ones composited into the
+// four). What the 3D view and the timeline draw through the ink table (`lut`: the profile as a
+// grid, see viewer/inklut.js), every plate switched there, the spots mixed in as MuPDF mixes them
+// (CMYK + tint × the spot's look in the profile, at most full ink; see INK_GLSL).
 // `rgb`: the page as an ImageBitmap in sRGB through the profile, white paper, for what leaves
 // the app (the client viewer's pages) and for anything drawn as an image.
 //
@@ -30,7 +32,11 @@ const { ColorSpace, Pixmap } = mupdf;
 // Separation behaviours (fz_separation_behavior): composited into the process colours, a
 // channel of its own, left out.
 const SEP_COMPOSITE = 0;
+const SEP_SPOT = 1;
 const SEP_DISABLED = 2;
+
+/** A page's spot colours drawn as channels of their own in an ink image (an RGBA texture's worth). */
+export const SPOT_CHANNELS = 4;
 
 // Scratch memory in MuPDF's heap for a rectangle handed to its glue (4 floats).
 let rectPtr = 0;
@@ -91,14 +97,15 @@ export class InkDocument {
 
   /**
    * The document's spot colours, every page's in the order they first appear: each with its
-   * name, its look in plain CMYK at full tint (0..1, as the file gives it: the alternate colour
-   * space's), and the pages (0-based) it is on.
-   * @returns {{name: string, cmyk: number[], pages: number[]}[]}
+   * name, its look at full tint in the chosen profile's CMYK (0..1: what MuPDF composites it as,
+   * from the file's alternate colour space), the pages (0-based) it is on, and those where it is
+   * composited into the process inks of an ink image (past SPOT_CHANNELS on the page).
+   * @returns {{name: string, cmyk: number[], pages: number[], composited: number[]}[]}
    */
   spots() {
-    /** @type {Map<string, {name: string, cmyk: number[], pages: number[]}>} */
+    /** @type {Map<string, {name: string, cmyk: number[], pages: number[], composited: number[]}>} */
     const found = new Map();
-    const cmyk = ColorSpace.DeviceCMYK.pointer;
+    const cmyk = (this.profile ?? ColorSpace.DeviceCMYK).pointer;
     for (let index = 0; index < this.count; index++) {
       const kept = this.pages.get(index);
       const page = kept ? null : this.doc.loadPage(index);
@@ -109,10 +116,11 @@ export class InkDocument {
           const name = libmupdf.UTF8ToString(libmupdf._wasm_pw_separation_name(seps, i));
           let s = found.get(name);
           if (!s) {
-            s = { name, cmyk: [0, 1, 2, 3].map((c) => libmupdf._wasm_pw_separation_equivalent(seps, i, cmyk, c)), pages: [] };
+            s = { name, cmyk: [0, 1, 2, 3].map((c) => libmupdf._wasm_pw_separation_equivalent(seps, i, cmyk, c)), pages: [], composited: [] };
             found.set(name, s);
           }
           s.pages.push(index);
+          if (i >= SPOT_CHANNELS) s.composited.push(index);
         }
       } finally {
         if (!kept) {
@@ -214,17 +222,21 @@ export class InkDocument {
   }
 
   /**
-   * Draw `rect` (mm, PDF user space) of page `index` at `height` pixels, with the inks that print.
-   * `mode` "rgb": {width, height, data: Uint8ClampedArray RGBA, sRGB, opaque}; "ink": {width,
-   * height, n: 4, data: Uint8Array, 4 bytes a pixel: C, M, Y, K, the spots composited in},
-   * with `mips` smaller copies (half, quarter, ...: see mips.js) when asked for.
+   * Draw `rect` (mm, PDF user space) of page `index` at `height` pixels.
+   * `mode` "rgb": {width, height, data: Uint8ClampedArray RGBA, sRGB, opaque}, the spots left
+   * out not drawn, the others composited. "ink": {width, height, n: 4, data: Uint8Array, 4 bytes
+   * a pixel: C, M, Y, K; spots: Uint8Array | null, 4 bytes a pixel: the page's first
+   * SPOT_CHANNELS spots' tints (0 where it has fewer), spotNames: theirs}, its further spots
+   * composited into the four (or left out). `mips`: smaller copies (half, quarter, ...: see
+   * mips.js) of both, `mips` and `spotMips`.
    */
   draw(index, rect, height, mode = "rgb", { mips = 0 } = {}) {
     const p = this.page(index);
     const { ctm, width, height: hPx } = this.#place(p, rect, height);
     const ink = mode === "ink";
+    const channels = ink ? Math.min(SPOT_CHANNELS, p.spots.length) : 0;
     p.spots.forEach((name, i) => {
-      libmupdf._wasm_pw_set_separation_behavior(p.seps, i, this.spotsOff.has(name) ? SEP_DISABLED : SEP_COMPOSITE);
+      libmupdf._wasm_pw_set_separation_behavior(p.seps, i, i < channels ? SEP_SPOT : this.spotsOff.has(name) ? SEP_DISABLED : SEP_COMPOSITE);
     });
     // Ink: a pixmap in the profile itself (MuPDF's own CMYK without one), so plain CMYK is taken
     // as it is (the same colour space at both ends: no conversion) and RGB content converted
@@ -235,13 +247,32 @@ export class InkDocument {
     let pix = null;
     try {
       pix = new Pixmap(libmupdf._wasm_pw_new_pixmap_from_page(p.page.pointer, matrixIn(ctm), bbox, cs.pointer, p.seps, ink ? 0 : 1, press));
-      const n = pix.getNumberOfComponents();
-      const data = (ink ? new Uint8Array(width * hPx * n) : new Uint8ClampedArray(width * hPx * 4));
-      data.set(pix.getPixels()); // a view into MuPDF's heap: copied out before anything else moves it
-      if (!ink) return { width, height: hPx, data };
-      // (The process plates are switched where the inks are shown: every ink image carries all four.)
-      const out = { width, height: hPx, n, data, mips: undefined };
-      if (mips > 0) out.mips = mipChain(data, width, hPx, mips);
+      const pixels = pix.getPixels(); // a view into MuPDF's heap: copied out before anything else moves it
+      if (!ink) {
+        const data = new Uint8ClampedArray(width * hPx * 4);
+        data.set(pixels);
+        return { width, height: hPx, data };
+      }
+      // C, M, Y, K, then the spot channels: the four apart, the spots apart (an RGBA texture each).
+      const n = 4 + channels;
+      const data = new Uint8Array(width * hPx * 4);
+      const spots = channels ? new Uint8Array(width * hPx * 4) : null;
+      if (!spots) data.set(pixels);
+      else {
+        for (let i = 0, o = 0; o < data.length; i += n, o += 4) {
+          data[o] = pixels[i];
+          data[o + 1] = pixels[i + 1];
+          data[o + 2] = pixels[i + 2];
+          data[o + 3] = pixels[i + 3];
+          for (let c = 0; c < channels; c++) spots[o + c] = pixels[i + 4 + c];
+        }
+      }
+      // (Every plate is switched where the inks are shown: every ink image carries them all.)
+      const out = { width, height: hPx, n: 4, data, spots, spotNames: p.spots.slice(0, channels), mips: undefined, spotMips: undefined };
+      if (mips > 0) {
+        out.mips = mipChain(data, width, hPx, mips);
+        if (spots) out.spotMips = mipChain(spots, width, hPx, mips);
+      }
       return out;
     } finally {
       pix?.destroy();

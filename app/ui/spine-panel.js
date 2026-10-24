@@ -1,7 +1,7 @@
 // The book's spine: its colour (a preset, a cover's edge, or any) or artwork from a PDF, and
 // the panel where they are chosen, with the spine's width.
 
-import { inkToRgb, naiveLut } from "../viewer/inklut.js";
+import { inkToRgb, mixInks, naiveLut } from "../viewer/inklut.js";
 import { coverOf } from "../core/paper.js";
 import { calculatedSpine, coverMmFor, hasSpine, paperForSpine, spineTakesArtwork } from "../core/spine.js";
 import { openPdf } from "../pdf/load.js";
@@ -36,33 +36,36 @@ function coverEdge(which) {
   const t = state.textures.get(folio);
   if (!t) return null;
   if (!t.edge) return paper; // a blank cover
-  const on = state.colour.inks ?? [true, true, true, true];
-  const [c, m, y, k] = t.edge.map((v, i) => (on[i] === false ? 0 : v));
+  const [c, m, y, k] = mixInks(t.edge.inks, t.edge.spots, t.edge.spotNames, state.colour.inks ?? [], state.spotInks);
   const rgb = inkToRgb(state.inkLut ?? naiveLut(), c, m, y, k);
   const p = [1, 3, 5].map((i) => parseInt(paper.slice(i, i + 2), 16) / 255);
   return "#" + rgb.map((v, i) => Math.round(v * p[i]).toString(16).padStart(2, "0")).join("");
 }
 
 /**
- * The average inks (Cyan, Magenta, Yellow, Black, 0..1) of a page along its left or right edge
- * (an ink image, see pdf/mupdf-render.js).
+ * The average inks of a page along its left or right edge (an ink image, see
+ * pdf/mupdf-render.js): Cyan, Magenta, Yellow, Black and its spot channels' tints, 0..1, and
+ * which spot each channel is (mixed with the plates as they are by mixInks).
+ * @returns {{inks: number[], spots: number[], spotNames: string[]}}
  */
 export function averageEdge(image, left) {
-  const { width: w, height: h, data } = image;
+  const { width: w, height: h, data, spots } = image;
   const cols = Math.max(1, Math.round(w * 0.03));
   const x0 = left ? 0 : w - cols;
   const y0 = Math.round(h * 0.08);
   const y1 = Math.round(h * 0.92);
-  const sum = [0, 0, 0, 0];
+  const sum = [0, 0, 0, 0, 0, 0, 0, 0];
   let n = 0;
   for (let y = y0; y < y1; y++) {
     for (let x = x0; x < x0 + cols; x++) {
       const o = (y * w + x) * 4;
       for (let k = 0; k < 4; k++) sum[k] += data[o + k];
+      if (spots) for (let k = 0; k < 4; k++) sum[4 + k] += spots[o + k];
       n++;
     }
   }
-  return sum.map((v) => v / Math.max(1, n) / 255);
+  const mean = sum.map((v) => v / Math.max(1, n) / 255);
+  return { inks: mean.slice(0, 4), spots: mean.slice(4), spotNames: image.spotNames ?? [] };
 }
 
 /** The colour the spine shows (without artwork). */

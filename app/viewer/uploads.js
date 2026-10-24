@@ -1,7 +1,8 @@
 // The pages' images to the GPU: their base images (setPageTexture, spread over frames), an image
 // shown for now instead (a video's), a capture's sharp strips, and the tiles (tiles.js) bound to
-// each page's material as their tables come. Functions of the scene (scene.js); the textures are
-// kept through rebuilds of the book (scene.pageTextures, overrides).
+// each page's material as their tables come; with each page, its spot channels and the spot
+// matrix that mixes them in (spotInk). Functions of the scene (scene.js); the textures are kept
+// through rebuilds of the book (scene.pageTextures, overrides).
 
 import * as THREE from "three";
 import { MAX_DETAIL } from "./shaders.js";
@@ -22,6 +23,7 @@ export function clearPages(scene) {
   scene.pageTextures.clear();
   scene.overrides.clear();
   scene.tiles.reset();
+  scene.spotNames.clear();
   showAllPages(scene);
 }
 
@@ -58,7 +60,7 @@ function warm(scene, ...textures) {
   const r = scene.renderer;
   const before = r.getRenderTarget();
   r.setRenderTarget(w.target);
-  for (const t of textures) {
+  for (const t of textures.flatMap((t) => (t.userData.spots ? [t, t.userData.spots] : [t]))) { // an ink image's spots with it
     r.initTexture(t);
     const m = t.type === THREE.UnsignedIntType ? w.uint : w.float;
     m.uniforms.uTex.value = t;
@@ -104,13 +106,78 @@ function pageTexture(scene, image) {
   return tex;
 }
 
-/** A page's image on its leaf (one shown for now, else its own, else white), and through it. */
+/**
+ * A page's image on its leaf (one shown for now, else its own, else white), with its spot
+ * channels and spot matrix, and through it (the other side's show-through).
+ */
 export function showPage(scene, folio) {
   const leaf = scene.leaves[Math.ceil(folio / 2) - 1];
   if (!leaf) return;
   const [mat, other] = folio % 2 ? [leaf.front, leaf.back] : [leaf.back, leaf.front];
-  mat.map = scene.overrides.get(folio) ?? scene.pageTextures.get(folio) ?? scene.blank;
-  other.userData.uniforms.uBack.value = mat.map; // show-through from this side
+  const shown = scene.overrides.get(folio);
+  mat.map = shown ?? scene.pageTextures.get(folio) ?? scene.blank;
+  const u = mat.userData.uniforms;
+  u.uSpots.value = mat.map.userData.spots ?? scene.noSpots;
+  // The page's own channels: its tiles' too, which may come before its image (an image shown
+  // for now is of the same page, but has channels only if it was drawn with them).
+  spotInk(scene, (shown ? shown.userData.spotNames : scene.spotNames.get(folio)) ?? [], u.uSpotInk.value);
+  const back = other.userData.uniforms;
+  back.uBack.value = mat.map; // show-through from this side
+  back.uBackSpots.value = u.uSpots.value;
+  back.uBackSpotInk.value.copy(u.uSpotInk.value);
+}
+
+/**
+ * A page's spot matrix (see INK_GLSL): column i, the look in CMYK (0..1) of the spot in its
+ * channel i (`names`), from scene.spotInks; nothing for a spot left out (not there), or a
+ * channel it hasn't.
+ * @param {import("./scene.js").BookScene} scene
+ * @param {string[]} names
+ * @param {THREE.Matrix4} out
+ * @returns {THREE.Matrix4} out
+ */
+export function spotInk(scene, names, out) {
+  const e = out.elements;
+  e.fill(0);
+  names.forEach((name, i) => {
+    const look = i < 4 ? scene.spotInks.get(name) : null;
+    if (look) for (let c = 0; c < 4; c++) e[4 * i + c] = look[c];
+  });
+  return out;
+}
+
+/** A spot matrix of nothing (no spot channels, or none printing). */
+export const noSpotInk = () => new THREE.Matrix4().fromArray(new Array(16).fill(0));
+
+/**
+ * Every page's spot matrix again (the spots that print, or their looks, changed: setSpotInks),
+ * the flaps' too: from the next frame, no image is touched.
+ * @param {import("./scene.js").BookScene} scene
+ */
+export function refreshSpots(scene) {
+  for (let folio = 1; folio <= 2 * scene.leaves.length; folio++) showPage(scene, folio);
+  for (const flap of scene.flaps.values()) {
+    const m = /** @type {any} */ (flap.material);
+    spotInk(scene, m.map?.userData.spotNames ?? [], m.userData.uniforms.uSpotInk.value);
+  }
+  scene.dirty = true;
+}
+
+/**
+ * A tile drawn (see tiles.js TileCache queueTile), its page's spot channels noted: the page's
+ * spot matrix is theirs, which the tiles come with as its image does (whichever comes first).
+ * @param {import("./scene.js").BookScene} scene
+ */
+export function queueTile(scene, folio, level, ix, iy, page, tile, stamp) {
+  noteSpotNames(scene, folio, tile.spotNames);
+  scene.tiles.queueTile(folio, level, ix, iy, page, tile, stamp);
+}
+
+function noteSpotNames(scene, folio, names = []) {
+  const had = scene.spotNames.get(folio);
+  if (had && had.join("\n") === names.join("\n")) return;
+  scene.spotNames.set(folio, names);
+  showPage(scene, folio);
 }
 
 /**
@@ -191,6 +258,7 @@ export function flushUploads(scene) {
       warm(scene, tex);
       freeImage(tex); // on the GPU now: the image in memory goes
       scene.pageTextures.set(folio, tex);
+      scene.spotNames.set(folio, tex.userData.spotNames ?? []);
       n++;
     }
     showPage(scene, folio);

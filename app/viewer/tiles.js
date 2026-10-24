@@ -8,8 +8,8 @@
 // drawn again from the cache at once, zooming out never shows less than what is kept, and
 // zooming in shows the coarser level for the few frames its tiles take to land.
 //
-// Tiles are ink images (pdf/mupdf-render.js, mode "ink"), so the process plates and the
-// profile's look switch them with everything else. Each carries a stamp, what its inks were
+// Tiles are ink images (pdf/mupdf-render.js, mode "ink"), so the plates and the profile's look
+// switch them with everything else; a tile's spot channels take a second layer. Each carries a stamp, what its inks were
 // drawn with besides the page (ui/pages.js inkStamp): a tile with an outdated one is still
 // drawn, but no longer counts as there (has), and its replacement takes its layer when it
 // comes. Each goes up with two mips made where it was drawn (pdf/mips.js): the texture array
@@ -86,17 +86,18 @@ export const tileKey = (folio, level, ix, iy) => `t:${folio}:${level}:${ix}:${iy
 /**
  * The cache's bookkeeping, without the GPU: which tile sits in which layer of the texture
  * array, which were drawn lately, and each page's table (what the shader reads: per level a
- * band of entries, one per tile position, RGBA bytes: the layer's index low and high, 255
- * if the tile is there, and how far it has faded in). (Exported for its tests, tests/tiles.test.js:
+ * band of entries, two per tile position, RGBA bytes: the layer's index low and high, 255 if
+ * the tile is there, and how far it has faded in; then its spot channels' layer, low and high,
+ * 255 if it has them). (Exported for its tests, tests/tiles.test.js:
  * the app uses it only through TileCache.)
  */
 export class TileIndex {
   /** @param {number} capacity layers in the texture array */
   constructor(capacity) {
     this.capacity = capacity;
-    /** @type {({key: string, folio: number, level: number, ix: number, iy: number, stamp: string, used: number, arrived: number} | null)[]} */
+    /** @type {(TileRecord | null)[]} each layer's tile (a tile with spot channels holds two) */
     this.slots = Array.from({ length: capacity }, () => null);
-    /** @type {Map<string, number>} key -> layer */
+    /** @type {Map<string, TileRecord>} */
     this.byKey = new Map();
     /** @type {Map<number, {page: ReturnType<typeof tilePage>, data: Uint8Array, width: number, height: number, dirty: boolean}>} */
     this.tables = new Map();
@@ -110,21 +111,21 @@ export class TileIndex {
 
   /** Whether the tile is kept: with `stamp`, only as drawn with that (see the header). */
   has(key, stamp) {
-    const layer = this.byKey.get(key);
-    return layer !== undefined && (stamp === undefined || this.slots[layer].stamp === stamp);
+    const r = this.byKey.get(key);
+    return !!r && (stamp === undefined || r.stamp === stamp);
   }
 
   /** A tile drawn by this view: not the next to go. */
   touch(key) {
-    const layer = this.byKey.get(key);
-    if (layer !== undefined) this.slots[layer].used = this.frame;
+    const r = this.byKey.get(key);
+    if (r) r.used = this.frame;
   }
 
-  /** The page's table, made on its first tile. */
+  /** The page's table, made on its first tile: two entries a tile position (see the class's doc). */
   table(folio, page) {
     let t = this.tables.get(folio);
     if (!t) {
-      const width = page.cols;
+      const width = 2 * page.cols;
       const height = page.rows * (TILE_MAX_LEVEL + 1);
       t = { page, data: new Uint8Array(width * height * 4), width, height, dirty: true };
       this.tables.set(folio, t);
@@ -132,58 +133,76 @@ export class TileIndex {
     return t;
   }
 
+  /** A tile position's first entry in its page's table (the second follows it). */
   #entry(t, level, ix, iy) {
-    return ((level * t.page.rows + iy) * t.width + ix) * 4;
+    return ((level * t.page.rows + iy) * t.width + 2 * ix) * 4;
   }
 
   /**
-   * Room for a tile: a free layer, else the one least recently drawn that this view didn't
-   * use. Takes it: the tile is listed, its table entry set (fading in from `now`). A tile kept
-   * already (with another stamp) keeps its layer, to be drawn over in place: no fade, the
-   * page never shows less in between.
-   * @returns {number | null} the layer, or null when every layer is in use by this view
+   * Room for a tile, and its spot channels' (`spots`) in a second layer: free layers, else those
+   * of the tiles least recently drawn that this view didn't use. Takes them: the tile is listed,
+   * its table entries set (fading in from `now`). A tile kept already (with another stamp)
+   * keeps its layers, to be drawn over in place: no fade, the page never shows less in between.
+   * @returns {{layer: number, spotLayer: number} | null} its layers (spotLayer -1: none), or
+   *   null when this view uses every layer it could have
    */
-  place(folio, level, ix, iy, page, now, stamp = "") {
+  place(folio, level, ix, iy, page, now, stamp = "", spots = false) {
     const key = tileKey(folio, level, ix, iy);
     const kept = this.byKey.get(key);
-    if (kept !== undefined) {
-      this.slots[kept].stamp = stamp;
+    if (kept && (kept.spotLayer >= 0) === spots) {
+      kept.stamp = stamp;
       return kept;
     }
-    let layer = -1;
-    if (this.free > 0) {
-      layer = this.slots.findIndex((s) => !s);
-      this.free--;
-    } else {
-      let oldest = Infinity;
-      for (let i = 0; i < this.slots.length; i++) {
-        const s = this.slots[i];
-        if (s.used < this.frame && s.used < oldest) { oldest = s.used; layer = i; }
+    if (kept) this.#evict(kept); // (its spot channels came or went: placed anew)
+    const layers = [];
+    while (layers.length < (spots ? 2 : 1)) {
+      const layer = this.#take();
+      if (layer < 0) {
+        for (const l of layers) { this.slots[l] = null; this.free++; }
+        return null;
       }
-      if (layer < 0) return null;
-      this.#evict(layer);
+      layers.push(layer);
+      this.slots[layer] = /** @type {any} */ (true); // taken (the record comes below)
     }
-    this.slots[layer] = { key, folio, level, ix, iy, stamp, used: this.frame, arrived: now };
-    this.byKey.set(key, layer);
+    /** @type {TileRecord} */
+    const r = { key, folio, level, ix, iy, stamp, layer: layers[0], spotLayer: layers[1] ?? -1, used: this.frame, arrived: now };
+    for (const l of layers) this.slots[l] = r;
+    this.byKey.set(key, r);
     const t = this.table(folio, page);
     const o = this.#entry(t, level, ix, iy);
-    t.data[o] = layer & 255;
-    t.data[o + 1] = layer >> 8;
-    t.data[o + 2] = 255;
-    t.data[o + 3] = 0;
+    t.data.set([r.layer & 255, r.layer >> 8, 255, 0], o);
+    t.data.set(r.spotLayer >= 0 ? [r.spotLayer & 255, r.spotLayer >> 8, 255, 255] : [0, 0, 0, 0], o + 4);
     t.dirty = true;
-    return layer;
+    return r;
   }
 
-  #evict(layer) {
-    const s = this.slots[layer];
-    if (!s) return;
-    this.byKey.delete(s.key);
-    this.slots[layer] = null;
-    const t = this.tables.get(s.folio);
+  /** A free layer, else one freed by letting go of the tile drawn least recently, not by this view; -1 if none. */
+  #take() {
+    if (this.free > 0) {
+      this.free--;
+      return this.slots.findIndex((s) => !s);
+    }
+    let oldest = null;
+    for (const r of this.byKey.values()) {
+      if (r.used < this.frame && (!oldest || r.used < oldest.used)) oldest = r;
+    }
+    if (!oldest) return -1;
+    this.#evict(oldest);
+    this.free--;
+    return this.slots.findIndex((s) => !s);
+  }
+
+  #evict(r) {
+    this.byKey.delete(r.key);
+    for (const l of [r.layer, r.spotLayer]) {
+      if (l < 0) continue;
+      this.slots[l] = null;
+      this.free++;
+    }
+    const t = this.tables.get(r.folio);
     if (t) {
-      const o = this.#entry(t, s.level, s.ix, s.iy);
-      t.data.fill(0, o, o + 4);
+      const o = this.#entry(t, r.level, r.ix, r.iy);
+      t.data.fill(0, o, o + 8);
       t.dirty = true;
     }
   }
@@ -194,15 +213,15 @@ export class TileIndex {
    */
   fade(now) {
     let fading = false;
-    for (const s of this.slots) {
-      if (!s || s.arrived < 0) continue;
-      const a = Math.max(0, Math.min(255, Math.round((255 * (now - s.arrived)) / TILE_FADE_MS)));
-      const t = this.tables.get(s.folio);
+    for (const r of this.byKey.values()) {
+      if (r.arrived < 0) continue;
+      const a = Math.max(0, Math.min(255, Math.round((255 * (now - r.arrived)) / TILE_FADE_MS)));
+      const t = this.tables.get(r.folio);
       if (t) {
-        t.data[this.#entry(t, s.level, s.ix, s.iy) + 3] = a;
+        t.data[this.#entry(t, r.level, r.ix, r.iy) + 3] = a;
         t.dirty = true;
       }
-      if (a >= 255) s.arrived = -1;
+      if (a >= 255) r.arrived = -1;
       else fading = true;
     }
     return fading;
@@ -210,9 +229,7 @@ export class TileIndex {
 
   /** A page's tiles and table let go (its image changed). */
   forgetPage(folio) {
-    for (let i = 0; i < this.slots.length; i++) {
-      if (this.slots[i]?.folio === folio) { this.#evict(i); this.free++; }
-    }
+    for (const r of [...this.byKey.values()]) if (r.folio === folio) this.#evict(r);
     this.tables.delete(folio);
   }
 
@@ -223,6 +240,12 @@ export class TileIndex {
     this.free = this.capacity;
   }
 }
+
+/**
+ * @typedef {{key: string, folio: number, level: number, ix: number, iy: number, stamp: string,
+ *            layer: number, spotLayer: number, used: number, arrived: number}} TileRecord
+ *   a tile kept: its layer, and its spot channels' (-1: none)
+ */
 
 /** The tile cache's share of memory: a 24th of the computer's, 256 MB to 1 GB. */
 export function tileBudget(systemBytes) {
@@ -248,7 +271,7 @@ export class TileCache {
     this.emptyTable = TileCache.#tableTexture(new Uint8Array(4), 1, 1);
     /** @type {Map<number, THREE.DataTexture>} folio -> its table on the GPU */
     this.tableTextures = new Map();
-    /** @type {{folio: number, level: number, ix: number, iy: number, page: ReturnType<typeof tilePage>, tile: {data: Uint8Array, mips?: Uint8Array[], close?: () => void}, stamp: string}[]} */
+    /** @type {{folio: number, level: number, ix: number, iy: number, page: ReturnType<typeof tilePage>, tile: {data: Uint8Array, mips?: Uint8Array[], spots?: Uint8Array | null, spotMips?: Uint8Array[], close?: () => void}, stamp: string}[]} */
     this.queue = [];
     this.failed = false; // the texture array couldn't be made: tiles off
   }
@@ -345,20 +368,23 @@ export class TileCache {
     let n = 0;
     while (this.queue.length && n < max) {
       const { folio, level, ix, iy, page, tile, stamp } = this.queue.shift();
-      const layer = this.index.place(folio, level, ix, iy, page, now, stamp);
-      if (layer === null) { tile.close?.(); continue; } // every layer in use by this view: next time
+      const placed = this.index.place(folio, level, ix, iy, page, now, stamp, !!tile.spots);
+      if (placed === null) { tile.close?.(); continue; } // every layer in use by this view: next time
       if (!this.tableTextures.has(folio)) newTables.add(folio);
       this.renderer.state.bindTexture(gl.TEXTURE_2D_ARRAY, this.glTexture);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, TILE, TILE, 1, gl.RGBA, gl.UNSIGNED_BYTE, tile.data);
-      const mips = tile.mips ?? [];
-      for (let i = 0; i < TILE_MIPS; i++) {
-        const side = TILE >> (i + 1);
-        const data = mips[i] ?? new Uint8Array(side * side * 4); // (no mips given: blank, never chosen while the level fits)
-        gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, i + 1, 0, 0, layer, side, side, 1, gl.RGBA, gl.UNSIGNED_BYTE, data);
-      }
+      const upload = (layer, data, mips = []) => {
+        gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, TILE, TILE, 1, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        for (let i = 0; i < TILE_MIPS; i++) {
+          const side = TILE >> (i + 1);
+          const level = mips[i] ?? new Uint8Array(side * side * 4); // (no mips given: blank, never chosen while the level fits)
+          gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, i + 1, 0, 0, layer, side, side, 1, gl.RGBA, gl.UNSIGNED_BYTE, level);
+        }
+      };
+      upload(placed.layer, tile.data, tile.mips);
+      if (tile.spots) upload(placed.spotLayer, tile.spots, tile.spotMips);
       tile.close?.();
       n++;
     }

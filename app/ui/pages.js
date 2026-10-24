@@ -28,11 +28,13 @@ function textureKey(folio) {
 
 /**
  * What a source page's inks are drawn with besides the page: the profile, and those of its
- * spots that are left out (state.drawn). Images of the page with another stamp are outdated.
+ * spots composited into its process inks (past its spot channels, see pdf/mupdf-render.js)
+ * that are left out (state.drawn). Images of the page with another stamp are outdated. (Its
+ * spot channels are switched where they are shown: they don't change the image.)
  * @param {number} sourceIndex the page in its file (a cover file's from COVER_BASE)
  */
 export function inkStamp(sourceIndex) {
-  const off = state.drawn.spotsOff.filter((name) => state.spots.some((s) => s.name === name && s.pages.includes(sourceIndex)));
+  const off = state.drawn.spotsOff.filter((name) => state.spots.some((s) => s.name === name && s.composited.includes(sourceIndex)));
   return `${state.drawn.profile}|${off.join("|")}`;
 }
 
@@ -113,7 +115,7 @@ export function loadAllTextures() {
       if (cur?.key === key && cur.stamp === stamp && cur.height >= h) return;
       // Kept here: what the page is, and a cover's inks along the spine (see coverEdge).
       // The image goes to the 3D view, which frees it once it is on the GPU.
-      const edge = folio === 1 || folio === n ? averageEdge(image, folio % 2 === 1) : null;
+      const edge = folio === 1 || folio === n ? averageEdge(image, folio % 2 === 1) : null; // (its inks and spot channels)
       state.textures.set(folio, { key, stamp, height: h, edge });
       scene.setPageTexture(folio, image);
       if (folio === 1 || folio === n) applySpine(); // the spine colour may come from a cover

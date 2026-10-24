@@ -1,0 +1,19 @@
+--- a/source/fitz/draw-device.c
++++ b/source/fitz/draw-device.c
+@@ -520,11 +520,14 @@
+ 		if (i != dc)
+ 			continue; /* Yes! Keep looking for one that doesn't. */
+ 
+-		/* Does name appear in the (active) spots? */
++		/* Does name appear in the (active) spots? Or the disabled ones (Printwarden): a
++		 * colorant left out maps to nothing, so it doesn't stop overprint protecting the
++		 * process colors (it knocked them out, as if mapped to them). */
+ 		for (k = 0; k < nseps; k++)
+ 		{
+ 			const char *name = fz_separation_name(ctx, dest->seps, k);
+-			if (!name || fz_separation_current_behavior(ctx, dest->seps, k) != FZ_SEPARATION_SPOT)
++			fz_separation_behavior beh = fz_separation_current_behavior(ctx, dest->seps, k);
++			if (!name || (beh != FZ_SEPARATION_SPOT && beh != FZ_SEPARATION_DISABLED))
+ 				continue;
+ 			if (!strcmp(name, sname))
+ 				break;

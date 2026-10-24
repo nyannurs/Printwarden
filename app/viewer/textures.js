@@ -8,12 +8,26 @@ import { LUT_DEPTH, LUT_HEIGHT, LUT_WIDTH } from "./inklut.js";
 /**
  * A page's inks as a texture: C, M, Y, K a byte each in the four channels (pdf/mupdf-render.js,
  * mode "ink"), read raw (no colour space), mipmapped and filtered as the page images were. The
- * shader turns them into colour through the ink table (INK_GLSL). The image's bytes are its own
- * until it is on the GPU (freeImage).
- * @param {{width: number, height: number, data: Uint8Array}} image
+ * shader turns them into colour through the ink table (INK_GLSL). Its spot channels, if it has
+ * any, are a second texture alike (userData.spots, disposed with it) and their names
+ * (userData.spotNames: which spot each channel is). The image's bytes are its own until it is
+ * on the GPU (freeImage).
+ * @param {{width: number, height: number, data: Uint8Array, spots?: Uint8Array | null, spotNames?: string[]}} image
  */
 export function makeInkTexture(image, anisotropy) {
-  const t = new THREE.DataTexture(/** @type {any} */ (image.data), image.width, image.height, THREE.RGBAFormat, THREE.UnsignedByteType);
+  const t = rawTexture(image.data, image.width, image.height, anisotropy);
+  t.userData.ink = true;
+  t.userData.spotNames = image.spotNames ?? [];
+  if (image.spots) {
+    const spots = rawTexture(image.spots, image.width, image.height, anisotropy);
+    t.userData.spots = spots;
+    t.addEventListener("dispose", () => spots.dispose());
+  }
+  return t;
+}
+
+function rawTexture(data, width, height, anisotropy) {
+  const t = new THREE.DataTexture(/** @type {any} */ (data), width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
   t.flipY = false;
   t.colorSpace = THREE.NoColorSpace;
   t.generateMipmaps = true;
@@ -21,7 +35,6 @@ export function makeInkTexture(image, anisotropy) {
   t.magFilter = THREE.LinearFilter;
   t.anisotropy = anisotropy;
   t.needsUpdate = true;
-  t.userData.ink = true;
   return t;
 }
 
@@ -38,7 +51,7 @@ export function makeInkLut(data) {
   return t;
 }
 
-/** A page's placeholder as inks: none, so paper. */
+/** A page's placeholder as inks: none, so paper. (Also the spot channels of an image without any.) */
 export function makeInkPaper() {
   const t = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1);
   t.colorSpace = THREE.NoColorSpace;
@@ -73,6 +86,7 @@ void main() { gl_FragColor = vec4( texture( uTex, vec2( 0.5 ) ) ); }`,
  * the image only to upload it, and these are never uploaded again.)
  */
 export function freeImage(tex) {
+  if (tex.userData.spots) freeImage(tex.userData.spots);
   const { image } = tex;
   if (!image) return;
   if (image.data) { // an ink image: its bytes go, the size stays

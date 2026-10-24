@@ -49,13 +49,13 @@ test("TILES: the index keeps tiles, evicts the least recently drawn that this vi
   const page = tilePage(1400, A4);
   const index = new TileIndex(3);
   index.nextFrame();
-  eq(index.place(5, 1, 0, 0, page, 1000), 0);
-  eq(index.place(5, 1, 1, 0, page, 1000), 1);
-  eq(index.place(6, 2, 3, 4, page, 1000), 2);
+  eq(index.place(5, 1, 0, 0, page, 1000)?.layer, 0);
+  eq(index.place(5, 1, 1, 0, page, 1000)?.layer, 1);
+  eq(index.place(6, 2, 3, 4, page, 1000)?.layer, 2);
   ok(index.has(tileKey(5, 1, 0, 0)) && index.has(tileKey(6, 2, 3, 4)), "listed");
   const t = index.tables.get(5);
-  eq([t.width, t.height], [page.cols, page.rows * (TILE_MAX_LEVEL + 1)]);
-  const at = (level, ix, iy) => ((level * page.rows + iy) * t.width + ix) * 4;
+  eq([t.width, t.height], [2 * page.cols, page.rows * (TILE_MAX_LEVEL + 1)], "two entries a tile position");
+  const at = (level, ix, iy) => ((level * page.rows + iy) * t.width + 2 * ix) * 4;
   eq([...t.data.subarray(at(1, 0, 0), at(1, 0, 0) + 4)], [0, 0, 255, 0], "layer 0, there, not faded in");
   eq([...t.data.subarray(at(1, 1, 0), at(1, 1, 0) + 4)], [1, 0, 255, 0]);
   eq([...t.data.subarray(at(1, 0, 1), at(1, 0, 1) + 4)], [0, 0, 0, 0], "no tile: not there");
@@ -65,7 +65,7 @@ test("TILES: the index keeps tiles, evicts the least recently drawn that this vi
   index.nextFrame();
   index.touch(tileKey(5, 1, 0, 0));
   index.touch(tileKey(6, 2, 3, 4));
-  eq(index.place(7, 1, 0, 0, page, 1200), 1, "took the layer of the tile not drawn by this view");
+  eq(index.place(7, 1, 0, 0, page, 1200)?.layer, 1, "took the layer of the tile not drawn by this view");
   ok(!index.has(tileKey(5, 1, 1, 0)), "evicted");
   eq([...t.data.subarray(at(1, 1, 0), at(1, 1, 0) + 4)], [0, 0, 0, 0], "its entry cleared");
   // Fading in: alpha climbs to 255 and then stays.
@@ -85,18 +85,43 @@ test("TILES: a tile with an outdated stamp (the profile, a spot plate) is drawn 
   const index = new TileIndex(4);
   index.nextFrame();
   const key = tileKey(3, 1, 0, 0);
-  eq(index.place(3, 1, 0, 0, page, 1000, "eci|"), 0);
+  eq(index.place(3, 1, 0, 0, page, 1000, "eci|")?.layer, 0);
   index.fade(5000); // faded in
   ok(index.has(key) && index.has(key, "eci|"), "kept, as drawn");
   ok(!index.has(key, "swop|"), "not as the new profile wants it: asked for again");
   const t = index.tables.get(3);
-  const at = ((1 * page.rows + 0) * t.width + 0) * 4;
+  const at = ((1 * page.rows + 0) * t.width + 0) * 4; // (tile 0, 0: its first entry)
   eq([...t.data.subarray(at, at + 4)], [0, 0, 255, 255], "still drawn meanwhile");
-  eq(index.place(3, 1, 0, 0, page, 6000, "swop|"), 0, "the new one in the same layer");
+  eq(index.place(3, 1, 0, 0, page, 6000, "swop|")?.layer, 0, "the new one in the same layer");
   ok(index.has(key, "swop|"), "now as wanted");
   eq(index.free, 3, "no second layer taken");
   eq(t.data[at + 3], 255, "no fade: the page never shows less in between");
   ok(!index.fade(6000), "nothing fading");
+});
+
+test("TILES: a tile with spot channels takes a second layer, named in its second entry; letting it go frees both", () => {
+  const page = tilePage(1400, A4);
+  const index = new TileIndex(3);
+  index.nextFrame();
+  const r = index.place(2, 1, 0, 0, page, 1000, "", true);
+  eq([r?.layer, r?.spotLayer], [0, 1]);
+  eq(index.free, 1);
+  const t = index.tables.get(2);
+  const o = (1 * page.rows + 0) * t.width * 4; // level 1, tile 0, 0: its two entries
+  eq([...t.data.subarray(o, o + 8)], [0, 0, 255, 0, 1, 0, 255, 255], "its layer, then its spot layer");
+  // Another with spots needs two layers: one is free, the other is the first tile's (not drawn by this view).
+  index.nextFrame();
+  const q = index.place(2, 1, 1, 0, page, 1100, "", true);
+  ok(q && q.spotLayer >= 0, "placed, the first let go");
+  ok(!index.has(tileKey(2, 1, 0, 0)), "the first tile let go");
+  eq([...t.data.subarray(o, o + 8)], [0, 0, 0, 0, 0, 0, 0, 0], "both its entries cleared");
+  eq(index.free, 1, "of the first's two layers, one taken");
+  // A pair needs two: one is free, the other in use by this view. None taken, nothing changed.
+  eq(index.place(4, 1, 0, 0, page, 1200, "", true), null);
+  eq(index.free, 1);
+  ok(index.has(tileKey(2, 1, 1, 0)), "the one this view uses kept");
+  index.forgetPage(2);
+  eq(index.free, 3, "a page let go frees its tiles' layers, spot layers too");
 });
 
 test("TILES: the budget: a 24th of memory, 256 MB to 1 GB", () => {

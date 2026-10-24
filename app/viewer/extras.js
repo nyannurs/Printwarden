@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { CASE_COVER_MM, CASE_HOLLOW, COIL_CLIMB_CENTRE, COIL_CLIMB_WIDTH, COIL_LOOP_START, coilCentre, coilClimb, leafShape, signatureSheets } from "./model.js";
 import { EDGE_INK_SHARE, EDGE_INSET_MM, INK_GLSL, inkUniforms, LEAF_FILL, patchShader } from "./shaders.js";
+import { noSpotInk } from "./uploads.js";
 
 // Booklet stitching wire (mm): crown width, clinched leg length, flattened cross-section.
 const STAPLE = { crown: 12.7, leg: 5.2, width: 0.62, thickness: 0.42 };
@@ -563,6 +564,11 @@ function foldSheetMaterial(scene, a, b) {
   m.userData.uniforms = {
     uFoldFrontA: { value: scene.blank }, uFoldBackA: { value: scene.blank },
     uFoldFrontB: { value: scene.blank }, uFoldBackB: { value: scene.blank },
+    // Each page's spot channels and spot matrix, as its page material has them (syncFoldSheet).
+    ...Object.fromEntries(["FrontA", "BackA", "FrontB", "BackB"].flatMap((p) => [
+      [`uFold${p}Spots`, { value: scene.noSpots }],
+      [`uFold${p}SpotInk`, { value: noSpotInk() }],
+    ])),
     uFoldEdge: { value: new THREE.Color() },
     uFoldInset: { value: new THREE.Vector2(EDGE_INSET_MM / W, EDGE_INSET_MM / H) },
     uFoldInk: { value: EDGE_INK_SHARE },
@@ -593,6 +599,14 @@ uniform sampler2D uFoldFrontA;
 uniform sampler2D uFoldBackA;
 uniform sampler2D uFoldFrontB;
 uniform sampler2D uFoldBackB;
+uniform sampler2D uFoldFrontASpots;
+uniform mat4 uFoldFrontASpotInk;
+uniform sampler2D uFoldBackASpots;
+uniform mat4 uFoldBackASpotInk;
+uniform sampler2D uFoldFrontBSpots;
+uniform mat4 uFoldFrontBSpotInk;
+uniform sampler2D uFoldBackBSpots;
+uniform mat4 uFoldBackBSpotInk;
 uniform vec3 uFoldEdge;
 uniform vec2 uFoldInset;
 uniform float uFoldInk;
@@ -604,10 +618,10 @@ const FOLD_INK = /* glsl */ `
     bool first = vFold.x < 0.0;
     vec2 at = clamp( vec2( abs( vFold.x ), vFold.y ), uFoldInset, 1.0 - uFoldInset );
     vec2 mirrored = vec2( 1.0 - at.x, at.y );
-    vec4 frontA = sRGBTransferEOTF( pvPageColor( texture2D( uFoldFrontA, at ) ) );
-    vec4 backA = sRGBTransferEOTF( pvPageColor( texture2D( uFoldBackA, mirrored ) ) );
-    vec4 frontB = sRGBTransferEOTF( pvPageColor( texture2D( uFoldFrontB, at ) ) );
-    vec4 backB = sRGBTransferEOTF( pvPageColor( texture2D( uFoldBackB, mirrored ) ) );
+    vec4 frontA = sRGBTransferEOTF( pvPageColor( texture2D( uFoldFrontA, at ), texture2D( uFoldFrontASpots, at ), uFoldFrontASpotInk ) );
+    vec4 backA = sRGBTransferEOTF( pvPageColor( texture2D( uFoldBackA, mirrored ), texture2D( uFoldBackASpots, mirrored ), uFoldBackASpotInk ) );
+    vec4 frontB = sRGBTransferEOTF( pvPageColor( texture2D( uFoldFrontB, at ), texture2D( uFoldFrontBSpots, at ), uFoldFrontBSpotInk ) );
+    vec4 backB = sRGBTransferEOTF( pvPageColor( texture2D( uFoldBackB, mirrored ), texture2D( uFoldBackBSpots, mirrored ), uFoldBackBSpotInk ) );
     if ( vFold.z > 1.5 ) {
       vec3 ink = 0.5 * ( first ? frontA.rgb + backA.rgb : frontB.rgb + backB.rgb );
       diffuseColor.rgb = uFoldEdge * mix( vec3( 1.0 ), ink, uFoldInk );
@@ -625,10 +639,11 @@ function syncFoldSheet(m, scene) {
   const B = scene.leaves[b];
   if (!A || !B) return;
   const u = m.userData.uniforms;
-  u.uFoldFrontA.value = A.front.map ?? scene.blank;
-  u.uFoldBackA.value = A.back.map ?? scene.blank;
-  u.uFoldFrontB.value = B.front.map ?? scene.blank;
-  u.uFoldBackB.value = B.back.map ?? scene.blank;
+  for (const [name, page] of [["FrontA", A.front], ["BackA", A.back], ["FrontB", B.front], ["BackB", B.back]]) {
+    u[`uFold${name}`].value = page.map ?? scene.blank;
+    u[`uFold${name}Spots`].value = page.userData.uniforms.uSpots.value;
+    u[`uFold${name}SpotInk`].value.copy(page.userData.uniforms.uSpotInk.value);
+  }
   u.uFoldEdge.value.copy((a === 0 ? scene.coverEdgeMat : scene.edgeMat).color);
   const stock = A.front;
   m.color.copy(stock.color);

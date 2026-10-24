@@ -84,15 +84,20 @@ export const EDGE_INK_SHARE = 0.85;
 
 // A page's inks to the colour they print, through the ink table (viewer/inklut.js): C, M, Y
 // read by the card's trilinear filter within a Black slice, Black by two slices mixed here. The
-// plates switched here (uInkOn): a plate left out is ink that isn't there, at once, on every
-// page. uInkPages: 1 when the pages' textures are inks (the app), 0 when they are sRGB images
-// (the client viewer): pvPageColor takes a sampled page either way, giving sRGB as stored.
+// plates switched here: a plate left out is ink that isn't there, at once, on every page. The
+// process plates by uInkOn; the spots by the page's spot matrix (`spotInk`: column i, the
+// look in CMYK of the spot in the page's spot channel i, or nothing while its plate is left
+// out; see uploads.js spotInk), mixed in as MuPDF composites a spot (CMYK + tint × its look,
+// at most full ink: fz_copy_pixmap_area_converting_seps), after the process plates are
+// switched (a spot is a plate of its own). uInkPages: 1 when the pages' textures are inks (the
+// app), 0 when they are sRGB images (the client viewer): pvPageColor takes a sampled page
+// either way, giving sRGB as stored.
 export const INK_GLSL = /* glsl */ `
 uniform highp sampler3D uInkLut;
 uniform vec4 uInkOn;
 uniform float uInkPages;
 vec3 pvInkToRgb( vec4 ink ) {
-  ink = clamp( ink * uInkOn, 0.0, 1.0 );
+  ink = clamp( ink, 0.0, 1.0 );
   float k = ink.a * 16.0;
   float k0 = min( floor( k ), 15.0 );
   vec2 cm = ( ink.rg * 16.0 + 0.5 ) / 17.0;
@@ -100,8 +105,8 @@ vec3 pvInkToRgb( vec4 ink ) {
   float yb = ( ( k0 + 1.0 ) * 17.0 + ink.b * 16.0 + 0.5 ) / 289.0;
   return mix( texture( uInkLut, vec3( cm, ya ) ).rgb, texture( uInkLut, vec3( cm, yb ) ).rgb, k - k0 );
 }
-vec4 pvPageColor( vec4 sampled ) {
-  return uInkPages > 0.5 ? vec4( pvInkToRgb( sampled ), 1.0 ) : sampled;
+vec4 pvPageColor( vec4 sampled, vec4 spots, mat4 spotInk ) {
+  return uInkPages > 0.5 ? vec4( pvInkToRgb( sampled * uInkOn + spotInk * spots ), 1.0 ) : sampled;
 }
 `;
 
@@ -116,6 +121,10 @@ export const EDGE_FRAGMENT_HEADER = /* glsl */ `
 ${INK_GLSL}
 uniform sampler2D uEdgeFront;
 uniform sampler2D uEdgeBack;
+uniform sampler2D uEdgeFrontSpots;
+uniform sampler2D uEdgeBackSpots;
+uniform mat4 uEdgeFrontSpotInk;
+uniform mat4 uEdgeBackSpotInk;
 uniform vec2 uEdgeInset;
 uniform float uEdgeInk;
 varying vec2 vEdgeUv;
@@ -123,8 +132,9 @@ varying vec2 vEdgeUv;
 export const EDGE_INK = /* glsl */ `
   {
     vec2 at = clamp( vEdgeUv, uEdgeInset, 1.0 - uEdgeInset );
-    vec3 inkFront = sRGBTransferEOTF( pvPageColor( texture( uEdgeFront, at, 1.0 ) ) ).rgb;
-    vec3 inkBack = sRGBTransferEOTF( pvPageColor( texture( uEdgeBack, vec2( 1.0 - at.x, at.y ), 1.0 ) ) ).rgb;
+    vec2 atBack = vec2( 1.0 - at.x, at.y );
+    vec3 inkFront = sRGBTransferEOTF( pvPageColor( texture( uEdgeFront, at, 1.0 ), texture( uEdgeFrontSpots, at, 1.0 ), uEdgeFrontSpotInk ) ).rgb;
+    vec3 inkBack = sRGBTransferEOTF( pvPageColor( texture( uEdgeBack, atBack, 1.0 ), texture( uEdgeBackSpots, atBack, 1.0 ), uEdgeBackSpotInk ) ).rgb;
     diffuseColor.rgb *= mix( vec3( 1.0 ), 0.5 * ( inkFront + inkBack ), uEdgeInk );
   }
 `;
@@ -251,8 +261,9 @@ vec3 sheetNormal() {
 
 // The page's tiles (viewer/tiles.js): the level this fragment needs, from how many level-0
 // texels a screen pixel covers; from it down, the first level whose tile is in the cache
-// (the page's table says which layer of uTiles holds it), the base image when none is. A
-// tile just landed fades in over what was drawn before it (the level under it, or the base).
+// (the page's table says which layer of uTiles holds it, and in the entry beside it which
+// holds its spot channels, if it has any), the base image when none is. A tile just landed
+// fades in over what was drawn before it (the level under it, or the base).
 const TILE_GLSL = /* glsl */ `
 uniform highp sampler2DArray uTiles;
 uniform sampler2D uTileTable;
@@ -262,7 +273,10 @@ const float PV_TILE = ${TILE.toFixed(1)};
 const float PV_TILE_PAY = ${TILE_PAYLOAD.toFixed(1)};
 const float PV_TILE_BORDER = ${TILE_BORDER.toFixed(1)};
 const float PV_TILE_SUPER = ${TILE_SUPERSAMPLE.toFixed(3)};
-bool pvTile( vec2 uv, vec2 dx, vec2 dy, out vec4 color ) {
+float pvTileLayer( vec4 e ) {
+  return floor( e.r * 255.0 + 0.5 ) + floor( e.g * 255.0 + 0.5 ) * 256.0;
+}
+bool pvTile( vec2 uv, vec2 dx, vec2 dy, out vec4 color, out vec4 spots ) {
   if ( uTileOn < 0.5 ) return false;
   // Level-0 texels a pixel along the screen's two axes. The level is chosen by the finer of
   // the two (a page seen at a slant is squeezed one way only: chosen by the squeezed axis, as
@@ -282,40 +296,54 @@ bool pvTile( vec2 uv, vec2 dx, vec2 dy, out vec4 color ) {
   // the one under it: found in the loop, read after it (a texture read with gradients inside a
   // loop of varying length is undefined on Direct3D).
   vec3 at = vec3( 0.0 );      // where in uTiles: the tile's uv and layer
+  float atSpots = -1.0;       // the layer of its spot channels (none: -1)
   vec2 scale = vec2( 0.0 );   // the page in that level's texels: the gradients' scale
   float fade = 1.0;
   vec3 under = vec3( 0.0 );
+  float underSpots = -1.0;
   vec2 underScale = vec2( 0.0 );
   int have = 0;
   for ( int k = need; k >= 1; k-- ) {
     vec2 sizeK = uTilePage.xy * exp2( float( k ) );
     vec2 t = cuv * sizeK;
     vec2 cell = floor( t / PV_TILE_PAY );
-    vec4 e = texelFetch( uTileTable, ivec2( int( cell.x ), k * rows + int( cell.y ) ), 0 );
+    ivec2 entry = ivec2( 2 * int( cell.x ), k * rows + int( cell.y ) );
+    vec4 e = texelFetch( uTileTable, entry, 0 );
     if ( e.b < 0.5 ) continue;
-    float layer = floor( e.r * 255.0 + 0.5 ) + floor( e.g * 255.0 + 0.5 ) * 256.0;
-    vec3 here = vec3( ( t - cell * PV_TILE_PAY + PV_TILE_BORDER ) / PV_TILE, layer );
+    vec4 es = texelFetch( uTileTable, entry + ivec2( 1, 0 ), 0 );
+    vec3 here = vec3( ( t - cell * PV_TILE_PAY + PV_TILE_BORDER ) / PV_TILE, pvTileLayer( e ) );
+    float hereSpots = es.b > 0.5 ? pvTileLayer( es ) : -1.0;
     if ( have == 0 ) {
       at = here;
+      atSpots = hereSpots;
       scale = sizeK;
       fade = e.a;
       have = 1;
       if ( fade >= 1.0 ) break;
     } else {
       under = here;
+      underSpots = hereSpots;
       underScale = sizeK;
       have = 2;
       break;
     }
   }
   if ( have == 0 ) return false;
-  vec4 found = textureGrad( uTiles, at, dx * scale / PV_TILE * 0.7, dy * scale / PV_TILE * 0.7 );
+  vec2 gx = dx * scale / PV_TILE * 0.7;
+  vec2 gy = dy * scale / PV_TILE * 0.7;
+  vec4 found = textureGrad( uTiles, at, gx, gy );
+  vec4 foundSpots = atSpots >= 0.0 ? textureGrad( uTiles, vec3( at.xy, atSpots ), gx, gy ) : vec4( 0.0 );
   if ( fade < 1.0 ) {
-    vec4 below = have == 2 ? textureGrad( uTiles, under, dx * underScale / PV_TILE * 0.7, dy * underScale / PV_TILE * 0.7 )
-      : pageSample( map, uv, dx, dy );
+    vec2 ux = dx * underScale / PV_TILE * 0.7;
+    vec2 uy = dy * underScale / PV_TILE * 0.7;
+    vec4 below = have == 2 ? textureGrad( uTiles, under, ux, uy ) : pageSample( map, uv, dx, dy );
+    vec4 belowSpots = have == 2 ? ( underSpots >= 0.0 ? textureGrad( uTiles, vec3( under.xy, underSpots ), ux, uy ) : vec4( 0.0 ) )
+      : pageSample( uSpots, uv, dx, dy );
     found = mix( below, found, fade );
+    foundSpots = mix( belowSpots, foundSpots, fade );
   }
   color = found;
+  spots = foundSpots;
   return true;
 }
 `;
@@ -333,6 +361,13 @@ uniform float uScore;
 // squares at head, foot and fore-edge, the cover's turn-in shows (rgb, its colour; a 1 on).
 uniform vec4 uTurnIn;
 uniform sampler2D uBack;
+// The page's spot channels and its spot matrix (see INK_GLSL); the other side's, for showing
+// through. (With them the page shader uses the 16 texture units a GPU gives a fragment shader
+// at the least: there is no room for another.)
+uniform sampler2D uSpots;
+uniform mat4 uSpotInk;
+uniform sampler2D uBackSpots;
+uniform mat4 uBackSpotInk;
 uniform float uShow;
 uniform float uSpineAtU0;
 uniform vec4 uHoles;      // shape (0 none, 1 round, 2 square), pitch, radius or half-width, offset from spine (mm)
@@ -370,15 +405,26 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
   vec2 detailDx = dFdx( vMapUv );
   vec2 detailDy = dFdy( vMapUv );
   vec4 sampledDiffuseColor = vec4( 1.0 );
+  vec4 sampledSpots = vec4( 0.0 );
   bool covered = false;
   ${DETAIL_LOOKUPS}
-  if ( !covered ) covered = pvTile( vMapUv, detailDx, detailDy, sampledDiffuseColor );
-  if ( !covered ) sampledDiffuseColor = pageSample( map, vMapUv, detailDx, detailDy );
+  // A capture's strips are their inks as they print, the plates applied where they were made
+  // (ui/capture.js mixImage: the page shader has no texture unit left for their spot channels).
+  bool asPrinted = covered;
+  if ( !covered ) covered = pvTile( vMapUv, detailDx, detailDy, sampledDiffuseColor, sampledSpots );
+  if ( !covered ) {
+    sampledDiffuseColor = pageSample( map, vMapUv, detailDx, detailDy );
+    sampledSpots = pageSample( uSpots, vMapUv, detailDx, detailDy );
+  }
   // The strip glued to the cover: paper, whatever was printed there (it faces the cover).
   float glueFrom = ( uSpineAtU0 > 0.5 ? vMapUv.x : 1.0 - vMapUv.x ) * uPageSize.x;
-  if ( uGlue > 0.0 && glueFrom < uGlue ) sampledDiffuseColor = uInkPages > 0.5 ? vec4( 0.0 ) : vec4( 1.0 );
+  if ( uGlue > 0.0 && glueFrom < uGlue ) {
+    sampledDiffuseColor = uInkPages > 0.5 ? vec4( 0.0 ) : vec4( 1.0 );
+    sampledSpots = vec4( 0.0 );
+  }
   // Inks to the colour they print (ink pages), then to light: filtered as stored, see PAGE_COLOR_SPACE.
-  sampledDiffuseColor = sRGBTransferEOTF( pvPageColor( sampledDiffuseColor ) );
+  sampledDiffuseColor = sRGBTransferEOTF( asPrinted && uInkPages > 0.5 ? vec4( pvInkToRgb( sampledDiffuseColor ), 1.0 )
+    : pvPageColor( sampledDiffuseColor, sampledSpots, uSpotInk ) );
   diffuseColor *= sampledDiffuseColor;
   if ( uTurnIn.a > 0.5 && ( vMapUv.y < 0.0 || vMapUv.y > 1.0 || ( uSpineAtU0 > 0.5 ? vMapUv.x > 1.0 : vMapUv.x < 0.0 ) ) ) {
     diffuseColor.rgb = uTurnIn.rgb;
@@ -477,7 +523,8 @@ export const HOLE_DISCARD = /* glsl */ `
 // The other side of the leaf, faintly, mirrored and softened: ink showing through paper.
 export const SHOW_THROUGH = /* glsl */ `
   {
-    vec3 behind = sRGBTransferEOTF( pvPageColor( texture( uBack, vec2( 1.0 - vMapUv.x, vMapUv.y ), 2.5 ) ) ).rgb;
+    vec2 mirrored = vec2( 1.0 - vMapUv.x, vMapUv.y );
+    vec3 behind = sRGBTransferEOTF( pvPageColor( texture( uBack, mirrored, 2.5 ), texture( uBackSpots, mirrored, 2.5 ), uBackSpotInk ) ).rgb;
     diffuseColor.rgb *= mix(vec3(1.0), behind, uShow);
   }
 `;

@@ -7,6 +7,7 @@ import { listCmykProfiles, readProfile } from "../platform.js";
 import { naiveLut } from "../viewer/inklut.js";
 import { filmstrip, inkView, inspector, scene, state } from "./app.js";
 import { redrawInks } from "./pages.js";
+import { refreshPlates } from "./plates.js";
 import { applySpine, renderSpineArt } from "./spine-panel.js";
 
 const PROFILE_PREF = "cmykProfile"; // remembered choice (localStorage)
@@ -99,6 +100,11 @@ export async function applyProfile() {
   state.inkLut = lut;
   scene.setInkLut(lut);
   inkView.setLut(lut);
+  // The spots' looks are in the profile (what MuPDF composites them as): asked for again.
+  const spots = await renderer.spots();
+  if (run !== profileRun || state.renderer !== renderer) return;
+  state.spots = spots;
+  refreshPlates(); // the rows' circles, and the looks to the views
   filmstrip.refreshInk();
   inspector.render(state.analysis, state.name, state.colour);
   applySpine(); // the covers' edge colours come through the table
@@ -115,12 +121,14 @@ export async function applyProfile() {
 }
 
 /**
- * Which plates print (the Separations window, ui/plates.js). The process plates (Cyan, Magenta,
- * Yellow, Black; false leaves one out) are switched where the inks are shown (the 3D view's
- * shaders, the timeline's converter, the cover's edge colour), from the next frame, on every page
- * at once: nothing is drawn again. The spot plates left out (`spotsOff`, by name) are left out
- * where the pages are drawn: the pages with them are drawn again, in the background, each shown
- * as it was until then.
+ * Which plates print (the Separations window, ui/plates.js), switched where the inks are shown
+ * (the 3D view's shaders, the timeline's converter, the cover's edge colour), from the next
+ * frame, on every page at once: nothing is drawn again. The process plates (Cyan, Magenta,
+ * Yellow, Black; false leaves one out) and the spots left out (`spotsOff`, by name), which every
+ * ink image carries as channels of their own (up to SPOT_CHANNELS a page, see
+ * pdf/mupdf-render.js). A page's further spots are composited where it is drawn: the pages with
+ * such a spot are drawn again, in the background, each shown as it was until then (redrawInks);
+ * so are the sRGB images drawn from then on (the client viewer's).
  * @param {boolean[]} process
  * @param {string[]} [spotsOff]
  */
@@ -129,11 +137,24 @@ export function setPlates(process, spotsOff = []) {
   state.colour = { ...state.colour, inks: process };
   scene.setInksOn(process);
   inkView.setInksOn(process);
+  const changed = spotsOff.join("\n") !== state.drawn.spotsOff.join("\n");
+  if (changed) state.drawn = { ...state.drawn, spotsOff };
+  applySpotInks(); // (and the timeline, the cover's edge)
+  if (changed && state.renderer) {
+    state.renderer.setSpotsOff(spotsOff);
+    if (state.spots.some((s) => s.composited.length)) redrawInks(); // only pages whose stamp changed are drawn
+  }
+}
+
+/**
+ * The spots that print, each with its look (state.spots: in the profile), to everything that
+ * shows inks: the 3D view, the timeline, the cover's edge colour.
+ */
+function applySpotInks() {
+  const off = new Set(state.drawn.spotsOff);
+  state.spotInks = new Map(state.spots.filter((s) => !off.has(s.name)).map((s) => [s.name, s.cmyk]));
+  scene.setSpotInks(state.spotInks);
+  inkView.setSpotInks(state.spotInks);
   filmstrip.refreshInk();
   applySpine();
-  if (spotsOff.join("\n") !== state.drawn.spotsOff.join("\n") && state.renderer) {
-    state.renderer.setSpotsOff(spotsOff);
-    state.drawn = { ...state.drawn, spotsOff };
-    redrawInks();
-  }
 }

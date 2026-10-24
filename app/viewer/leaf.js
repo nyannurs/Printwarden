@@ -10,6 +10,7 @@ import {
   OTHER_ROWS, PAGE_FRAGMENT_HEADER, PAGE_MAP_FRAGMENT, PAPER_ROLLOFF, patchShader, sheetShader, SHOW_THROUGH,
 } from "./shaders.js";
 import { makeInkTexture } from "./textures.js";
+import { noSpotInk, spotInk } from "./uploads.js";
 
 /** The first and last leaves are the covers (a single leaf is both). */
 export function isCover(model, i) {
@@ -293,6 +294,12 @@ function pageMaterial(scene, isFront, holesOf = null) {
   });
   m.userData.uniforms = holesOf?.userData.uniforms ?? {
     uBack: { value: scene.blank },
+    // The page's spot channels and spot matrix, the other side's for its show-through (see
+    // uploads.js showPage).
+    uSpots: { value: scene.noSpots },
+    uSpotInk: { value: noSpotInk() },
+    uBackSpots: { value: scene.noSpots },
+    uBackSpotInk: { value: noSpotInk() },
     uShow: { value: 0.01 },
     uSpineAtU0: { value: isFront ? 1 : 0 },
     // Up to MAX_DETAIL sharp strips laid over the page (see detail.js).
@@ -379,15 +386,21 @@ export function makeFlap(scene, leaf, side, reach, image, flip) {
   }
   const m = new THREE.MeshPhysicalMaterial({ roughness: 0.9, side: THREE.DoubleSide, map: tex });
   m.userData.lift = { value: scene.model.thickness[leaf.i] }; // off the face it lies on, outward (the sheet shader takes the face's side)
+  // Its spot channels and spot matrix (refreshed with the pages', uploads.js refreshSpots).
+  m.userData.uniforms = {
+    uSpots: { value: tex.userData.spots ?? scene.noSpots },
+    uSpotInk: { value: spotInk(scene, tex.userData.spotNames ?? [], noSpotInk()) },
+  };
   m.onBeforeCompile = (shader) => {
     sheetShader(shader, scene.shared);
     inkUniforms(shader, scene.shared);
+    Object.assign(shader.uniforms, m.userData.uniforms);
     shader.uniforms.uSheetLift = m.userData.lift;
     shader.fragmentShader = patchShader(shader.fragmentShader, [
-      ["void main() {", INK_GLSL + "void main() {"],
+      ["void main() {", INK_GLSL + "uniform sampler2D uSpots;\nuniform mat4 uSpotInk;\nvoid main() {"],
       ["#include <map_fragment>", `{
   vec4 ink = texture2D( map, vMapUv );
-  diffuseColor *= sRGBTransferEOTF( pvPageColor( ink ) );
+  diffuseColor *= sRGBTransferEOTF( pvPageColor( ink, texture2D( uSpots, vMapUv ), uSpotInk ) );
 }`],
     ]);
   };
@@ -434,9 +447,11 @@ function inkFiller(scene, page) {
   m.onBeforeCompile = (shader) => {
     sheetShader(shader, scene.shared);
     inkUniforms(shader, scene.shared);
+    shader.uniforms.uSpots = page.userData.uniforms.uSpots; // the page's own, as its image is
+    shader.uniforms.uSpotInk = page.userData.uniforms.uSpotInk;
     shader.fragmentShader = patchShader(shader.fragmentShader, [
-      ["void main() {", INK_GLSL + "void main() {"],
-      ["#include <map_fragment>", "diffuseColor *= sRGBTransferEOTF( pvPageColor( texture2D( map, vMapUv ) ) );"],
+      ["void main() {", INK_GLSL + "uniform sampler2D uSpots;\nuniform mat4 uSpotInk;\nvoid main() {"],
+      ["#include <map_fragment>", "diffuseColor *= sRGBTransferEOTF( pvPageColor( texture2D( map, vMapUv ), texture2D( uSpots, vMapUv ), uSpotInk ) );"],
     ]);
   };
   m.customProgramCacheKey = () => "bookview-sheet-ink-filler";
@@ -529,6 +544,10 @@ function edgeMaterial(scene, base, front, back) {
   m.userData.uniforms = {
     uEdgeFront: { value: scene.blank },
     uEdgeBack: { value: scene.blank },
+    uEdgeFrontSpots: { value: scene.noSpots },
+    uEdgeBackSpots: { value: scene.noSpots },
+    uEdgeFrontSpotInk: { value: noSpotInk() },
+    uEdgeBackSpotInk: { value: noSpotInk() },
     uEdgeInset: { value: new THREE.Vector2(EDGE_INSET_MM / scene.model.width, EDGE_INSET_MM / scene.model.height) },
     uEdgeInk: { value: EDGE_INK_SHARE },
   };
@@ -559,8 +578,13 @@ function edgeMaterial(scene, base, front, back) {
 function inkEdges(m) {
   const { base, front, back, white } = m.userData.edgeOf;
   m.color.copy(base.color);
-  m.userData.uniforms.uEdgeFront.value = front.map ?? white;
-  m.userData.uniforms.uEdgeBack.value = back.map ?? white;
+  const u = m.userData.uniforms;
+  u.uEdgeFront.value = front.map ?? white;
+  u.uEdgeBack.value = back.map ?? white;
+  u.uEdgeFrontSpots.value = front.userData.uniforms.uSpots.value;
+  u.uEdgeBackSpots.value = back.userData.uniforms.uSpots.value;
+  u.uEdgeFrontSpotInk.value.copy(front.userData.uniforms.uSpotInk.value);
+  u.uEdgeBackSpotInk.value.copy(back.userData.uniforms.uSpotInk.value);
 }
 
 /** A page material's twin (see pageMaterial) takes the settings the page's material has now. */

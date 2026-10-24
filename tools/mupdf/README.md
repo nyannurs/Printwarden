@@ -7,7 +7,13 @@ Printwarden reads and renders PDFs with [MuPDF](https://mupdf.com) (Artifex Soft
 
 The added functions are in `printwarden.c` here (about 170 lines, `wasm_pw_*`). The build appends them to MuPDF's own glue (`platform/wasm/lib/mupdf.c`, so they share its context and macros) and appends an export of the module instance (`libmupdfModule`) to its JS API (`lib/mupdf.ts`), so Printwarden's own wrapper can call them on the same module instance.
 
-One change to MuPDF itself, as a patch here, applied by the build: `separation-disabled-images.patch` (source/fitz/separation.c). MuPDF leaves a disabled separation out of a fill but drew an image in that ink through its alternate colour space, so an image in a spot colour stayed visible with its plate switched off. With the patch it is left out of images too, as Acrobat's Output Preview does. Nothing else of MuPDF is changed.
+Three changes to MuPDF itself, as patches here, applied by the build:
+
+- `overprint-disabled-separations.patch` (source/fitz/draw-device.c): a fill in a separation that is disabled overprinted nothing: MuPDF took its colorant, mapped nowhere, for one mapped onto the process colours, and painted them (with nothing: paper). It now protects them as overprint should: a spot plate left out leaves the inks under an overprinting spot fill as they are.
+- `separation-disabled-images.patch` (source/fitz/separation.c): MuPDF leaves a disabled separation out of a fill but drew an image in that ink through its alternate colour space, so an image in a spot colour stayed visible with its plate switched off. With the patch it is left out of images too, as Acrobat's Output Preview does.
+- `separation-spot-channels.patch` (source/fitz/separation.c): where a pixmap's spot channels are mapped onto another's, or composited into the process colours (`fz_copy_pixmap_area_converting_seps`), MuPDF took a separation's place among all separations, or among those composited, for its channel; its channel is its place among those that have one. A page drawn with its first spots as channels and a further one composited (Printwarden's ink images: four spot channels) had that one read from the first spot's channel. With the patch each is read from its own.
+
+Nothing else of MuPDF is changed.
 
 ## Building
 

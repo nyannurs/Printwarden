@@ -59,6 +59,49 @@ export function naiveLut() {
   return out;
 }
 
+/**
+ * Inks as they print with the plates as they are, as the shaders mix them (INK_GLSL): the
+ * process inks (0..1) with `processOn` (Cyan, Magenta, Yellow, Black: false leaves one out),
+ * plus each spot channel's tint (0..1) times its look (`looks`: name -> CMYK 0..1, the spots
+ * that print), at most full ink.
+ * @param {ArrayLike<number>} cmyk
+ * @param {ArrayLike<number>} spots the spot channels' tints, in `names`' order
+ * @param {string[]} names
+ * @param {boolean[]} processOn
+ * @param {Map<string, number[]>} looks
+ * @returns {number[]} C, M, Y, K, 0..1
+ */
+export function mixInks(cmyk, spots, names, processOn, looks) {
+  const out = [0, 1, 2, 3].map((c) => (processOn[c] === false ? 0 : cmyk[c]));
+  names.forEach((name, i) => {
+    const look = looks.get(name);
+    if (look) for (let c = 0; c < 4; c++) out[c] += spots[i] * look[c];
+  });
+  return out.map((v) => Math.min(1, v));
+}
+
+/**
+ * An ink image's pixels as they print (mixInks for every pixel), as a plain ink image: CMYK bytes
+ * with nothing left to switch (a capture's strips, which the page shader shows as they are).
+ * @param {{width: number, height: number, data: Uint8Array, spots?: Uint8Array | null, spotNames?: string[]}} image
+ * @returns {Uint8Array}
+ */
+export function mixImage(image, processOn, looks) {
+  const { data, spots } = image;
+  const names = image.spotNames ?? [];
+  const on = [0, 1, 2, 3].map((c) => (processOn[c] === false ? 0 : 1));
+  const m = names.map((name) => looks.get(name) ?? [0, 0, 0, 0]);
+  const out = new Uint8Array(data.length);
+  for (let o = 0; o < data.length; o += 4) {
+    for (let c = 0; c < 4; c++) {
+      let v = data[o + c] * on[c];
+      if (spots) for (let i = 0; i < m.length; i++) v += spots[o + i] * m[i][c];
+      out[o + c] = v > 255 ? 255 : Math.round(v);
+    }
+  }
+  return out;
+}
+
 /** The colour (sRGB, 0..255) the table gives inks (0..1): the nearest entry. */
 export function inkToRgb(lut, c, m, y, k) {
   const step = (v) => Math.max(0, Math.min(INK_STEPS - 1, Math.round(v * (INK_STEPS - 1))));

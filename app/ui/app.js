@@ -58,7 +58,8 @@ export const state = {
   // colour.options) and the spot plates left out (names). A page's images carry it (inkStamp in
   // pages.js); a change draws again what it changes (redrawInks).
   drawn: { profile: "builtin", spotsOff: /** @type {string[]} */ ([]) },
-  spots: /** @type {{name: string, cmyk: number[], pages: number[]}[]} */ ([]), // the document's spot colours, once the renderer listed them
+  spots: /** @type {{name: string, cmyk: number[], pages: number[], composited: number[]}[]} */ ([]), // the document's spot colours, once the renderer listed them
+  spotInks: /** @type {Map<string, number[]>} */ (new Map()), // the spots that print, by name: their looks in CMYK (colour.js)
   flapKey: "", // which flap images the 3D covers show (see applyCoverExtras)
   background: "#56575b", // 3D backdrop colour, remembered between launches
   bookKey: "",
@@ -151,6 +152,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     state.colour = colourOptionsOfFile;
     state.drawn = { profile: colourOptionsOfFile.choice, spotsOff: [] }; // as the new threads start (startRenderers)
     state.spots = [];
+    state.spotInks = new Map();
     state.renderer?.destroy();
     state.renderer = null;
     state.rendererReady = rendererReady;
@@ -162,7 +164,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
       r.spots().then((spots) => {
         if (state.renderer !== r) return;
         state.spots = spots;
-        refreshPlates(); // a row for each
+        refreshPlates(); // a row for each, and the spots to the views as their plates are
       }, (err) => console.error(err));
     });
     state.bytes = file.bytes;

@@ -60,12 +60,15 @@ export function routedRenderer(main, cover) {
     /** Both files' spots, by name (a spot in both: one, on the pages of both). */
     async spots() {
       const [a, b] = await Promise.all([main.spots(), cover.spots()]);
-      const byName = new Map(a.map((s) => [s.name, { ...s, pages: [...s.pages] }]));
+      const byName = new Map(a.map((s) => [s.name, { ...s, pages: [...s.pages], composited: [...s.composited] }]));
       for (const s of b) {
         const pages = s.pages.map((i) => i + COVER_BASE);
+        const composited = s.composited.map((i) => i + COVER_BASE);
         const had = byName.get(s.name);
-        if (had) had.pages.push(...pages);
-        else byName.set(s.name, { ...s, pages });
+        if (had) {
+          had.pages.push(...pages);
+          had.composited.push(...composited);
+        } else byName.set(s.name, { ...s, pages, composited });
       }
       return [...byName.values()];
     },
@@ -193,8 +196,8 @@ class Scheduler {
   }
 
   /**
-   * The document's spot colours (see mupdf-render.js spots).
-   * @returns {Promise<{name: string, cmyk: number[], pages: number[]}[]>}
+   * The document's spot colours, their look in the profile set now (see mupdf-render.js spots).
+   * @returns {Promise<{name: string, cmyk: number[], pages: number[], composited: number[]}[]>}
    */
   spots() {
     return Promise.resolve([]);
@@ -395,7 +398,7 @@ class WorkerPool extends Scheduler {
     return this.#ask({ type: "lut", bytes: bytes ?? null });
   }
 
-  /** @returns {Promise<{name: string, cmyk: number[], pages: number[]}[]>} see mupdf-render.js spots (none if the thread failed) */
+  /** @returns {Promise<{name: string, cmyk: number[], pages: number[], composited: number[]}[]>} see mupdf-render.js spots (none if the thread failed) */
   async spots() {
     return (await this.#ask({ type: "spots" })) ?? [];
   }
@@ -433,7 +436,7 @@ class WorkerPool extends Scheduler {
       this.#restart(slot);
     } else if (job) {
       if (msg.type === "done") {
-        if (msg.ink) msg.ink.close = () => { msg.ink.data = null; }; // as an ImageBitmap's: its bytes let go
+        if (msg.ink) msg.ink.close = () => { msg.ink.data = msg.ink.spots = null; }; // as an ImageBitmap's: its bytes let go
         job.resolve(msg.bitmap ?? msg.ink);
       } else {
         job.reject(new Error(msg.message));
@@ -518,7 +521,7 @@ export class MainThreadRenderer extends Scheduler {
     await new Promise((r) => setTimeout(r, 0)); // a frame between pages
     const drawn = this.doc.draw(index, rect, height, mode, { mips });
     if (mode === "ink") {
-      drawn.close = () => { drawn.data = null; };
+      drawn.close = () => { drawn.data = drawn.spots = null; };
       return drawn;
     }
     const { toBitmap } = await import("./mupdf-render.js");

@@ -1,0 +1,69 @@
+--- a/source/fitz/separation.c
++++ b/source/fitz/separation.c
+@@ -813,21 +813,28 @@
+ 		 *    For each source spot, i, mapped[i] != 0 implies that it maps directly to a dest spot.
+ 		 *    For each dest spot, j, map[j] = the source spot that goes there (or -1 if none).
+ 		 */
+-		for (i = 0; i < sseps_n; i++)
++		/* Printwarden: a separation's channel in a pixmap is its place among the separations
++		 * that have one (state SPOT), not its place among all of them; the two differ once
++		 * one without a channel (composited, disabled) comes before one with. map[] is by
++		 * the destination's channels, of the source's channels; schan[] is each source
++		 * separation's channel (-1: none). */
++		signed char schan[FZ_MAX_COLORS];
++		for (i = 0, k = 0; i < sseps_n; i++)
++		{
+ 			mapped[i] = 0;
++			schan[i] = sep_state(sseps, i) == FZ_SEPARATION_SPOT ? k++ : -1;
++		}
+ 
+-		for (i = 0; i < dseps_n; i++)
++		for (i = 0, k = 0; i < dseps_n; i++)
+ 		{
+ 			const char *name;
+ 			int state = sep_state(dseps, i);
+ 
+-			map[i] = -1;
+ 			if (state != FZ_SEPARATION_SPOT)
+ 				continue;
++			map[k] = -1;
+ 			name = dseps->name[i];
+-			if (name == NULL)
+-				continue;
+-			for (j = 0; j < sseps_n; j++)
++			for (j = 0; name != NULL && j < sseps_n; j++)
+ 			{
+ 				const char *sname;
+ 				if (mapped[j])
+@@ -837,16 +844,17 @@
+ 				sname = sseps->name[j];
+ 				if (sname && !strcmp(name, sname))
+ 				{
+-					map[i] = j;
++					map[k] = schan[j];
+ 					unmapped--;
+ 					mapped[j] = 1;
+ 					break;
+ 				}
+ 			}
++			k++;
+ 		}
+ 		if (sa)
+-			map[i] = sseps_n;
+-		/* map[i] is now defined for all 0 <= i < dseps_n+sa */
++			map[k] = ss;
++		/* map[i] is now defined for all 0 <= i < ds+sa */
+ 
+ 		/* Now we need to make d[i] = map[i] < 0 : 0 ? s[map[i]] */
+ 		if (ds)
+@@ -882,8 +890,8 @@
+ 					continue;
+ 				if (fz_separation_current_behavior(ctx, sseps, m) != FZ_SEPARATION_SPOT)
+ 					continue;
+-				i++;
+-				/* Src spot m (the i'th one) is not mapped. We need to convert that down. */
++				i = schan[m]; /* Printwarden: its channel (see schan above) */
++				/* Src spot m (in channel i) is not mapped. We need to convert that down. */
+ 				fz_separation_equivalent(ctx, sseps, m, dst->colorspace, convert, proof_cs, color_params);
+ 
+ 				if (fz_colorspace_is_subtractive(ctx, dst->colorspace))

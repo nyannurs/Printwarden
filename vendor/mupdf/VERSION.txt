@@ -1,5 +1,5 @@
 MuPDF 1.28.1 (https://github.com/ArtifexSoftware/mupdf, tag 1.28.1), the WebAssembly build of
-platform/wasm, with Printwarden's patches applied (separation-disabled-images.patch),
+platform/wasm, with Printwarden's patches applied (overprint-disabled-separations.patch separation-disabled-images.patch separation-spot-channels.patch),
 its tools/mupdf/printwarden.c appended to lib/mupdf.c and
 'export const libmupdfModule: any = libmupdf' appended to lib/mupdf.ts, built by tools/mupdf/build.sh
 (Emscripten 4.0.8). License: GNU Affero General Public License 3.0 or later (LICENSE.txt).
