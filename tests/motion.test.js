@@ -19,7 +19,7 @@ function run(state, rounds, full, { fixed = 0, refresh = HZ120, timed = true, la
 test("motion: a graphics card too slow for the screen draws motion smaller until it keeps up", () => {
   const s = motionState();
   // 16 ms a frame at full size, a 120 Hz screen: frames late whenever the drawing outlasts a refresh.
-  const scales = run(s, 8, 16, { late: (scale) => (16 * scale * scale > HZ120 ? 0.5 : 0) });
+  const scales = run(s, 16, 16, { late: (scale) => (16 * scale * scale > HZ120 ? 0.5 : 0) }); // (one step back up is tried, once)
   const last = scales[scales.length - 1];
   ok(last < 1 && 16 * last * last <= HZ120, `settled at ${last}, where frames are on time`);
   eq(new Set(scales.slice(-3)).size, 1, "and stays there");
@@ -53,7 +53,16 @@ test("motion: REGRESSION: frames on time stay full size, whatever the card's tim
   const s = motionState();
   s.k = MOTION_SCALES.length - 1;
   const scales = run(s, 40, 8.7, { refresh: 1000 / 135 });
-  ok(scales[scales.length - 1] >= 0.85, `back up to ${scales[scales.length - 1]}`);
+  eq(scales[scales.length - 1], 1, `back up to full size: ${scales.join(" ")}`);
+});
+
+test("motion: a step up that makes frames late is taken back and not tried again (no bouncing)", () => {
+  const s = motionState();
+  s.k = MOTION_SCALES.indexOf(0.85);
+  // On time at 85 %, late at full size.
+  const scales = run(s, 30, 9, { late: (scale) => (scale > 0.9 ? 0.4 : 0) });
+  const tail = scales.slice(-10);
+  ok(tail.every((x) => x === 0.85), `settles at 85 %: ${scales.join(" ")}`);
 });
 
 test("motion: frames reaching the screen late count, though the card's drawing looks in time (the author's M4 Pro, 0.17.93)", () => {

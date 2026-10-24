@@ -6,7 +6,7 @@ export const MOTION_SCALES = [1, 0.85, 0.7, 0.6, 0.5];
 
 /** A fresh state: full size, any step allowed. */
 export function motionState() {
-  return { k: 0, floor: MOTION_SCALES.length - 1, stepped: null, fast: 0 };
+  return { k: 0, floor: MOTION_SCALES.length - 1, stepped: null, fast: 0, ceiling: 0, rose: false };
 }
 
 /**
@@ -30,9 +30,9 @@ export function motionState() {
  * 8.7 ms a frame at full size against a 7.4 ms refresh, and every frame still reached the
  * screen on time, 120 fps, at full size and at half alike; motion was drawn at 50 % for
  * nothing, every turn and drag soft, sharp again at rest ("it just feels bad", the author).
- * With the timer, a step down needs frames actually late too; a step up, the card's time
- * scaled to the next size within the refresh (from 50 % the old rule, under 0.4 of the
- * refresh, was never met: it stayed small).
+ * With the timer, a step down needs frames actually late too; a step up, frames on time for a
+ * while (from 50 % the old rule, under 0.4 of the refresh, was never met: it stayed small). A
+ * size that made frames late right after a step up isn't tried again until the window changes.
  * @param {number} late
  * @returns {number} the scale to draw motion at
  */
@@ -48,13 +48,19 @@ export function motionStep(state, mean, refreshMs, timed, late = 0) {
     state.k = stepped.k;
     state.fast = 0;
   } else if (((timed ? mean > slow && late > 0.05 : mean > slow) || late > 0.1) && state.k < state.floor) {
+    // Late right after a step up: that size is too much here; not tried again (no bouncing).
+    if (state.rose) state.ceiling = state.k + 1;
+    state.rose = false;
     state.stepped = { k: state.k, mean, late };
     state.k++;
     state.fast = 0;
-  } else if ((timed ? mean * (MOTION_SCALES[state.k - 1] / MOTION_SCALES[state.k]) ** 2 < refresh * 0.9 : mean < easy) && late < 0.02 && state.k > 0) {
+  } else if ((timed || mean < easy) && late < 0.02 && state.k > state.ceiling) {
+    // On time for a while: a step larger. (With the timer, its reading isn't asked: frames on
+    // time are what counts; from 85 % a timed rule kept the author's M4 Pro small for good.)
     if (++state.fast >= 4) {
       state.k--;
       state.fast = 0;
+      state.rose = true;
     }
   } else {
     state.fast = 0;
@@ -66,4 +72,6 @@ export function motionStep(state, mean, refreshMs, timed, late = 0) {
 export function motionReset(state) {
   state.floor = MOTION_SCALES.length - 1;
   state.stepped = null;
+  state.ceiling = 0;
+  state.rose = false;
 }
