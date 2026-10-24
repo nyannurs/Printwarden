@@ -25,6 +25,8 @@ export class Filmstrip {
     this.cells = [];
     /** @type {Map<HTMLElement, {width: number, height: number, data: Uint8Array}>} a page's cell -> its inks, for drawing again */
     this.thumbs = new Map();
+    /** @type {WeakMap<HTMLElement, Promise<any>>} a cell -> its thumbnail asked for last */
+    this.asked = new WeakMap();
 
     this.toggle = document.createElement("div");
     this.toggle.className = "pill-row";
@@ -174,13 +176,30 @@ export class Filmstrip {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       this.observer.unobserve(entry.target);
-      for (const div of entry.target.querySelectorAll(".page:not(.blank)")) {
-        this.deps.thumbnail(Number(div.dataset.folio)).then((ink) => {
-          if (!ink || !div.isConnected) return; // a page that rendered blank, or gone
-          this.thumbs.set(div, ink);
-          this.#draw(div, ink);
-        }).catch(() => {});
-      }
+      for (const div of entry.target.querySelectorAll(".page:not(.blank)")) this.#load(div);
+    }
+  }
+
+  /** A cell's thumbnail asked for, drawn when it comes (the newest asked for wins). */
+  #load(div) {
+    const asked = this.deps.thumbnail(Number(div.dataset.folio));
+    this.asked.set(div, asked);
+    asked.then((ink) => {
+      // A page that rendered blank, gone, or asked for again since.
+      if (!ink || !div.isConnected || this.asked.get(div) !== asked || this.thumbs.get(div) === ink) return;
+      this.thumbs.set(div, ink);
+      this.#draw(div, ink);
+    }).catch(() => {});
+  }
+
+  /**
+   * Every thumbnail shown asked for again (the profile or the spot plates changed, see
+   * redrawInks in pages.js): one whose inks changed is drawn when its new ones come.
+   */
+  reloadThumbnails() {
+    for (const div of [...this.thumbs.keys()]) {
+      if (div.isConnected) this.#load(div);
+      else this.thumbs.delete(div);
     }
   }
 

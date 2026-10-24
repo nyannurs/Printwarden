@@ -213,6 +213,7 @@ function coilRestingAngle(book, left, opening) {
  * @param {1 | -1} [side]   closed with the front cover up, right of the spine (1), or the
  *                          back cover up, left of it (-1: flipped through to the end)
  * @returns {{x: Float32Array, y: Float32Array, phi: Float32Array}}
+ * (Exported for its tests, tests/geometry.test.js and v2.test.js: the app uses it only here.)
  */
 export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 1) {
   const { style, width, cum, total, ground, thickness } = book;

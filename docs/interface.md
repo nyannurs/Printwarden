@@ -105,8 +105,9 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 
 - `colourOptions` lists the profiles: the included ISO Coated v2 (ECI), "From PDF" where the file has an output intent, and every installed CMYK profile.
 - The last choice is remembered.
-- `setColourProfile` has MuPDF make the ink table for the profile (about 60 ms, in a render thread) and swaps it in the 3D view, the timeline and the cover's edge color (`applyProfile`); the renderer takes the profile for the sRGB images it draws from then on. No page is drawn again.
-- `setPlates` (the Separations window) switches the plates in the 3D view's shaders and the timeline's converter: from the next frame, on every page, no render.
+- `setColourProfile` has MuPDF make the ink table for the profile (about 60 ms, in a render thread) and swaps it in the 3D view, the timeline and the cover's edge color (`applyProfile`). The renderer takes the profile, which RGB content is converted into: every page is drawn again in the background (`redrawInks` in pages.js), each shown as it was until its new image is there.
+- `setPlates(process, spotsOff)` (the Separations window) switches the process plates in the 3D view's shaders and the timeline's converter: from the next frame, on every page, no render. The spot plates left out (by name) go to the renderer: the pages with them are drawn again in the background.
+- `state.drawn` is what the renderer draws with (the profile, the spots left out); a page's images carry it as their stamp (`inkStamp`), base image, thumbnail and tiles alike. A tile with an outdated stamp is drawn until its new one takes its place.
 
 ## The spine (`spine-panel.js`)
 

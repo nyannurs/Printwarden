@@ -4,12 +4,13 @@ import { buildBook, isRecto, label } from "../app/core/book.js";
 import { detectSpreads, SpreadMode, SpreadPattern } from "../app/core/detect.js";
 import { scheme } from "../app/core/folding.js";
 import { creepMm, layoutFor, saddleStitchLayout, signatureLayout } from "../app/core/imposition.js";
-import { centreSpread, facingPairs, pairNumbers, partnerMap } from "../app/core/pairing.js";
-import { expectedMediaSize, manualSetup, setupFromPdf, sides, trimRectFor } from "../app/core/setup.js";
+import { centreSpread, facingPairs, pairNumbers } from "../app/core/pairing.js";
+import { expectedMediaSize, setupFromPdf, sides, trimRectFor } from "../app/core/setup.js";
 import { caliperUm, coverOf, defaultPaper, paperThicknessMm } from "../app/core/paper.js";
 import { bookThicknessMm, calculatedSpine, defaultSpine } from "../app/core/spine.js";
 import { rect, rectSize } from "../app/core/units.js";
 import { eq, near, ok, test, throws } from "./harness.js";
+import { manualSetup, partnerMap } from "./helpers.js";
 
 // --- fixtures: SourcePages built directly, no PDF involved --------------------------
 

@@ -4,14 +4,15 @@
 // needs, the tiles one sample's spacing around it (the gaps between samples, and a margin
 // past the screen's edge, so panning finds its tiles already there), and the level under it
 // (shown until the tile lands, and the one a zoom out needs). At rest, the next finer level
-// too, so a zoom in finds it there. What is kept is never asked for again; what is no longer
-// wanted but still queued is cancelled.
+// too, so a zoom in finds it there. What is kept is never asked for again, unless its inks
+// changed (the profile, a spot plate: its stamp, see inkStamp in pages.js; it stays on screen
+// till its new one lands); what is no longer wanted but still queued is cancelled.
 
 import { pageSizeOf } from "../core/analysis.js";
 import { baseHeight } from "../pdf/render.js";
 import { TILE, TILE_MAX_LEVEL, TILE_MIPS, tileAt, tileKey, tileLevel, tilePage, tileRect } from "../viewer/tiles.js";
 import { scene, state } from "./app.js";
-import { pageRegionImage } from "./pages.js";
+import { folioStamp, pageRegionImage } from "./pages.js";
 
 const TILE_PRIORITY = -1; // the band: after a capture's images (-3), before every base image (100 and up)
 const MOVING_INTERVAL_MS = 24; // between updates while the view moves (the rays cost a little)
@@ -61,6 +62,16 @@ export function resetTiles() {
 /** Queued tile renders dropped (a capture wants the renderer). */
 export function cancelTiles() {
   state.renderer?.cancel((job) => !!job.tag);
+}
+
+/**
+ * The inks changed (redrawInks in pages.js): what is in flight is of the old (dropped as it
+ * lands), and the view asks again for what it shows.
+ */
+export function refreshTiles() {
+  inFlight.clear();
+  lastUpdate = -Infinity;
+  updateTiles(performance.now(), { settled: scene.settled });
 }
 
 /**
@@ -131,7 +142,8 @@ export function updateTiles(now, { settled = false } = {}) {
   }
   let requested = 0;
   for (const [key, t] of [...wanted].sort((a, b) => a[1].priority - b[1].priority)) {
-    if (cache.has(key)) { cache.touch(key); continue; }
+    if (cache.has(key)) cache.touch(key); // (outdated, it is drawn till its new one lands)
+    if (cache.has(key, folioStamp(t.folio))) continue;
     if (inFlight.has(key) || requested >= REQUESTS_PER_UPDATE || inFlight.size >= IN_FLIGHT_MAX) continue;
     requested++;
     request(key, t);
@@ -145,23 +157,27 @@ function request(key, t) {
   const p = pageOf(folio);
   if (!p) return;
   const gen = state.generation;
+  const stamp = folioStamp(folio);
   const asked = performance.now();
-  inFlight.set(key, { ...t, asked });
+  const flight = { ...t, asked };
+  inFlight.set(key, flight);
+  // (Only this request's entry: after refreshTiles another may be in flight for the key.)
+  const landed = () => inFlight.get(key) === flight && inFlight.delete(key);
   tileStats.asked++;
   pageRegionImage(folio, tileRect(p.page, level, ix, iy, p.trim), TILE, priority, { mode: "ink", cache: false, flex: true, tag: key, mips: TILE_MIPS })
     .then((tile) => {
-      inFlight.delete(key);
+      landed();
       if (!tile) return;
       tileStats.landed++;
       tileStats.lastMs = performance.now() - asked;
       if (tileStats.latencies.push(tileStats.lastMs) > 64) tileStats.latencies.shift();
-      if (gen !== state.generation) return tile.close?.();
-      scene.tiles.queueTile(folio, level, ix, iy, p.page, tile);
+      if (gen !== state.generation || stamp !== folioStamp(folio)) return tile.close?.();
+      scene.tiles.queueTile(folio, level, ix, iy, p.page, tile, stamp);
       // At rest, the view asked once for at most REQUESTS_PER_UPDATE: ask again as they land,
       // until everything it wants (the spreads either side included) is in.
       if (scene.settled && !again && inFlight.size < IN_FLIGHT_MAX / 2) {
         again = setTimeout(() => { again = 0; if (scene.settled) updateTiles(performance.now(), { settled: true }); }, 0);
       }
       scene.dirty = true; // a frame: the tile goes up (flush) and shows
-    }, () => { inFlight.delete(key); tileStats.cancelled++; }); // cancelled, or the renderer closed
+    }, () => { landed(); tileStats.cancelled++; }); // cancelled, or the renderer closed
 }

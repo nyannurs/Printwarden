@@ -301,7 +301,7 @@ function pageMaterial(scene, isFront, holesOf = null) {
       [`uDetailRect${i}`, { value: new THREE.Vector4(0, 0, 0, 0) }],
     ]).flat()),
     uDetailCount: { value: 0 },
-    // The page's tiles (viewer/tiles.js): its table and its pyramid's shape, bound by the scene (#bindTiles).
+    // The page's tiles (viewer/tiles.js): its table and its pyramid's shape, bound by the scene (uploads.js bindTiles).
     uTileTable: { value: scene.tiles.emptyTable },
     uTilePage: { value: new THREE.Vector4(1, 1, 0, 1) },
     uTileOn: { value: 0 },

@@ -6,6 +6,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, screen, session, sh
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 // Packaged: build.mjs copies the web app into ./web. Development: the repository root.
 const WEB_ROOT = app.isPackaged ? path.join(__dirname, "web") : path.resolve(__dirname, "..");
@@ -267,7 +268,11 @@ ipcMain.handle("read-profile", async (_event, file) => {
   return fs.promises.readFile(file);
 });
 
-/** Colour space, class and description of an ICC profile (header and 'desc' tag only). */
+/**
+ * Colour space, class and description of an ICC profile file (header and 'desc' tag only), by
+ * the web app's own reader (app/pdf/icc.js); the file's name where the profile has no
+ * description. Null for what isn't a profile, is damaged, or is too large to be one.
+ */
 async function readIccInfo(file) {
   let b;
   try {
@@ -276,36 +281,11 @@ async function readIccInfo(file) {
   } catch {
     return null;
   }
-  try {
-    if (b.length < 132 || b.toString("latin1", 36, 40) !== "acsp") return null;
-    const colorSpace = b.toString("latin1", 16, 20).trim();
-    const deviceClass = b.toString("latin1", 12, 16).trim();
-    let name = path.basename(file).replace(/\.(icc|icm)$/i, "");
-    const count = b.readUInt32BE(128);
-    for (let i = 0; i < count && 132 + 12 * i + 12 <= b.length; i++) {
-      const at = 132 + 12 * i;
-      if (b.toString("latin1", at, at + 4) !== "desc") continue;
-      const off = b.readUInt32BE(at + 4);
-      const type = b.toString("latin1", off, off + 4);
-      if (type === "desc") {
-        const len = b.readUInt32BE(off + 8);
-        // eslint-disable-next-line no-control-regex -- names are padded with NUL characters
-        name = b.toString("latin1", off + 12, off + 12 + len).replace(/\u0000+$/, "") || name;
-      } else if (type === "mluc") {
-        const recLen = b.readUInt32BE(off + 20);
-        const recOff = b.readUInt32BE(off + 24);
-        const chars = [];
-        for (let k = 0; k + 1 < recLen; k += 2) chars.push(b.readUInt16BE(off + recOff + k));
-        // eslint-disable-next-line no-control-regex -- the same
-        name = String.fromCharCode(...chars).replace(/\u0000+$/, "") || name;
-      }
-      break;
-    }
-    return { colorSpace, deviceClass, name: name.trim() };
-  } catch {
-    return null; // a damaged profile: skip it, never fail the scan
-  }
+  iccReader ??= import(pathToFileURL(path.join(WEB_ROOT, "app", "pdf", "icc.js")).href);
+  const info = (await iccReader).iccInfo(new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
+  return info && { ...info, name: info.name || path.basename(file).replace(/\.(icc|icm)$/i, "") };
 }
+let iccReader = null; // the module, imported on the first profile
 
 // Two-step save for renders: choose the place first, write when the image is ready.
 // Only paths chosen in this dialog can be written.

@@ -78,6 +78,7 @@ export function signatureLayout(pageCount, signaturePages, sheetPages = 2) {
   return { sides, signaturePages: S, sheetCount: sides.length / 2, sheetPages };
 }
 
+/** Saddle stitch: one signature of every page. (Exported for its tests, tests/core.test.js and v2.test.js.) */
 export const saddleStitchLayout = (pageCount, sheetPages = 2) => signatureLayout(pageCount, pageCount, sheetPages);
 
 /** Whether a scheme of `sheetPages` a sheet folds `signaturePages` signatures (2: always). */

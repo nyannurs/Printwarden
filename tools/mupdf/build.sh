@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds Printwarden's MuPDF (WebAssembly): MuPDF at tag $MUPDF_TAG, its WASM glue with
+# Builds Printwarden's MuPDF (WebAssembly): MuPDF at tag $MUPDF_TAG with the patches here
+# (tools/mupdf/*.patch) applied, its WASM glue with
 # tools/mupdf/printwarden.c appended and its JS API exporting the module instance, built as MuPDF
 # builds its own npm package (platform/wasm/tools/build.sh: Emscripten 4.0.8). The built files go
 # to $OUT (vendor/mupdf/ by default). Run by .github/workflows/mupdf.yml on GitHub's machines; by
@@ -21,6 +22,11 @@ export EMSDK=${EMSDK:-/opt/emsdk}
 
 echo "MuPDF $MUPDF_TAG into $SRC"
 git clone --quiet --depth 1 --branch "$MUPDF_TAG" --recurse-submodules https://github.com/ArtifexSoftware/mupdf.git "$SRC"
+cd "$SRC"
+for patch in "$HERE"/*.patch; do
+  echo "Patch: $(basename "$patch")"
+  git apply --verbose "$patch"
+done
 cd "$SRC/platform/wasm"
 
 echo "Printwarden's glue"
@@ -61,7 +67,8 @@ done
 cat "$DEST/licenses/INDEX.txt"
 {
   echo "MuPDF $MUPDF_TAG (https://github.com/ArtifexSoftware/mupdf, tag $MUPDF_TAG), the WebAssembly build of"
-  echo "platform/wasm, with Printwarden's tools/mupdf/printwarden.c appended to lib/mupdf.c and"
+  echo "platform/wasm, with Printwarden's patches applied ($(cd "$HERE" && echo *.patch)),"
+  echo "its tools/mupdf/printwarden.c appended to lib/mupdf.c and"
   echo "'export const libmupdfModule: any = libmupdf' appended to lib/mupdf.ts, built by tools/mupdf/build.sh"
   echo "(Emscripten 4.0.8). License: GNU Affero General Public License 3.0 or later (LICENSE.txt)."
 } > "$DEST/VERSION.txt"

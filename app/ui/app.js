@@ -52,8 +52,13 @@ export const state = {
   // a cover keeps its colour along the spine, see coverEdge)
   textures: new Map(),
   details: new Map(), // folio -> a capture's strips on screen: [{region, pxPerMm}] (capture.js)
-  colour: { options: [], choice: "builtin", inks: [true, true, true, true] }, // CMYK profile options for this document, the plates that print
+  colour: { options: [], choice: "builtin", inks: [true, true, true, true] }, // CMYK profile options for this document, the process plates that print
   inkLut: null, // the chosen profile as the ink table (viewer/inklut.js), once the renderer made it
+  // What the renderer draws the inks with besides the pages themselves: the profile (its id in
+  // colour.options) and the spot plates left out (names). A page's images carry it (inkStamp in
+  // pages.js); a change draws again what it changes (redrawInks).
+  drawn: { profile: "builtin", spotsOff: /** @type {string[]} */ ([]) },
+  spots: /** @type {{name: string, cmyk: number[], pages: number[]}[]} */ ([]), // the document's spot colours, once the renderer listed them
   flapKey: "", // which flap images the 3D covers show (see applyCoverExtras)
   background: "#56575b", // 3D backdrop colour, remembered between launches
   bookKey: "",
@@ -144,6 +149,8 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     if (!pages.length) throw new Error("This PDF has no pages.");
     if (coverPages && !coverPages.length) throw new Error(`The cover file ${cover.name} has no pages.`);
     state.colour = colourOptionsOfFile;
+    state.drawn = { profile: colourOptionsOfFile.choice, spotsOff: [] }; // as the new threads start (startRenderers)
+    state.spots = [];
     state.renderer?.destroy();
     state.renderer = null;
     state.rendererReady = rendererReady;
@@ -152,6 +159,11 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
       state.renderer = r;
       refreshPlates(); // the Separations window's rows: usable now
       applyProfile().catch((err) => console.error(err)); // the ink table for the 3D view and the timeline
+      r.spots().then((spots) => {
+        if (state.renderer !== r) return;
+        state.spots = spots;
+        refreshPlates(); // a row for each
+      }, (err) => console.error(err));
     });
     state.bytes = file.bytes;
     state.pages = pages;

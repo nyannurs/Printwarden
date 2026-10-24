@@ -1,0 +1,27 @@
+--- a/source/fitz/separation.c
++++ b/source/fitz/separation.c
+@@ -489,6 +489,11 @@
+ 					{
+ 						const char *dname = dseps->name[k];
+ 						int state = sep_state(dseps, k);
++						/* Printwarden: a disabled separation's colorant is left out of
++						 * an image, as it is of a fill (fz_convert_separation_colors),
++						 * not drawn through the alternate space. */
++						if ((state == FZ_SEPARATION_DISABLED || state == FZ_SEPARATION_DISABLED_RENDER) && dname && !strcmp(name, dname))
++							goto skip_disabled;
+ 						if (state != FZ_SEPARATION_SPOT)
+ 							continue;
+ 						if (dname && !strcmp(name, dname))
+@@ -519,6 +524,12 @@
+ 						sd += sstride;
+ 					}
+ 				}
++				else if (0)
++				{
++	skip_disabled:
++					/* Nothing drawn, and not converted below (mapped). */
++					{}
++				}
+ 				else
+ 				{
+ 					unmapped = 1;

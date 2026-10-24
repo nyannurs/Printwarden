@@ -38,7 +38,10 @@ function urlOf(key) {
   return new URL(`../${key}`, import.meta.url);
 }
 
-/** A specifier as a key: relative ones resolved against the importing module's key. */
+/**
+ * A specifier as a key: relative ones resolved against the importing module's key.
+ * (Exported for its tests, tests/bundle.test.js: the app uses it only here.)
+ */
 export function resolveKey(fromKey, spec) {
   if (!spec.startsWith(".")) return spec;
   const parts = fromKey.split("/").slice(0, -1);

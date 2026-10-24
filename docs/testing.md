@@ -30,6 +30,7 @@ node tools/make-testfiles.mjs
 | `core.test.js` | The arithmetic: pairing (including what adding one or two pages in InDesign does to every pair), parity, the center spread, page counts per binding, imposition and folding schemes against the classic tables, creep, setup detection, paper and spine figures, the side-glue rule. |
 | `v2.test.js` | Odd setups, imposed files folded back, sheet plans, the 3D book model. |
 | `pdf.test.js` | Real PDFs, made with pdf-lib: read back, imposed, folded back, rendered the same before and after imposition. |
+| `press.test.js` | Pages drawn for a press: plain CMYK exact in the chosen profile and RGB converted through it, with an output intent or without; spot colours listed and left out by name; a render thread that fails replaced. |
 | `fixtures.test.js` | The generated test documents through the app's own import path: cover files (spine, flaps, outside only, hardcover), spine artwork widths, booklets' sheet counts, output intents, overprint and a spot image drawn by the render threads (MuPDF). |
 | `geometry.test.js` | The geometry proof: no two sheets pass through each other, in any binding, at rest at any opening, closed on either cover, closing and opening, mid-turn, with several pages in the air, flipping fast forward and back. Every pair of sheets that could meet is tested, as outlines at their drawn thickness (`crossings.js`). |
 | `turning.test.js` | Turning, opening and closing in every binding, frame by frame on the scene's own clock: no frame jumps. Single and double clicks, quick bursts, back and forth, closing from the middle, opening deep in, 80 pages. |
@@ -41,6 +42,7 @@ node tools/make-testfiles.mjs
 | `bundle.test.js` | The client viewer's bundle: the right modules, no import left pointing at a file. |
 | `export.test.js` | The imposed export's dialog: the sheet layout chosen in it is the one exported, even with Export pressed at once; the last choice wins. |
 | `harness.js` | The small test harness: `test`, `ok`, `eq`, `near`, `throws`. |
+| `helpers.js` | Helpers only the tests use (`partnerMap`, `manualSetup`). The few things the app exports only for its tests say so where they are defined. |
 
 ### Writing a test
 

@@ -1,8 +1,9 @@
 // Mouse and keyboard on the view: drag to orbit (the camera springs home on release), space
 // and drag to pan, double space to reset, the wheel to zoom (gliding), a click to turn.
-// `own`: the scene's own steps (waking its frames, where it aims).
+// `own`: the scene's own steps (waking its frames); where it aims: framing.js.
 
 import * as THREE from "three";
+import { currentTarget } from "./framing.js";
 import { pageHit } from "./leaf.js";
 
 const CLICK_SLOP_PX = 5;
@@ -60,9 +61,9 @@ export function bindInput(scene, own) {
     down.moved = true;
     if (down.pan) {
       scene.rig.enterFree();
-      pan(scene, own, e.movementX, e.movementY);
+      pan(scene, e.movementX, e.movementY);
     } else {
-      orbit(scene, own, e.movementX, e.movementY);
+      orbit(scene, e.movementX, e.movementY);
     }
     scene.dirty = true;
   });
@@ -83,7 +84,7 @@ export function bindInput(scene, own) {
   el.addEventListener("lostpointercapture", end);
   el.addEventListener("wheel", (e) => {
     e.preventDefault();
-    zoomAt(scene, own, e);
+    zoomAt(scene, e);
   }, { passive: false });
 }
 
@@ -103,16 +104,16 @@ function surfaceSheets(scene) {
 }
 
 /** A pan as the space bar and a drag make it (for the performance check, probe.js). */
-export function panBy(scene, own, dx, dy) {
+export function panBy(scene, dx, dy) {
   scene.rig.enterFree();
-  pan(scene, own, dx, dy);
+  pan(scene, dx, dy);
   scene.dirty = true;
 }
 
-function pan(scene, own, dx, dy) {
+function pan(scene, dx, dy) {
   const lowest = scene.float ? -Infinity : (scene.model?.ground ?? -Infinity) + 2;
   const wasAbove = scene.camera.position.y >= lowest - 1e-3;
-  const d = scene.camera.position.distanceTo(own.currentTarget());
+  const d = scene.camera.position.distanceTo(currentTarget(scene));
   const perPx = (2 * d * Math.tan((scene.camera.fov * Math.PI) / 360)) / scene.renderer.domElement.clientHeight;
   const right = new THREE.Vector3().setFromMatrixColumn(scene.camera.matrixWorld, 0);
   const up = new THREE.Vector3().setFromMatrixColumn(scene.camera.matrixWorld, 1);
@@ -121,12 +122,12 @@ function pan(scene, own, dx, dy) {
   p.x += shift.x;
   p.y += shift.y;
   p.z += shift.z;
-  pivotOnPaper(scene, own);
+  pivotOnPaper(scene);
   // A pan doesn't take the camera under the table: in low views (Front, Side) a pan
   // downward would otherwise. Lifting the whole view keeps the pivot in front of the
   // paper. Already beneath it (orbited there to see the underside), panning is free:
   // lifting there fought the pivot settling back onto the paper, and the view jumped.
-  const cameraY = own.currentTarget().y + scene.fitDistance * scene.rig.zoom * Math.sin(scene.rig.elevation);
+  const cameraY = currentTarget(scene).y + scene.fitDistance * scene.rig.zoom * Math.sin(scene.rig.elevation);
   if (wasAbove && cameraY < lowest) p.y += lowest - cameraY;
   scene.cameraChanged = true;
 }
@@ -137,13 +138,13 @@ function pan(scene, own, dx, dy) {
  * underneath one; the camera would then follow it under the paper and the book would
  * seem to vanish.
  */
-function pivotOnPaper(scene, own) {
+function pivotOnPaper(scene) {
   if (scene.debugNoPivot) return; // the performance check's "no re-pivot" run
   const { azimuth, elevation, zoom } = scene.rig;
   const d = scene.fitDistance * zoom;
   const toCamera = new THREE.Vector3(
     Math.sin(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.cos(azimuth) * Math.cos(elevation));
-  const target = own.currentTarget();
+  const target = currentTarget(scene);
   const camera = target.clone().addScaledVector(toCamera, d);
   const ray = new THREE.Raycaster(camera, toCamera.clone().negate(), 0, d + scene.fitDistance);
   const hit = ray.intersectObjects(surfaceSheets(scene), false)[0];
@@ -170,7 +171,7 @@ function pivotOnPaper(scene, own) {
  * itself and the goal stops short of it: the camera bumps into the page instead of
  * passing through.
  */
-function zoomAt(scene, own, e) {
+function zoomAt(scene, e) {
   const scale = e.deltaMode === 1 ? 0.05 : 0.0015;
   const now = performance.now();
   const glide = scene.zoomGlide;
@@ -178,7 +179,7 @@ function zoomAt(scene, own, e) {
   if (!glide || glide.keepPivot || now - glide.lastInput > 250) {
     const ray = new THREE.Raycaster();
     ray.setFromCamera(new THREE.Vector2(0, 0), scene.camera);
-    const target = own.currentTarget();
+    const target = currentTarget(scene);
     const onPage = ray.intersectObjects(surfaceSheets(scene), false)[0];
     let anchor = onPage?.point ?? null;
     if (!anchor) {
@@ -199,7 +200,7 @@ function zoomAt(scene, own, e) {
 }
 
 /** Ease the camera toward the zoom goal, keeping the aim point fixed on screen. */
-export function glideZoom(scene, own, time) {
+export function glideZoom(scene, time) {
   const g = scene.zoomGlide;
   if (!g) return false;
   const dt = g.lastTime == null ? 1 / 60 : Math.min(0.05, (time - g.lastTime) / 1000);
@@ -211,7 +212,7 @@ export function glideZoom(scene, own, time) {
   const ratio = next / from;
   scene.rig.zoom = next;
   if (g.anchor) {
-    const target = own.currentTarget();
+    const target = currentTarget(scene);
     const moved = g.anchor.clone().add(target.clone().sub(g.anchor).multiplyScalar(ratio)).sub(target);
     const p = scene.rig.pan;
     p.x += moved.x;
@@ -221,7 +222,7 @@ export function glideZoom(scene, own, time) {
   scene.cameraChanged = true;
   if (done) {
     scene.zoomGlide = null;
-    if (!g.keepPivot) pivotOnPaper(scene, own);
+    if (!g.keepPivot) pivotOnPaper(scene);
   }
   return true;
 }
@@ -230,13 +231,13 @@ export function glideZoom(scene, own, time) {
  * Is a page between the pivot and where the camera would be? Close up only: from afar the
  * pivot floats above the book and nothing can come between.
  */
-function pageInTheWay(scene, own) {
+function pageInTheWay(scene) {
   const { azimuth, elevation, zoom } = scene.rig;
   const d = scene.fitDistance * zoom;
   if (!scene.leaves.length || d > scene.fitDistance * 0.5) return false;
   const toCamera = new THREE.Vector3(
     Math.sin(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.cos(azimuth) * Math.cos(elevation));
-  const world = new THREE.Ray(own.currentTarget(), toCamera);
+  const world = new THREE.Ray(currentTarget(scene), toCamera);
   const local = new THREE.Ray();
   const toLeaf = new THREE.Matrix4();
   return scene.leaves.some((leaf) => {
@@ -253,10 +254,10 @@ function pageInTheWay(scene, own) {
  * never move the camera, their pages may pass through the view. (Pushing the camera in
  * front of pages every frame made it jump as they swept past.)
  */
-function orbit(scene, own, dx, dy) {
+function orbit(scene, dx, dy) {
   const rig = scene.rig;
   // Already behind a page (one swung there while you looked): move freely to get out.
-  if (pageInTheWay(scene, own)) {
+  if (pageInTheWay(scene)) {
     rig.drag(dx, dy);
     return;
   }
@@ -265,7 +266,7 @@ function orbit(scene, own, dx, dy) {
     rig.azimuth = before.azimuth;
     rig.elevation = before.elevation;
     rig.drag(mx, my);
-    if (!pageInTheWay(scene, own)) return;
+    if (!pageInTheWay(scene)) return;
   }
   rig.azimuth = before.azimuth;
   rig.elevation = before.elevation;

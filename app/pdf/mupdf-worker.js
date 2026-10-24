@@ -1,14 +1,18 @@
 // A render thread: MuPDF drawing pages (mupdf-render.js) for the pool in render.js, which
-// hands it the document, the CMYK profile, the plates that print, and one render at a time.
-// Messages in: open {bytes | blob}, profile {bytes}, inks {inkOn}, render {id, index, rect,
-// height, mode, mips}, lut {id, bytes}, rest. Out: loaded, ready, error, done {id, bitmap | ink},
-// fail {id, message}, lut {id, data}.
+// hands it the document, the CMYK profile, the spot plates left out, and one render at a time.
+// Messages in: open {bytes | blob}, profile {bytes}, spots-off {names}, render {id, index, rect,
+// height, mode, mips}, lut {id, bytes}, spots {id}, rest. Out: loaded, ready, error, done {id,
+// bitmap | ink}, fail {id, message, fatal}, answer {id, data}.
+//
+// `fatal`: MuPDF itself failed (a WebAssembly trap or abort: out of memory, say), and nothing
+// more can be drawn here; the pool starts another thread in this one's place.
 
 import { InkDocument, toBitmap } from "./mupdf-render.js";
 
 /** @type {InkDocument | null} */
 let doc = null;
 let profile = null; // the profile's bytes, if they arrived before the document
+let spotsOff = [];
 
 self.postMessage({ type: "loaded" }); // MuPDF is instantiated (the import)
 
@@ -19,6 +23,7 @@ self.onmessage = async ({ data }) => {
         const bytes = data.bytes ?? new Uint8Array(await data.blob.arrayBuffer());
         doc = new InkDocument(bytes);
         if (profile !== null) doc.setProfile(profile);
+        doc.setSpotsOff(spotsOff);
         self.postMessage({ type: "ready" });
         return;
       }
@@ -26,8 +31,9 @@ self.onmessage = async ({ data }) => {
         profile = data.bytes ?? null;
         doc?.setProfile(profile);
         return;
-      case "inks":
-        doc?.setInks(data.inkOn);
+      case "spots-off":
+        spotsOff = data.names;
+        doc?.setSpotsOff(spotsOff);
         return;
       case "render": {
         if (!doc) throw new Error("no document");
@@ -42,9 +48,12 @@ self.onmessage = async ({ data }) => {
       }
       case "lut": {
         const table = doc.lut(data.bytes ?? null);
-        self.postMessage({ type: "lut", id: data.id, data: table }, [table.buffer]);
+        self.postMessage({ type: "answer", id: data.id, data: table }, [table.buffer]);
         return;
       }
+      case "spots":
+        self.postMessage({ type: "answer", id: data.id, data: doc.spots() });
+        return;
       case "rest":
         doc?.forget();
         return;
@@ -52,9 +61,13 @@ self.onmessage = async ({ data }) => {
         return;
     }
   } catch (err) {
+    const fatal = err instanceof WebAssembly.RuntimeError;
     if (data.type === "open") self.postMessage({ type: "error", message: String(err?.stack ?? err) });
-    else if (data.type === "render") self.postMessage({ type: "fail", id: data.id, message: String(err?.message ?? err) });
-    else if (data.type === "lut") self.postMessage({ type: "lut", id: data.id, data: null });
-    else console.warn("[mupdf-worker]", data.type, err);
+    else if (data.type === "render") self.postMessage({ type: "fail", id: data.id, message: String(err?.message ?? err), fatal });
+    else if (data.type === "lut" || data.type === "spots") self.postMessage({ type: "answer", id: data.id, data: null, fatal });
+    else {
+      console.warn("[mupdf-worker]", data.type, err);
+      if (fatal) self.postMessage({ type: "fail", id: null, message: String(err?.message ?? err), fatal });
+    }
   }
 };

@@ -39,7 +39,7 @@ What you see as page numbers are **labels**: the PDF's own page labels (`/PageLa
 - `[N, null]` at the end when the page count is even.
 - The center spread exists when the count is a multiple of 4.
 
-Facing pairs are not press-sheet pairs. In saddle stitch the two coincide only at the center spread. `partnerMap` keys each page by its content, so two versions of a book can be compared. Adding two pages near the front keeps every pair; adding one re-pairs everything after it.
+Facing pairs are not press-sheet pairs. In saddle stitch the two coincide only at the center spread. The tests' `partnerMap` (tests/helpers.js) keys each page by its content, so two versions of a book can be compared. Adding two pages near the front keeps every pair; adding one re-pairs everything after it.
 
 ## Spread or single pages
 

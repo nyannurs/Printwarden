@@ -8,9 +8,12 @@
 // drawn again from the cache at once, zooming out never shows less than what is kept, and
 // zooming in shows the coarser level for the few frames its tiles take to land.
 //
-// Tiles are ink images (pdf/mupdf-render.js, mode "ink"), so plates and the profile switch
-// them with everything else. Each goes up with two mips made where it was drawn
-// (pdf/mips.js): the texture array keeps no mipmap pass of its own.
+// Tiles are ink images (pdf/mupdf-render.js, mode "ink"), so the process plates and the
+// profile's look switch them with everything else. Each carries a stamp, what its inks were
+// drawn with besides the page (ui/pages.js inkStamp): a tile with an outdated one is still
+// drawn, but no longer counts as there (has), and its replacement takes its layer when it
+// comes. Each goes up with two mips made where it was drawn (pdf/mips.js): the texture array
+// keeps no mipmap pass of its own.
 //
 // The geometry and the bookkeeping (TileIndex) are pure and tested; TileCache adds the GPU.
 
@@ -39,7 +42,7 @@ export function tilePage(h0, pageMm) {
   return { scale0, w0, h0, cols: top.cols, rows: top.rows };
 }
 
-/** The tiling of a page at a level: how many tiles across and down. */
+/** The tiling of a page at a level: how many tiles across and down. (Exported for its tests too.) */
 export function tileGrid(page, level) {
   const f = 2 ** level;
   return { cols: Math.max(1, Math.ceil((page.w0 * f) / TILE_PAYLOAD)), rows: Math.max(1, Math.ceil((page.h0 * f) / TILE_PAYLOAD)) };
@@ -84,13 +87,14 @@ export const tileKey = (folio, level, ix, iy) => `t:${folio}:${level}:${ix}:${iy
  * The cache's bookkeeping, without the GPU: which tile sits in which layer of the texture
  * array, which were drawn lately, and each page's table (what the shader reads: per level a
  * band of entries, one per tile position, RGBA bytes: the layer's index low and high, 255
- * if the tile is there, and how far it has faded in).
+ * if the tile is there, and how far it has faded in). (Exported for its tests, tests/tiles.test.js:
+ * the app uses it only through TileCache.)
  */
 export class TileIndex {
   /** @param {number} capacity layers in the texture array */
   constructor(capacity) {
     this.capacity = capacity;
-    /** @type {({key: string, folio: number, level: number, ix: number, iy: number, used: number, arrived: number} | null)[]} */
+    /** @type {({key: string, folio: number, level: number, ix: number, iy: number, stamp: string, used: number, arrived: number} | null)[]} */
     this.slots = Array.from({ length: capacity }, () => null);
     /** @type {Map<string, number>} key -> layer */
     this.byKey = new Map();
@@ -104,8 +108,10 @@ export class TileIndex {
     this.frame++;
   }
 
-  has(key) {
-    return this.byKey.has(key);
+  /** Whether the tile is kept: with `stamp`, only as drawn with that (see the header). */
+  has(key, stamp) {
+    const layer = this.byKey.get(key);
+    return layer !== undefined && (stamp === undefined || this.slots[layer].stamp === stamp);
   }
 
   /** A tile drawn by this view: not the next to go. */
@@ -132,12 +138,18 @@ export class TileIndex {
 
   /**
    * Room for a tile: a free layer, else the one least recently drawn that this view didn't
-   * use. Takes it: the tile is listed, its table entry set (fading in from `now`).
+   * use. Takes it: the tile is listed, its table entry set (fading in from `now`). A tile kept
+   * already (with another stamp) keeps its layer, to be drawn over in place: no fade, the
+   * page never shows less in between.
    * @returns {number | null} the layer, or null when every layer is in use by this view
    */
-  place(folio, level, ix, iy, page, now) {
+  place(folio, level, ix, iy, page, now, stamp = "") {
     const key = tileKey(folio, level, ix, iy);
-    if (this.byKey.has(key)) return this.byKey.get(key);
+    const kept = this.byKey.get(key);
+    if (kept !== undefined) {
+      this.slots[kept].stamp = stamp;
+      return kept;
+    }
     let layer = -1;
     if (this.free > 0) {
       layer = this.slots.findIndex((s) => !s);
@@ -151,7 +163,7 @@ export class TileIndex {
       if (layer < 0) return null;
       this.#evict(layer);
     }
-    this.slots[layer] = { key, folio, level, ix, iy, used: this.frame, arrived: now };
+    this.slots[layer] = { key, folio, level, ix, iy, stamp, used: this.frame, arrived: now };
     this.byKey.set(key, layer);
     const t = this.table(folio, page);
     const o = this.#entry(t, level, ix, iy);
@@ -236,7 +248,7 @@ export class TileCache {
     this.emptyTable = TileCache.#tableTexture(new Uint8Array(4), 1, 1);
     /** @type {Map<number, THREE.DataTexture>} folio -> its table on the GPU */
     this.tableTextures = new Map();
-    /** @type {{folio: number, level: number, ix: number, iy: number, page: ReturnType<typeof tilePage>, tile: {data: Uint8Array, mips?: Uint8Array[], close?: () => void}}[]} */
+    /** @type {{folio: number, level: number, ix: number, iy: number, page: ReturnType<typeof tilePage>, tile: {data: Uint8Array, mips?: Uint8Array[], close?: () => void}, stamp: string}[]} */
     this.queue = [];
     this.failed = false; // the texture array couldn't be made: tiles off
   }
@@ -253,8 +265,9 @@ export class TileCache {
     return this.index?.capacity ?? 0;
   }
 
-  has(key) {
-    return !!this.index?.has(key);
+  /** See TileIndex has. */
+  has(key, stamp) {
+    return !!this.index?.has(key, stamp);
   }
 
   touch(key) {
@@ -312,10 +325,13 @@ export class TileCache {
     return true;
   }
 
-  /** A tile drawn: queued for the GPU (flush). The tile's bytes are let go once it is there. */
-  queueTile(folio, level, ix, iy, page, tile) {
+  /**
+   * A tile drawn (`stamp`: what with, see the header): queued for the GPU (flush). The tile's
+   * bytes are let go once it is there.
+   */
+  queueTile(folio, level, ix, iy, page, tile, stamp = "") {
     if (this.failed) return tile.close?.();
-    this.queue.push({ folio, level, ix, iy, page, tile });
+    this.queue.push({ folio, level, ix, iy, page, tile, stamp });
   }
 
   /**
@@ -328,8 +344,8 @@ export class TileCache {
     const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
     let n = 0;
     while (this.queue.length && n < max) {
-      const { folio, level, ix, iy, page, tile } = this.queue.shift();
-      const layer = this.index.place(folio, level, ix, iy, page, now);
+      const { folio, level, ix, iy, page, tile, stamp } = this.queue.shift();
+      const layer = this.index.place(folio, level, ix, iy, page, now, stamp);
       if (layer === null) { tile.close?.(); continue; } // every layer in use by this view: next time
       if (!this.tableTextures.has(folio)) newTables.add(folio);
       this.renderer.state.bindTexture(gl.TEXTURE_2D_ARRAY, this.glTexture);

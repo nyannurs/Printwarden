@@ -47,7 +47,7 @@ export function makeInkPaper() {
   return t;
 }
 
-/** One pixel to draw textures into once (see #warm). */
+/** One pixel to draw textures into once (see uploads.js warm). */
 export function makeWarmer() {
   const vertexShader = "void main() { gl_Position = vec4( position.xy, 0.0, 1.0 ); }";
   const float = new THREE.ShaderMaterial({

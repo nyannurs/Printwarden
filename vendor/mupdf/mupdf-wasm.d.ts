@@ -575,12 +575,6 @@ interface Libmupdf {
 	_wasm_pw_count_separations(seps: Pointer<"fz_separations">): number,
 	_wasm_pw_separation_name(seps: Pointer<"fz_separations">, idx: number): Pointer<"char">,
 	_wasm_pw_set_separation_behavior(seps: Pointer<"fz_separations">, idx: number, behavior: number): void,
-	_wasm_pw_separation_behavior(seps: Pointer<"fz_separations">, idx: number): number,
 	_wasm_pw_separation_equivalent(seps: Pointer<"fz_separations">, idx: number, cs: Pointer<"fz_colorspace">, component: number): number,
-	_wasm_pw_new_pixmap_with_bbox(colorspace: Pointer<"fz_colorspace">, bbox: Pointer<"fz_rect">, seps: Pointer<"fz_separations">, alpha: boolean): Pointer<"fz_pixmap">,
-	_wasm_pw_pixmap_spots(pix: Pointer<"fz_pixmap">): number,
-	_wasm_pw_set_default_colorspaces(dev: Pointer<"fz_device">, cmyk: Pointer<"fz_colorspace">, rgb: Pointer<"fz_colorspace">, gray: Pointer<"fz_colorspace">): void,
-	_wasm_pw_new_pixmap_from_page(page: Pointer<"any_page">, ctm: Pointer<"fz_matrix">, bbox: Pointer<"fz_rect">, colorspace: Pointer<"fz_colorspace">, seps: Pointer<"fz_separations">, alpha: boolean, cmyk: Pointer<"fz_colorspace">, rgb: Pointer<"fz_colorspace">, gray: Pointer<"fz_colorspace">): Pointer<"fz_pixmap">,
-	_wasm_pw_page_uses_overprint(page: Pointer<"any_page">): number,
-	_wasm_pw_document_output_intent(doc: Pointer<"any_document">): Pointer<"fz_colorspace">,
+	_wasm_pw_new_pixmap_from_page(page: Pointer<"any_page">, ctm: Pointer<"fz_matrix">, bbox: Pointer<"fz_rect">, colorspace: Pointer<"fz_colorspace">, seps: Pointer<"fz_separations">, alpha: boolean, press: Pointer<"fz_colorspace">): Pointer<"fz_pixmap">,
 }

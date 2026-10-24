@@ -1,11 +1,12 @@
 // Colour management: which CMYK profile the pages are shown with (the ink table the 3D view and
-// the timeline read their inks through, see viewer/inklut.js; the renderer's, for sRGB images),
-// and which plates print. The profile last chosen, for every file until another is; until one
-// is, the PDF's output intent if it has one, else the one included.
+// the timeline read their inks through, see viewer/inklut.js; the renderer's, which RGB content
+// is converted into), and which plates print. The profile last chosen, for every file until
+// another is; until one is, the PDF's output intent if it has one, else the one included.
 
 import { listCmykProfiles, readProfile } from "../platform.js";
 import { naiveLut } from "../viewer/inklut.js";
 import { filmstrip, inkView, inspector, scene, state } from "./app.js";
+import { redrawInks } from "./pages.js";
 import { applySpine, renderSpineArt } from "./spine-panel.js";
 
 const PROFILE_PREF = "cmykProfile"; // remembered choice (localStorage)
@@ -56,8 +57,8 @@ export async function profileBytes(colour, id) {
 }
 
 /**
- * Switch profile. Nothing is drawn again: the pages are their inks, and the profile is the ink
- * table they are shown through (applyProfile).
+ * Switch profile: the pages' plain CMYK shown through it from the next frame, their RGB content
+ * drawn again in the background (applyProfile).
  */
 export async function setColourProfile(id) {
   if (!state.bytes || id === state.colour.choice) return;
@@ -73,8 +74,10 @@ export async function setColourProfile(id) {
 /**
  * The chosen profile applied: as the ink table (viewer/inklut.js, made by MuPDF), to the 3D
  * view, the timeline and the cover's edge colour, which show every page's inks through it from
- * the next frame; to the renderer, for the sRGB images it draws (the client viewer's pages, the
- * spine artwork). Called once the renderer is ready, and on every change of profile.
+ * the next frame; to the renderer, which converts RGB content into it (the inks of a page with
+ * RGB images or RGB colours depend on it: every page is drawn again, in the background, each
+ * shown as it was until then) and draws the sRGB images through it (the client viewer's pages,
+ * the spine artwork). Called once the renderer is ready, and on every change of profile.
  */
 export async function applyProfile() {
   const renderer = state.renderer;
@@ -84,7 +87,13 @@ export async function applyProfile() {
   const run = ++profileRun;
   const bytes = await profileBytes(state.colour, state.colour.choice);
   if (run !== profileRun || state.renderer !== renderer) return;
-  renderer.setProfile(bytes);
+  const id = state.colour.choice;
+  if (state.drawn.profile !== id) {
+    // (The threads started with the profile chosen then: see startRenderers in app.js.)
+    renderer.setProfile(bytes);
+    state.drawn = { ...state.drawn, profile: id };
+    redrawInks();
+  }
   const lut = (await renderer.inkLut(bytes)) ?? naiveLut();
   if (run !== profileRun || state.renderer !== renderer) return; // a newer profile, or another document, since
   state.inkLut = lut;
@@ -106,26 +115,25 @@ export async function applyProfile() {
 }
 
 /**
- * Which plates print (the Separations window, ui/plates.js): by plate, Cyan, Magenta, Yellow,
- * Black, then a page's spots; false leaves one out. A process plate is switched where the inks
- * are shown (the 3D view's shaders, the timeline's converter, the cover's edge colour), from
- * the next frame, on every page at once: nothing is drawn again. (A spot left out would be: the
- * window has the process plates only, spots always print.)
- * @param {boolean[]} inkOn
+ * Which plates print (the Separations window, ui/plates.js). The process plates (Cyan, Magenta,
+ * Yellow, Black; false leaves one out) are switched where the inks are shown (the 3D view's
+ * shaders, the timeline's converter, the cover's edge colour), from the next frame, on every page
+ * at once: nothing is drawn again. The spot plates left out (`spotsOff`, by name) are left out
+ * where the pages are drawn: the pages with them are drawn again, in the background, each shown
+ * as it was until then.
+ * @param {boolean[]} process
+ * @param {string[]} [spotsOff]
  */
-export function setPlates(inkOn) {
+export function setPlates(process, spotsOff = []) {
   if (!state.bytes) return;
-  const process = inkOn.slice(0, 4);
   state.colour = { ...state.colour, inks: process };
   scene.setInksOn(process);
   inkView.setInksOn(process);
   filmstrip.refreshInk();
   applySpine();
-  // Spots: drawn again, without the ones left out, when that changes (both ways).
-  const spots = inkOn.slice(4).map(Boolean).join();
-  if (spots !== spotsSent) {
-    spotsSent = spots;
-    state.renderer?.setInks(inkOn);
+  if (spotsOff.join("\n") !== state.drawn.spotsOff.join("\n") && state.renderer) {
+    state.renderer.setSpotsOff(spotsOff);
+    state.drawn = { ...state.drawn, spotsOff };
+    redrawInks();
   }
 }
-let spotsSent = ""; // the spot plates the renderer was last told (see setPlates)

@@ -11,14 +11,16 @@ World space is millimeters. The book lies on a table, the spine along z, the hea
 | `leaf.js` | One sheet in 3D: its mesh, materials, cut edges, flaps, the sheets texture, picking. |
 | `shaders.js` | The shaders: three.js's own, changed as text, plus the sheet builder, page shading, spot finishes, holes, show-through, soft shadows. |
 | `extras.js` | What each binding adds: a spine slab, threads, signature folds, staples, a case with boards and headbands, a coil; the contact shadow and the table. |
-| `scene.js` | The scene: lights, camera, animations, page images, the frame loop. The `BookScene` class is the 3D view's whole interface to the rest of the app. |
+| `scene.js` | The scene: lights, materials, the book's state and animations, the frame loop. The `BookScene` class is the 3D view's whole interface to the rest of the app; its parts below are functions of it. |
 | `camera.js` | The camera presets and the camera's two modes. |
+| `framing.js` | Where the camera stands and aims (the spread, a page or the closed book framed; the camera placed for a frame), and which parts of which pages it sees, how densely. |
+| `uploads.js` | The page images to the GPU (spread over frames), an image shown for now instead (a video's), a capture's sharp strips, the tiles bound to the pages. |
 | `input.js` | Mouse and keyboard on the view. |
 | `draw.js` | Drawing a frame: shadows only when needed, sheets nearest first. |
 | `tiles.js` | The tile cache: the pages' sharper levels kept on the graphics card as a map keeps its tiles. |
 | `detail.js` | Planning a capture's sharp strips. |
 | `textures.js` | Placeholder and generated textures: white paper, grain, the contact shadow. |
-| `capture.js` | Screenshots in tiles, videos frame by frame. |
+| `capture.js` | Screenshots in tiles, videos frame by frame; the picture under the frame counter read back. |
 
 ## The model: a leaf as a ribbon
 

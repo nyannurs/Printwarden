@@ -1,11 +1,13 @@
 // Screenshots and videos: the view rendered offline, larger than the screen (tile by tile)
 // or frame by frame on the scene's own clock (see BookScene.captureImage, recordVideo).
-// `own`: the scene's own steps (camera, animations, uploads).
+// `own`: the scene's own steps (its animations brought to a time).
 
 import * as THREE from "three";
 import { renderView } from "./draw.js";
+import { currentTarget, frameCamera, placeCamera } from "./framing.js";
 import { layoutLeaves } from "./layout.js";
 import { LEAF_ROWS } from "./shaders.js";
+import { flushUploads } from "./uploads.js";
 
 /**
  * Render the current view as a large image, tile by tile. Before each tile,
@@ -14,14 +16,13 @@ import { LEAF_ROWS } from "./shaders.js";
  * at exactly the resolution the tile needs. Resolution is then limited only by the
  * output size, not by the screen or by texture memory.
  * @param {import("./scene.js").BookScene} scene
- * @param {import("./scene.js").SceneSteps} own
  * @param {{width: number, height: number, transparent?: boolean,
  *          prepare?: (visible: ReturnType<import("./scene.js").BookScene["visiblePages"]>,
  *                     tile: {x: number, y: number, w: number, h: number}) => Promise<void>,
  *          onProgress?: (done: number, total: number) => void}} options
  * @returns {Promise<Blob>} PNG
  */
-export async function captureImage(scene, own, { width, height, transparent = false, prepare = async () => {}, onProgress = () => {} }) {
+export async function captureImage(scene, { width, height, transparent = false, prepare = async () => {}, onProgress = () => {} }) {
   const tileMax = Math.min(4096, scene.renderer.capabilities.maxTextureSize);
   const cols = Math.ceil(width / tileMax);
   const rows = Math.ceil(height / tileMax);
@@ -40,8 +41,8 @@ export async function captureImage(scene, own, { width, height, transparent = fa
   try {
     layoutLeaves(scene);
     scene.camera.aspect = width / height;
-    own.frameCamera(); // framed for the output's shape: the whole book fits
-    own.placeCamera();
+    frameCamera(scene); // framed for the output's shape: the whole book fits
+    placeCamera(scene);
     if (transparent) scene.scene.background = null;
     scene.renderer.setClearColor(0x000000, 0);
     for (let r = 0; r < rows; r++) {
@@ -80,7 +81,7 @@ export async function captureImage(scene, own, { width, height, transparent = fa
   } finally {
     scene.camera.clearViewOffset();
     scene.camera.aspect = aspect;
-    own.frameCamera();
+    frameCamera(scene);
     scene.camera.updateProjectionMatrix();
     scene.scene.background = background;
     scene.renderer.setClearColor(clearColor, clearAlpha);
@@ -97,10 +98,10 @@ export async function captureImage(scene, own, { width, height, transparent = fa
  * across the view, d toward the camera: it fits when distance ≥ d + |x| / (margin · tan(half
  * fov)), and the same for y.
  */
-function distanceToFit(scene, own, margin) {
+function distanceToFit(scene, margin) {
   const { tanH, tanV } = halfFov(scene.camera, margin);
   let need = 0;
-  bookPoints(scene, own, (x, y, d) => {
+  bookPoints(scene, (x, y, d) => {
     need = Math.max(need, d + Math.abs(x) / tanH, d + Math.abs(y) / tanV);
   });
   return need;
@@ -117,11 +118,11 @@ function halfFov(cam, margin) {
  * x across, y up, d toward the camera (`visit(x, y, d)`). Points along each leaf from root to
  * fore-edge, at head and foot (and the middle, turning).
  */
-function bookPoints(scene, own, visit) {
+function bookPoints(scene, visit) {
   const cam = scene.camera;
   cam.updateMatrixWorld();
   const e = cam.matrixWorld.elements;
-  const t = own.currentTarget();
+  const t = currentTarget(scene);
   scene.block.updateWorldMatrix(true, false);
   const m = scene.block.matrixWorld;
   const v = new THREE.Vector3();
@@ -167,7 +168,7 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
       scene.clock = start + ms;
       while (pending.length && pending[0].at <= ms) pending.shift().run();
       own.update(scene.clock);
-      own.frameCamera();
+      frameCamera(scene);
       each(i, ms);
     }
   };
@@ -197,8 +198,8 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
     let need = 0;
     run(() => {
       aim();
-      own.placeCamera();
-      need = Math.max(need, distanceToFit(scene, own, margin));
+      placeCamera(scene);
+      need = Math.max(need, distanceToFit(scene, margin));
     });
     return need;
   };
@@ -218,11 +219,11 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     run(() => {
       fix();
-      own.placeCamera();
+      placeCamera(scene);
       scene.camera.updateMatrixWorld();
       const e = scene.camera.matrixWorld.elements;
-      const t = own.currentTarget();
-      bookPoints(scene, own, (x, y, d) => {
+      const t = currentTarget(scene);
+      bookPoints(scene, (x, y, d) => {
         // Back to a world point, then through the camera: where it lands in the picture.
         v.set(t.x + e[0] * x + e[4] * y + e[8] * d, t.y + e[1] * x + e[5] * y + e[9] * d, t.z + e[2] * x + e[6] * y + e[10] * d).project(scene.camera);
         x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x);
@@ -248,7 +249,7 @@ function planVideo(scene, own, { width, height, fps, frames, cues, reset, margin
   const need = [];
   run((i) => {
     fix();
-    own.placeCamera();
+    placeCamera(scene);
     scene.camera.updateMatrixWorld();
     const folios = candidates();
     const here = new Map(folios.map((f) => [f, 0]));
@@ -333,10 +334,10 @@ export async function recordVideo(scene, own, { width, height, fps, durationMs, 
       while (pending.length && pending[0].at <= ms) pending.shift().run();
       await prepare(ms, plan?.need[i] ?? new Map());
       own.update(scene.clock);
-      while (scene.uploads.size) own.flushUploads(); // every page image for this frame
-      own.frameCamera();
+      while (scene.uploads.size) flushUploads(scene); // every page image for this frame
+      frameCamera(scene);
       plan?.fix(); // the video's fixed camera: every page in the picture, no moving or pulsing
-      own.placeCamera();
+      placeCamera(scene);
       renderView(scene, target, null);
       scene.renderer.setRenderTarget(out);
       scene.renderer.render(postScene, postCamera);
@@ -355,7 +356,7 @@ export async function recordVideo(scene, own, { width, height, fps, durationMs, 
     await Promise.allSettled(delivered);
     scene.clock = null;
     scene.camera.aspect = aspect;
-    own.frameCamera();
+    frameCamera(scene);
     scene.camera.updateProjectionMatrix();
     scene.scene.background = background;
     scene.renderer.setClearColor(clearColor, clearAlpha);
@@ -367,3 +368,71 @@ export async function recordVideo(scene, own, { width, height, fps, durationMs, 
     scene.dirty = true;
   }
 }
+
+// --- the picture read back -----------------------------------------------------------
+
+/**
+ * After a frame is drawn: the picture under the rects asked for (sampleUnder) copied into a
+ * buffer on the GPU, collected once the GPU is through with it.
+ * @param {import("./scene.js").BookScene} scene
+ * @param {WebGL2RenderingContext} gl
+ */
+export function copyUnder(scene, gl) {
+  const u = scene.under;
+  if (!u.request || u.busy || !rects0(u.request.rects)) return;
+  const { rects, done } = u.request;
+  u.request = null;
+  const W = gl.drawingBufferWidth;
+  const H = gl.drawingBufferHeight;
+  const boxes = rects.map((r) => {
+    const x = Math.max(0, Math.min(W - 1, Math.round(r.x)));
+    const y = Math.max(0, Math.min(H - 1, Math.round(r.y)));
+    const w = Math.max(1, Math.min(W - x, Math.round(r.w)));
+    const h = Math.max(1, Math.min(H - y, Math.round(r.h)));
+    return { x, y: H - y - h, w, h }; // GL counts rows from the bottom
+  });
+  const size = boxes.reduce((sum, b) => sum + 4 * b.w * b.h, 0);
+  u.buffer ??= gl.createBuffer();
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, u.buffer);
+  if (u.size < size) {
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, size, gl.STREAM_READ);
+    u.size = size;
+  }
+  let at = 0;
+  for (const b of boxes) {
+    gl.readPixels(b.x, b.y, b.w, b.h, gl.RGBA, gl.UNSIGNED_BYTE, at);
+    at += 4 * b.w * b.h;
+  }
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  gl.flush();
+  u.busy = true;
+  // Polled by the fence's status (clientWaitSync with no wait kept answering "not yet" in
+  // Chromium long after the fence had signalled).
+  const collect = () => {
+    if (gl.isContextLost()) return void (u.busy = false);
+    if (gl.getSyncParameter(sync, gl.SYNC_STATUS) !== gl.SIGNALED) return void setTimeout(collect, 8);
+    gl.deleteSync(sync);
+    u.busy = false;
+    const px = new Uint8Array(size);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, u.buffer);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, px);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    let k = 0;
+    done(boxes.map((b) => {
+      let sum = 0;
+      for (let i = 0; i < b.w * b.h; i++, k += 4) sum += 0.2126 * SRGB_TO_LINEAR[px[k]] + 0.7152 * SRGB_TO_LINEAR[px[k + 1]] + 0.0722 * SRGB_TO_LINEAR[px[k + 2]];
+      return sum / (b.w * b.h);
+    }));
+  };
+  setTimeout(collect, 0);
+}
+
+/** An 8-bit sRGB value's linear light (see sampleUnder). */
+const SRGB_TO_LINEAR = Float32Array.from({ length: 256 }, (_, i) => {
+  const c = i / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+});
+
+/** At least one rect with an area. */
+const rects0 = (rects) => rects.some((r) => r.w >= 1 && r.h >= 1);

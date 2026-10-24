@@ -2,7 +2,6 @@
 // Not to be confused with imposed sheets (imposition.js), which is how pages are
 // grouped on press. In saddle stitch the two only coincide at the centre spread.
 
-import { contentKey } from "./book.js";
 
 /** [null, 1], [2, 3], [4, 5], … and a trailing [N, null] when N is even. */
 export function pairNumbers(pageCount) {
@@ -38,18 +37,3 @@ export function facingPairs(book) {
 
 /** Opening index (0 = cover) that shows the given folio. */
 export const openingOf = (folio) => Math.floor(folio / 2);
-
-/**
- * For each content page, the content page it faces (null = nothing or a blank).
- * Keyed by content identity, so books built from the same source can be compared.
- */
-export function partnerMap(book) {
-  const partners = new Map();
-  for (const { left, right } of facingPairs(book)) {
-    const lk = left && contentKey(left);
-    const rk = right && contentKey(right);
-    if (lk) partners.set(lk, rk ?? null);
-    if (rk) partners.set(rk, lk ?? null);
-  }
-  return partners;
-}

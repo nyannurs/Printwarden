@@ -42,6 +42,8 @@ const THREADS_FILE_BYTES = 1.5 * 2 ** 30; // the threads' copies of a file toget
 const SHARED_FILE_BYTES = 24 * 2 ** 20;
 // Threads idle this long let go of the pages and caches they built (see mupdf-worker.js).
 const REST_MS = 20000;
+// Threads started in place of failed ones, at most, in a document (see WorkerPool #restart).
+const RESTARTS_MAX = 6;
 
 /**
  * One renderer for a book from two files: the pages' and the cover file's (its pages at
@@ -52,9 +54,21 @@ export function routedRenderer(main, cover) {
   const of = (index) => (index >= COVER_BASE ? [cover, index - COVER_BASE] : [main, index]);
   return {
     render(index, ...rest) { const [r, i] = of(index); return r.render(i, ...rest); },
-    setInks(inkOn) { main.setInks(inkOn); cover.setInks(inkOn); },
+    setSpotsOff(names) { main.setSpotsOff(names); cover.setSpotsOff(names); },
     setProfile(bytes) { main.setProfile(bytes); cover.setProfile(bytes); },
     inkLut(bytes) { return main.inkLut(bytes); },
+    /** Both files' spots, by name (a spot in both: one, on the pages of both). */
+    async spots() {
+      const [a, b] = await Promise.all([main.spots(), cover.spots()]);
+      const byName = new Map(a.map((s) => [s.name, { ...s, pages: [...s.pages] }]));
+      for (const s of b) {
+        const pages = s.pages.map((i) => i + COVER_BASE);
+        const had = byName.get(s.name);
+        if (had) had.pages.push(...pages);
+        else byName.set(s.name, { ...s, pages });
+      }
+      return [...byName.values()];
+    },
     cancel(predicate) { main.cancel(predicate); cover.cancel(predicate); },
     destroy() { main.destroy(); cover.destroy(); },
   };
@@ -165,20 +179,25 @@ class Scheduler {
   }
 
   /**
-   * Which plates print (by plate: Cyan, Magenta, Yellow, Black, then a page's spots; false
-   * leaves one out): every image drawn from now on is without them. What was drawn before is
-   * let go of (the caller asks again for what it shows).
-   * @param {boolean[]} inkOn
+   * The spot plates left out (their names): every image drawn from now on is without them.
+   * What was drawn before is let go of (the caller asks again for what it shows).
+   * @param {string[]} _names
    */
-  setInks(inkOn) {
-    this.inkOn = inkOn;
+  setSpotsOff(_names) {
     this.cache.clear();
   }
 
-  /** The CMYK profile (ICC bytes, or null for MuPDF's own) for the sRGB images drawn from now on. */
-  setProfile(bytes) {
-    this.profile = bytes;
+  /** The CMYK profile (ICC bytes, or null for MuPDF's own) for every image drawn from now on. */
+  setProfile(_bytes) {
     this.cache.clear();
+  }
+
+  /**
+   * The document's spot colours (see mupdf-render.js spots).
+   * @returns {Promise<{name: string, cmyk: number[], pages: number[]}[]>}
+   */
+  spots() {
+    return Promise.resolve([]);
   }
 
   /**
@@ -251,49 +270,26 @@ function takeSpareWorkers(count) {
 }
 
 class WorkerPool extends Scheduler {
-  constructor() {
+  constructor(bytes) {
     super();
     /** @type {any[]} the threads (slots), once started */
     this.workers = [];
     this.owner = new Map(); // page index -> first slot to read it (its images are cached there)
-    this.lutJobs = new Map(); // id -> resolve (ink tables asked of a thread)
+    /** @type {Map<string, {resolve: (data: any) => void, slot: any}>} questions asked of a thread (an ink table, the spots) */
+    this.asks = new Map();
+    // The file, for a thread started in place of one that failed: a large one as one Blob (each
+    // reads it into its own memory when it opens), smaller ones handed over whole.
+    this.bytes = bytes;
+    this.shared = bytes.byteLength >= SHARED_FILE_BYTES ? new Blob([bytes]) : null;
+    this.profile = null; // the profile's bytes, once known
+    this.spotsOff = [];
+    this.restarts = 0;
   }
 
   static async start(bytes, slots, cmykProfile) {
-    const pool = new WorkerPool();
-    const shared = bytes.byteLength >= SHARED_FILE_BYTES ? new Blob([bytes]) : null;
-    pool.workers = await Promise.all(slots.map((slot) => new Promise((resolve, reject) => {
-      const { worker } = slot;
-      worker.onerror = (e) => reject(new Error(e.message || "worker failed to start"));
-      // The document opens right away; the CMYK profile follows when known (it depends on
-      // the file's output intent). A worker takes pages only once it has both.
-      let opened = false;
-      let profiled = false;
-      const maybeReady = () => opened && profiled && resolve(slot);
-      worker.onmessage = ({ data }) => {
-        if (data.type === "ready") {
-          worker.onmessage = ({ data: msg }) => pool.#finished(slot, msg);
-          worker.onerror = (e) => pool.#finished(slot, { type: "fail", message: e.message, crashed: true });
-          opened = true;
-          maybeReady();
-        } else if (data.type === "error") {
-          reject(new Error(data.message));
-        }
-      };
-      slot.loaded.then(() => {
-        if (shared) {
-          worker.postMessage({ type: "open", blob: shared }); // the one Blob, not a copy
-        } else {
-          const copy = bytes.slice(); // each thread its own copy, handed over (not copied again)
-          worker.postMessage({ type: "open", bytes: copy }, [copy.buffer]);
-        }
-      }, reject);
-      Promise.resolve(cmykProfile).then((profile) => {
-        worker.postMessage({ type: "profile", bytes: profile ?? null });
-        profiled = true;
-        maybeReady();
-      }, reject);
-    }))).catch((err) => {
+    const pool = new WorkerPool(bytes);
+    const profile = Promise.resolve(cmykProfile).then((p) => (pool.profile = p ?? null));
+    pool.workers = await Promise.all(slots.map((slot) => pool.#open(slot, profile))).catch((err) => {
       // None of them is used then: all stopped (they each hold the file, or part of it).
       for (const slot of slots) slot.worker.terminate();
       throw err;
@@ -302,16 +298,62 @@ class WorkerPool extends Scheduler {
   }
 
   /**
-   * A worker keeps the pages it read last (their decoded images above all), so later renders
-   * of one are quickest there. A page's renders therefore go to the worker that first read it;
-   * tiles and strips ("flex" jobs) to any free one (MuPDF reads a page in milliseconds; a photo
+   * A thread given the document, then the CMYK profile when known (`profile` resolves when
+   * this.profile is: it depends on the file's output intent) and the spot plates left out. It
+   * takes pages once it has them all.
+   * @returns {Promise<any>} the slot, ready
+   */
+  #open(slot, profile) {
+    const { worker } = slot;
+    return new Promise((resolve, reject) => {
+      worker.onerror = (e) => reject(new Error(e.message || "worker failed to start"));
+      let opened = false;
+      let profiled = false;
+      const maybeReady = () => opened && profiled && resolve(slot);
+      worker.onmessage = ({ data }) => {
+        if (data.type === "ready") {
+          worker.onmessage = ({ data: msg }) => this.#finished(slot, msg);
+          worker.onerror = (e) => {
+            e.preventDefault?.();
+            this.#finished(slot, { type: "fail", message: e.message, fatal: true });
+          };
+          opened = true;
+          maybeReady();
+        } else if (data.type === "error") {
+          reject(new Error(data.message));
+        }
+      };
+      slot.loaded.then(() => {
+        if (this.shared) {
+          worker.postMessage({ type: "open", blob: this.shared }); // the one Blob, not a copy
+        } else {
+          const copy = this.bytes.slice(); // each thread its own copy, handed over (not copied again)
+          worker.postMessage({ type: "open", bytes: copy }, [copy.buffer]);
+        }
+      }, reject);
+      // Once MuPDF is loaded in it too: a module thread drops what comes before (its handler
+      // is set only when its imports are done). The newest profile and spots then, should they
+      // have changed while it started.
+      Promise.all([slot.loaded, profile]).then(() => {
+        worker.postMessage({ type: "profile", bytes: this.profile });
+        if (this.spotsOff.length) worker.postMessage({ type: "spots-off", names: this.spotsOff });
+        profiled = true;
+        maybeReady();
+      }, reject);
+    });
+  }
+
+  /**
+   * A page's renders go to the thread that first read it: a thread keeps the pages it read
+   * last (their decoded images above all), so later renders of one are quickest there. Tiles
+   * and strips ("flex" jobs) go to any free one (MuPDF reads a page in milliseconds; a photo
    * page's JPEG once more on another thread). A page nobody has read goes to whichever is free.
    */
   pump() {
     if (this.closed) return;
     clearTimeout(this.resting);
     for (const slot of this.workers) {
-      if (slot.job) continue;
+      if (slot.job || slot.starting) continue;
       let best = -1;
       for (let i = 0; i < this.queue.length; i++) {
         const job = this.queue[i];
@@ -329,53 +371,67 @@ class WorkerPool extends Scheduler {
       slot.job = job;
       slot.worker.postMessage({ type: "render", id: job.id, index: job.index, rect: job.rect, height: job.height, mode: job.mode, mips: job.mips });
     }
-    if (!this.queue.length && !this.lutJobs.size && this.workers.every((s) => !s.job)) {
+    if (!this.queue.length && !this.asks.size && this.workers.every((s) => !s.job)) {
       this.resting = setTimeout(() => {
         for (const slot of this.workers) slot.worker.postMessage({ type: "rest" });
       }, REST_MS);
     }
   }
 
-  setInks(inkOn) {
-    super.setInks(inkOn);
-    for (const slot of this.workers) slot.worker.postMessage({ type: "inks", inkOn });
+  setSpotsOff(names) {
+    super.setSpotsOff(names);
+    this.spotsOff = names;
+    for (const slot of this.workers) slot.worker.postMessage({ type: "spots-off", names });
   }
 
   setProfile(bytes) {
     super.setProfile(bytes);
-    for (const slot of this.workers) slot.worker.postMessage({ type: "profile", bytes: bytes ?? null });
+    this.profile = bytes ?? null;
+    for (const slot of this.workers) slot.worker.postMessage({ type: "profile", bytes: this.profile });
   }
 
   /** @returns {Promise<Uint8Array | null>} the table, or null if the thread failed */
   inkLut(bytes) {
-    if (this.closed) return Promise.resolve(null);
-    const slot = this.workers[0];
-    const id = `l${++jobIds}`;
+    return this.#ask({ type: "lut", bytes: bytes ?? null });
+  }
+
+  /** @returns {Promise<{name: string, cmyk: number[], pages: number[]}[]>} see mupdf-render.js spots (none if the thread failed) */
+  async spots() {
+    return (await this.#ask({ type: "spots" })) ?? [];
+  }
+
+  /** A question for a thread (the first that is running), answered with its data, or null. */
+  #ask(message) {
+    const slot = this.workers.find((s) => !s.starting);
+    if (this.closed || !slot) return Promise.resolve(null);
+    const id = `a${++jobIds}`;
     clearTimeout(this.resting);
     return new Promise((resolve) => {
-      this.lutJobs.set(id, resolve);
-      slot.worker.postMessage({ type: "lut", id, bytes: bytes ?? null });
+      this.asks.set(id, { resolve, slot });
+      slot.worker.postMessage({ ...message, id });
     });
   }
 
-  /** Every ink table still asked for, answered with none (a thread crashed, or the pool ends). */
-  #dropLutJobs() {
-    for (const resolve of this.lutJobs.values()) resolve(null);
-    this.lutJobs.clear();
-  }
-
   #finished(slot, msg) {
-    if (msg.type === "lut") {
-      const resolve = this.lutJobs.get(msg.id);
-      this.lutJobs.delete(msg.id);
-      resolve?.(msg.data ?? null);
+    if (msg.type === "answer") {
+      const ask = this.asks.get(msg.id);
+      this.asks.delete(msg.id);
+      ask?.resolve(msg.data ?? null);
+      if (msg.fatal) this.#restart(slot);
       this.pump();
       return;
     }
-    if (msg.crashed) this.#dropLutJobs();
     const job = slot.job;
     slot.job = null;
-    if (job) {
+    if (msg.fatal) {
+      // The thread can draw no more: another in its place, and its render tried once more
+      // there or on another (a page that brings MuPDF down twice is reported as failed).
+      if (job && !job.retried) {
+        job.retried = true;
+        this.queue.push(job);
+      } else job?.reject(new Error(msg.message));
+      this.#restart(slot);
+    } else if (job) {
       if (msg.type === "done") {
         if (msg.ink) msg.ink.close = () => { msg.ink.data = null; }; // as an ImageBitmap's: its bytes let go
         job.resolve(msg.bitmap ?? msg.ink);
@@ -386,15 +442,58 @@ class WorkerPool extends Scheduler {
     this.pump();
   }
 
+  /**
+   * A thread that failed (MuPDF trapped, or the thread itself ended) stopped, and a new one
+   * started in its place with the same document, profile and plates. The pages it had read
+   * go to whichever thread is free. After RESTARTS_MAX in one document no more are started:
+   * the threads left carry on; with none left, what is queued fails.
+   */
+  #restart(slot) {
+    slot.worker.terminate();
+    for (const [index, owner] of this.owner) if (owner === slot) this.owner.delete(index);
+    for (const [id, ask] of this.asks) {
+      if (ask.slot !== slot) continue;
+      this.asks.delete(id);
+      ask.resolve(null);
+    }
+    if (this.closed) return;
+    if (++this.restarts > RESTARTS_MAX) {
+      console.warn("[render] a render thread failed; not started again");
+      this.workers = this.workers.filter((s) => s !== slot);
+      if (!this.workers.length) {
+        for (const job of this.queue) job.reject(new Error("no render thread"));
+        this.queue = [];
+      }
+      return;
+    }
+    console.warn("[render] a render thread failed; starting another");
+    const fresh = spawnWorker();
+    slot.worker = fresh.worker;
+    slot.loaded = fresh.loaded;
+    slot.starting = true;
+    this.#open(slot, Promise.resolve(this.profile)).then(() => {
+      slot.starting = false;
+      this.pump();
+    }, (err) => {
+      console.warn("[render] the new render thread failed:", err);
+      slot.starting = false;
+      this.#restart(slot);
+    });
+  }
+
   destroy() {
     this.close();
     clearTimeout(this.resting);
-    this.#dropLutJobs();
+    for (const ask of this.asks.values()) ask.resolve(null);
+    this.asks.clear();
     for (const slot of this.workers) slot.worker.terminate();
   }
 }
 
-/** Fallback: MuPDF on the main thread (the same drawing; the interface waits while a page draws). */
+/**
+ * Fallback: MuPDF on the main thread (the same drawing; the interface waits while a page draws).
+ * (Exported for its tests, tests/pdf.test.js: the app makes one only in createRenderer.)
+ */
 export class MainThreadRenderer extends Scheduler {
   /** @param {import("./mupdf-render.js").InkDocument} doc */
   constructor(doc) {
@@ -426,9 +525,9 @@ export class MainThreadRenderer extends Scheduler {
     return toBitmap(drawn);
   }
 
-  setInks(inkOn) {
-    super.setInks(inkOn);
-    this.doc.setInks(inkOn);
+  setSpotsOff(names) {
+    super.setSpotsOff(names);
+    this.doc.setSpotsOff(names);
   }
 
   setProfile(bytes) {
@@ -438,6 +537,10 @@ export class MainThreadRenderer extends Scheduler {
 
   inkLut(bytes) {
     return Promise.resolve(this.doc.lut(bytes ?? null));
+  }
+
+  spots() {
+    return Promise.resolve(this.doc.spots());
   }
 
   destroy() {

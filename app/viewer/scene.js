@@ -5,6 +5,11 @@
 // the way it does in a real book (computed per binding, noise-free).
 //
 // World space is millimetres: the book lies on a table, spine along z, head at -z.
+//
+// Its parts in files of their own, as functions of the scene: where the camera stands and what
+// it sees (framing.js), the page images and tiles going to the GPU (uploads.js), screenshots,
+// videos and the picture read back (capture.js), input (input.js), the layout (layout.js) and
+// the draw order and shadows (draw.js).
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -15,14 +20,16 @@ import { CAMERA_PRESETS, CameraRig, presetHome } from "./camera.js";
 import * as capture from "./capture.js";
 import { drawOrder, shadows } from "./draw.js";
 import { layoutGround, makeExtras } from "./extras.js";
+import { frameCamera, placeCamera, visiblePages } from "./framing.js";
 import { bindInput, glideZoom, panBy } from "./input.js";
 import { layoutLeaves } from "./layout.js";
-import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, pageHit, fillerMaterial } from "./leaf.js";
+import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, fillerMaterial } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
 import { MAX_DETAIL, sheetShader } from "./shaders.js";
 import { naiveLut } from "./inklut.js";
-import { disposeTexture, freeImage, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeInkTexture, makeWarmer, makeWhite } from "./textures.js";
+import { disposeTexture, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeWhite } from "./textures.js";
 import { TileCache } from "./tiles.js";
+import * as uploads from "./uploads.js";
 
 const TURN_MS = 720;
 const FAST_TURN_MS = 360; // for requests in quick succession (rapid clicks, scrubbing)
@@ -37,12 +44,6 @@ const SETTLE_MS = 120; // quiet time before the view counts as settled
 // After pages turned: longer, so the at-rest tile requests (the next finer level, the spreads
 // either side: ui/tiles.js) aren't made for pages only flipped past as the next click comes.
 const TURN_SETTLE_MS = 350;
-const UPLOADS_PER_FRAME = 2;
-const TILES_PER_FRAME = 3; // tiles to the GPU a frame (5.5 MB each with its mips: a frame at 130 Hz takes about three)
-// Page images are filtered as stored (sRGB values) and only then turned into light: type
-// keeps its weight, the way browsers and Acrobat antialias it. Filtered as light, the grey
-// edge pixels of dark type on white come out too light, and text looks thin and grey.
-const PAGE_COLOR_SPACE = THREE.NoColorSpace;
 // All light scaled so white paper peaks just under the screen's white (about 247-250 of
 // 255, measured on a white page in the reading and isometric views): it shades instead of
 // clipping flat. At 1 (until 0.13.1), about 60 % of a white page sat at 255: overexposed.
@@ -58,26 +59,18 @@ const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const lerp = (a, b, t) => a + (b - a) * t;
 
 /**
- * @typedef {{wake: () => void, currentTarget: () => THREE.Vector3, frameCamera: () => void,
- *            placeCamera: () => void, update: (time: number) => {animating: boolean, moving: boolean},
- *            flushUploads: () => void}} SceneSteps
+ * @typedef {{wake: () => void, update: (time: number) => {animating: boolean, moving: boolean}}} SceneSteps
  */
 
 export class BookScene {
-  /** The picture under the plain type over the view, being read back (see sampleUnder). */
-  #under = { request: null, busy: false, buffer: null, size: 0 };
-
   /**
-   * The scene's own steps that the parts in other files call (input.js, capture.js).
+   * The scene's own steps that the parts in other files call (input.js, capture.js): asking
+   * for frames again, and the animations brought to a time.
    * @type {SceneSteps}
    */
   #own = {
     wake: () => this.#wake(),
-    currentTarget: () => this.#currentTarget(),
-    frameCamera: () => this.#frameCamera(),
-    placeCamera: () => this.#placeCamera(),
     update: (time) => this.#update(time),
-    flushUploads: () => this.#flushUploads(),
   };
 
   /**
@@ -114,7 +107,7 @@ export class BookScene {
     this.layoutVersion = 0; // counts the book's layouts (the leaves', and the parts around them)
     container.appendChild(r.domElement);
     this.renderer = r;
-    this.tiles = new TileCache(r); // the pages' tiles on the GPU (see tiles.js); bound to the pages by #bindTiles
+    this.tiles = new TileCache(r); // the pages' tiles on the GPU (see tiles.js); bound to the pages by uploads.js
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#56575b");
@@ -286,11 +279,12 @@ export class BookScene {
     this.lastRequest = 0;
     this.capturing = false; // a screenshot or video owns the renderer (capture.js)
     this.pixelBudget = Infinity; // see setPixelBudget
-    this.warmer = null; // see #warm
+    this.warmer = null; // see uploads.js warm
     this.space = false; // space held: a drag pans (input.js)
     this.shadowState = null; // what the shadow map was last drawn for (draw.js)
     this.uploads = new Map(); // folio -> image waiting for GPU upload
     this.detailQueue = new Map(); // folio -> detail strips being prepared
+    this.under = { request: null, busy: false, buffer: null, size: 0 }; // the picture read back (see sampleUnder)
     // The zoom shown is the camera's distance to its pivot against the preset's framing; the
     // pivot moves onto the paper under the view's middle when panning (input.js
     // pivotOnPaper) without the camera moving, which changes that distance: this factor takes
@@ -428,17 +422,14 @@ export class BookScene {
     makeSheets(this);
     this.extras = makeExtras(this);
     this.#applyFinish();
-    for (let folio = 1; folio <= 2 * this.leaves.length; folio++) {
-      this.#showPage(folio);
-      this.#bindTiles(folio);
-    }
+    uploads.showAllPages(this);
     this.setPaper(spec.paper);
     layoutGround(this);
     this.geometryDirty = true;
     this.coverShift = this.#shiftGoal();
     this.pageFrame = Math.abs(this.coverShift);
     this.coverFrame = this.#coverSide() ? 1 : 0;
-    this.#frameCamera();
+    frameCamera(this);
   }
 
   /**
@@ -522,59 +513,12 @@ export class BookScene {
 
   /** Forget every page's image and tiles (a new file). */
   clearPages() {
-    for (const { image } of this.uploads.values()) image?.close();
-    this.uploads.clear();
-    for (const tex of [...this.pageTextures.values(), ...this.overrides.values()]) tex.dispose();
-    this.pageTextures.clear();
-    this.overrides.clear();
-    this.tiles.reset();
-    for (let folio = 1; folio <= 2 * this.leaves.length; folio++) {
-      this.#showPage(folio);
-      this.#bindTiles(folio);
-    }
-  }
-
-  /**
-   * A page's tiles (its table and its pyramid's shape) on its material; none, the empty table.
-   * A page showing an image for now (a video's, showPageImage) shows that: it was rendered for
-   * the frame, and tiles kept from the view may be coarser.
-   */
-  #bindTiles(folio) {
-    const leaf = this.leaves[Math.ceil(folio / 2) - 1];
-    if (!leaf) return;
-    const u = (folio % 2 ? leaf.front : leaf.back).userData.uniforms;
-    const t = this.overrides.has(folio) ? null : this.tiles.pageUniforms(folio);
-    u.uTileTable.value = t?.table ?? this.tiles.emptyTable;
-    if (t) u.uTilePage.value.fromArray(t.page);
-    u.uTileOn.value = t ? 1 : 0;
+    uploads.clearPages(this);
   }
 
   /** A page's tiles let go (its image changed: ui/pages.js). */
   forgetTiles(folio) {
-    this.tiles.forgetPage(folio);
-    this.#bindTiles(folio);
-    this.dirty = true;
-  }
-
-  /**
-   * Put textures on the GPU now, as they arrive, and draw from each once (into a single
-   * pixel nobody sees): graphics drivers finish taking a texture in only when it is first
-   * drawn from, and pages first shown mid-turn (flipping through a document just opened)
-   * cost 30-70 ms frames.
-   */
-  #warm(...textures) {
-    const w = (this.warmer ??= makeWarmer());
-    const r = this.renderer;
-    const before = r.getRenderTarget();
-    r.setRenderTarget(w.target);
-    for (const t of textures) {
-      r.initTexture(t);
-      const m = t.type === THREE.UnsignedIntType ? w.uint : w.float;
-      m.uniforms.uTex.value = t;
-      w.quad.material = m;
-      r.render(w.scene, w.camera);
-    }
-    r.setRenderTarget(before);
+    uploads.forgetTiles(this, folio);
   }
 
   #applyFinish() {
@@ -761,7 +705,7 @@ export class BookScene {
       this.coverShift = this.#shiftGoal();
       this.pageFrame = Math.abs(this.coverShift);
       this.coverFrame = this.#coverSide() ? 1 : 0;
-      this.#frameCamera();
+      frameCamera(this);
     }
     this.#updateHome();
     this.geometryDirty = true;
@@ -865,7 +809,7 @@ export class BookScene {
       this.closed = closed ? 1 : 0;
       if (closed) this.closedSide = nextSide;
       this.geometryDirty = true;
-      this.#frameCamera();
+      frameCamera(this);
     } else if (closed && this.closed > 0 && nextSide !== this.closedSide) {
       // Lying on (or closing onto) the other cover: open, then close the other way.
       this.closeAnim = { from: this.closed, to: 0, start: now, duration: this.closeMs / 2, then: nextSide };
@@ -914,16 +858,9 @@ export class BookScene {
     else if (this.isClosed) this.setClosed(false);
   }
 
-  /**
-   * A page's image (an ImageBitmap, or null for plain paper). Uploads are spread over frames,
-   * so a burst of finished renders never stutters. The scene takes the image: once it is on
-   * the GPU it is freed from memory, and the texture is kept through rebuilds of the book.
-   */
+  /** See uploads.js setPageTexture. */
   setPageTexture(folio, image) {
-    const waiting = this.uploads.get(folio);
-    if (waiting?.image && waiting.image !== image) waiting.image.close(); // replaced before it went up
-    this.uploads.set(folio, { image });
-    this.dirty = true;
+    uploads.setPageTexture(this, folio, image);
   }
 
   /** The page's material (its face of its leaf), or null. */
@@ -969,200 +906,24 @@ export class BookScene {
     this.dirty = true;
   }
 
-  /**
-   * Show `image` on a page for now instead of its own (a video's sharper pages), or its own
-   * again (null). Not taken: the caller frees it, after.
-   */
+  /** See uploads.js showPageImage. */
   showPageImage(folio, image) {
-    disposeTexture(this.overrides.get(folio), this.blank);
-    if (image) this.overrides.set(folio, this.#pageTexture(image));
-    else this.overrides.delete(folio);
-    this.#showPage(folio);
-    this.#bindTiles(folio);
-    this.dirty = true;
+    uploads.showPageImage(this, folio, image);
   }
 
-  #pageTexture(image) {
-    if (image.data) return makeInkTexture(image, this.renderer.capabilities.getMaxAnisotropy()); // a page's inks
-    const tex = new THREE.Texture(image);
-    tex.flipY = false;
-    tex.colorSpace = PAGE_COLOR_SPACE;
-    tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    tex.needsUpdate = true;
-    return tex;
+  /** See framing.js visiblePages. */
+  visiblePages(size) {
+    return visiblePages(this, size);
   }
 
-  /** A page's image on its leaf (one shown for now, else its own, else white), and through it. */
-  #showPage(folio) {
-    const leaf = this.leaves[Math.ceil(folio / 2) - 1];
-    if (!leaf) return;
-    const [mat, other] = folio % 2 ? [leaf.front, leaf.back] : [leaf.back, leaf.front];
-    mat.map = this.overrides.get(folio) ?? this.pageTextures.get(folio) ?? this.blank;
-    other.userData.uniforms.uBack.value = mat.map; // show-through from this side
-  }
-
-  /**
-   * The pages in view: which part of each page image is on screen (texture uv, v = 0 at
-   * the head), and the screen density measured across it.
-   *
-   * Found by casting rays from a grid of screen points onto the page: exact at any zoom
-   * and angle, including a page seen steeply, where near parts need far more detail than
-   * distant ones (the densest part decides). Rays meet the page's cross-section curve, not
-   * its triangles (see pageHit): zoomed in, every ray reaches the page's bounds, and
-   * testing thousands of triangles each took about 50 ms a call while moving.
-   * @returns {{folio: number, region: {u0: number, v0: number, u1: number, v1: number},
-   *            samples: {u: number, v: number, pxPerMm: number, sx: number, sy: number}[]}[]}
-   *   a sample's `sx`, `sy`: where on the screen it was taken (0 to 1)
-   * @param {{width?: number, height?: number, folios?: number[]}} [size] a capture tile's, in
-   *   device pixels (else the canvas's); `folios`: the pages to look for (else the open spread's)
-   */
-  visiblePages({ width, height, folios = this.shownFolios } = {}) {
-    if (!this.model) return [];
-    // In device pixels of the canvas, or of a capture tile when given.
-    const W = width ?? this.renderer.domElement.width;
-    const H = height ?? this.renderer.domElement.height;
-    const { width: pw, height: ph } = this.model;
-    const cols = 16;
-    const rows = 12;
-    const ray = new THREE.Raycaster();
-    const ndc = new THREE.Vector2();
-    const out = [];
-    const toLeaf = new THREE.Matrix4();
-    const local = new THREE.Ray();
-    for (const folio of folios) {
-      const leaf = this.leaves[Math.ceil(folio / 2) - 1];
-      if (!leaf || folio < 1 || folio > this.pageCount) continue;
-      const front = folio % 2 === 1; // odd pages on the leaf's front
-      leaf.mesh.updateWorldMatrix(true, false);
-      toLeaf.copy(leaf.mesh.matrixWorld).invert();
-      const grid = [];
-      for (let j = 0; j <= rows; j++) {
-        const row = [];
-        for (let i = 0; i <= cols; i++) {
-          ndc.set((i / cols) * 2 - 1, 1 - (j / rows) * 2);
-          ray.setFromCamera(ndc, this.camera);
-          local.copy(ray.ray).applyMatrix4(toLeaf);
-          row.push(pageHit(this.model, leaf, local, front));
-        }
-        grid.push(row);
-      }
-      let u0 = 1;
-      let u1 = 0;
-      let v0 = 1;
-      let v1 = 0;
-      const samples = [];
-      const stepX = W / cols;
-      const stepY = H / rows;
-      for (let j = 0; j <= rows; j++) {
-        for (let i = 0; i <= cols; i++) {
-          const q = grid[j][i];
-          if (!q) continue;
-          u0 = Math.min(u0, q.x);
-          u1 = Math.max(u1, q.x);
-          v0 = Math.min(v0, q.y);
-          v1 = Math.max(v1, q.y);
-          // Screen pixels per mm of paper here: from the neighbouring rays.
-          let here = 0;
-          for (const [n, step] of [[grid[j][i + 1], stepX], [grid[j + 1]?.[i], stepY], [grid[j][i - 1], stepX], [grid[j - 1]?.[i], stepY]]) {
-            if (!n) continue;
-            const mm = Math.hypot((n.x - q.x) * pw, (n.y - q.y) * ph);
-            if (mm > 1e-6) here = Math.max(here, step / mm);
-          }
-          if (here) samples.push({ u: q.x, v: q.y, pxPerMm: here, sx: i / cols, sy: j / rows });
-        }
-      }
-      if (u1 < u0 || v1 < v0) continue; // not on screen
-      // Grow by one ray spacing, as measured on the page (the widest step between neighbouring
-      // rays): its edge, or the screen's, can lie up to that far past the last ray that met
-      // it. (Until 0.17.79 by a sixteenth of the part met, a ninth of the true spacing on a
-      // page filling six of the sixteen columns: the strips stopped 12 % short of the spine,
-      // and the page showed a seam there between its strip and its base image.)
-      let du = 0.01;
-      let dv = 0.01;
-      for (let j = 0; j <= rows; j++) {
-        for (let i = 0; i <= cols; i++) {
-          const q = grid[j][i];
-          if (!q) continue;
-          for (const n of [grid[j][i + 1], grid[j + 1]?.[i]]) {
-            if (!n) continue;
-            du = Math.max(du, Math.min(0.5, Math.abs(n.x - q.x)));
-            dv = Math.max(dv, Math.min(0.5, Math.abs(n.y - q.y)));
-          }
-        }
-      }
-      // Within a further spacing of the page's own edge: to the edge. Where the page curves
-      // away into the spine its steps on screen are shorter than the widest measured, and the
-      // last millimetres there fell between rays.
-      const lo = (a, d) => (a - 2 * d <= 0 ? 0 : a - d);
-      const hi = (a, d) => (a + 2 * d >= 1 ? 1 : a + d);
-      out.push({ folio, region: { u0: lo(u0, du), v0: lo(v0, dv), u1: hi(u1, du), v1: hi(v1, dv) }, samples });
-    }
-    return out;
-  }
-
-  /**
-   * A capture's sharp strips of a page (each: an image and its region in texture uv), drawn
-   * over its base image and its tiles. Replaces the page's previous strips; pass [] to clear.
-   * The images are owned: closed when replaced. `immediate`: on the GPU now (a capture draws
-   * no frames between), else one a frame.
-   */
-  setPageDetails(folio, strips, { immediate = false } = {}) {
-    // Replaces any set still being prepared for this page.
-    const pending = this.detailQueue.get(folio);
-    if (pending) {
-      for (const tex of pending.textures) disposeTexture(tex, this.blank);
-      for (const s of pending.strips.slice(pending.textures.length)) s.image.close?.();
-    }
-    this.detailQueue.set(folio, { strips: strips.slice(0, MAX_DETAIL), textures: [] });
-    if (immediate) while (this.detailQueue.has(folio)) this.#prepareDetails(folio);
-    this.dirty = true;
-  }
-
-  /**
-   * Prepare queued detail strips one per frame (upload plus mipmaps is the costly part),
-   * then swap a page's whole set in at once: no frame carries the full load.
-   */
-  #prepareDetails(only = null) {
-    for (const [folio, job] of this.detailQueue) {
-      if (only !== null && folio !== only) continue;
-      const leaf = this.leaves[Math.ceil(folio / 2) - 1];
-      if (!leaf) {
-        for (const s of job.strips) s.image.close?.();
-        this.detailQueue.delete(folio);
-        continue;
-      }
-      if (job.textures.length < job.strips.length) {
-        // Exactly as a page's base image goes up (see #flushUploads): the same texture, drawn
-        // from once before its pixels are let go. (Until 0.17.79 strips had a way of their
-        // own, without that first draw.)
-        const tex = this.#pageTexture(job.strips[job.textures.length].image);
-        tex.userData.owned = true;
-        this.#warm(tex);
-        freeImage(tex);
-        job.textures.push(tex);
-        this.dirty = true;
-        return; // one per frame
-      }
-      const u = (folio % 2 ? leaf.front : leaf.back).userData.uniforms;
-      for (let i = 0; i < MAX_DETAIL; i++) {
-        disposeTexture(u[`uDetail${i}`].value, this.blank);
-        u[`uDetail${i}`].value = job.textures[i] ?? this.blank;
-        const r = job.strips[i]?.region;
-        if (r) u[`uDetailRect${i}`].value.set(r.u0, r.v0, r.u1, r.v1);
-      }
-      // In at once: strips are a capture's, drawn the moment they are laid. (They faded in over
-      // the base image for the view's own strips, until 2026-10-24; a capture draws no frames
-      // between, so a screenshot of one tile showed every page's base image.)
-      u.uDetailCount.value = job.textures.length;
-      this.detailQueue.delete(folio);
-      this.dirty = true;
-      return;
-    }
+  /** See uploads.js setPageDetails. */
+  setPageDetails(folio, strips, options) {
+    uploads.setPageDetails(this, folio, strips, options);
   }
 
   /** The current view as a large PNG, tile by tile (see capture.js). */
   captureImage(options) {
-    return capture.captureImage(this, this.#own, options);
+    return capture.captureImage(this, options);
   }
 
   /** An animation, rendered offline frame by frame on the scene's own clock (see capture.js). */
@@ -1180,59 +941,7 @@ export class BookScene {
    * @param {(luminances: number[]) => void} done
    */
   sampleUnder(rects, done) {
-    this.#under.request = { rects, done };
-  }
-
-  /** @param {WebGL2RenderingContext} gl */
-  #copyUnder(gl) {
-    const u = this.#under;
-    if (!u.request || u.busy || !rects0(u.request.rects)) return;
-    const { rects, done } = u.request;
-    u.request = null;
-    const W = gl.drawingBufferWidth;
-    const H = gl.drawingBufferHeight;
-    const boxes = rects.map((r) => {
-      const x = Math.max(0, Math.min(W - 1, Math.round(r.x)));
-      const y = Math.max(0, Math.min(H - 1, Math.round(r.y)));
-      const w = Math.max(1, Math.min(W - x, Math.round(r.w)));
-      const h = Math.max(1, Math.min(H - y, Math.round(r.h)));
-      return { x, y: H - y - h, w, h }; // GL counts rows from the bottom
-    });
-    const size = boxes.reduce((sum, b) => sum + 4 * b.w * b.h, 0);
-    u.buffer ??= gl.createBuffer();
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, u.buffer);
-    if (u.size < size) {
-      gl.bufferData(gl.PIXEL_PACK_BUFFER, size, gl.STREAM_READ);
-      u.size = size;
-    }
-    let at = 0;
-    for (const b of boxes) {
-      gl.readPixels(b.x, b.y, b.w, b.h, gl.RGBA, gl.UNSIGNED_BYTE, at);
-      at += 4 * b.w * b.h;
-    }
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-    gl.flush();
-    u.busy = true;
-    // Polled by the fence's status (clientWaitSync with no wait kept answering "not yet" in
-    // Chromium long after the fence had signalled).
-    const collect = () => {
-      if (gl.isContextLost()) return void (u.busy = false);
-      if (gl.getSyncParameter(sync, gl.SYNC_STATUS) !== gl.SIGNALED) return void setTimeout(collect, 8);
-      gl.deleteSync(sync);
-      u.busy = false;
-      const px = new Uint8Array(size);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, u.buffer);
-      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, px);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-      let k = 0;
-      done(boxes.map((b) => {
-        let sum = 0;
-        for (let i = 0; i < b.w * b.h; i++, k += 4) sum += 0.2126 * SRGB_TO_LINEAR[px[k]] + 0.7152 * SRGB_TO_LINEAR[px[k + 1]] + 0.0722 * SRGB_TO_LINEAR[px[k + 2]];
-        return sum / (b.w * b.h);
-      }));
-    };
-    setTimeout(collect, 0);
+    this.under.request = { rects, done };
   }
 
   /** Whether the sheets' depth is drawn first (see makeLeaf). */
@@ -1251,7 +960,7 @@ export class BookScene {
 
   /** For the performance check: a pan by (dx, dy) screen pixels, as the space bar and a drag make it. */
   debugPan(dx, dy) {
-    panBy(this, this.#own, dx, dy);
+    panBy(this, dx, dy);
   }
 
   /** For tests: advance the animations to the set clock and lay the book out, without drawing. */
@@ -1263,7 +972,7 @@ export class BookScene {
   debugSample(fx, fy) {
     this.dirty = true;
     this.#frame(performance.now()); // lays out pending changes and renders
-    this.#placeCamera();
+    placeCamera(this);
     shadows(this);
     drawOrder(this);
     this.composer.render();
@@ -1323,7 +1032,7 @@ export class BookScene {
     this.preset = name;
     this.float = CAMERA_PRESETS[name]?.float ?? null;
     this.ground.visible = this.contact.visible = !this.float; // the table (its shadow) only under a resting book
-    this.#frameCamera();
+    frameCamera(this);
     this.zoomGlide = null;
     this.zoomBias = 1;
     this.#updateHome();
@@ -1350,12 +1059,7 @@ export class BookScene {
     this.leaves = [];
     for (const flap of this.flaps.values()) freeFlap(this, flap); // the flaps lay on them
     this.flaps.clear();
-    // Sharp strips still on their way to the GPU were for the old book's leaves.
-    for (const job of this.detailQueue.values()) {
-      for (const tex of job.textures) disposeTexture(tex, this.blank);
-      for (const s of job.strips.slice(job.textures.length)) s.image.close?.();
-    }
-    this.detailQueue.clear();
+    uploads.dropDetails(this); // sharp strips on their way: for the old book's leaves
     this.sheets?.tex.dispose();
     this.sheets = null;
     if (this.extras) {
@@ -1369,71 +1073,7 @@ export class BookScene {
     }
   }
 
-  // --- textures ------------------------------------------------------------------------
-
-  #flushUploads() {
-    let n = 0;
-    for (const [folio, { image }] of this.uploads) {
-      if (n >= UPLOADS_PER_FRAME) break;
-      this.uploads.delete(folio);
-      this.pageTextures.get(folio)?.dispose();
-      this.pageTextures.delete(folio);
-      if (image) {
-        const tex = this.#pageTexture(image);
-        this.#warm(tex);
-        freeImage(tex); // on the GPU now: the image in memory goes
-        this.pageTextures.set(folio, tex);
-        n++;
-      }
-      this.#showPage(folio);
-      this.dirty = true;
-    }
-  }
-
   // --- per-frame layout --------------------------------------------------------------
-
-  #frameCamera() {
-    if (!this.model) return;
-    const { width: w, height: h, ground, total } = this.model;
-    const c = ease(this.closed);
-    const aspect = this.camera.aspect;
-    const vfov = (this.camera.fov * Math.PI) / 360;
-    const hfov = Math.atan(Math.tan(vfov) * aspect);
-    const spreadFit = Math.max((w * 1.15) / Math.tan(hfov), (h * 0.62) / Math.tan(vfov));
-    const closedFit = Math.max((w * 0.75) / Math.tan(hfov), (h * 0.66) / Math.tan(vfov));
-    // Open at a cover, the pages lie on one side: framed like a single page, centred on it.
-    // So is the one page asked for (focus).
-    const s = this.coverShift;
-    const p = this.pageFrame;
-    // A page asked for: never farther than the spread (in a wide view both fill its height, and
-    // a page framed with the closed book's room above and below drew back as it was asked for).
-    // At a cover: as the closed book, which it is about to be (a coil book closing from there
-    // stepped back as it tilted onto its coil, 0.17.24 to 0.17.38).
-    const openFit = lerp(spreadFit, lerp(Math.min(closedFit, spreadFit), closedFit, this.coverFrame), p);
-    this.fitDistance = 1.08 * lerp(openFit, closedFit, c);
-    const openY = lerp(w * 0.2, total / 2, p);
-    this.target.set(lerp((s * w) / 2, (this.closedSide * w) / 2, c), ground + lerp(openY, total / 2, c), h * 0.03);
-    // Floating: the book is tilted about the point the camera aims at, which stays put.
-    const tilt = this.float;
-    this.root.rotation.set(tilt?.x ?? 0, 0, tilt?.z ?? 0);
-    this.root.position.copy(this.target).sub(this.target.clone().applyEuler(this.root.rotation));
-    this.root.updateMatrixWorld();
-    // Key light upper left in front; rim light behind. Fixed to the book, not to where the
-    // camera aims: as the view re-frames (closing, opening at a cover) a light following it
-    // moved the shadow map a fraction of a texel each frame, and shadows crawled. Floating,
-    // they turn with the book: lit as it would be lying on a table, however it hangs.
-    const d = Math.max(w, h) * 3;
-    const anchor = new THREE.Vector3(0, ground, 0); // the spine on the table, in the book's frame
-    const around = (x, y, z) => this.root.localToWorld(new THREE.Vector3(x, y, z).add(anchor));
-    this.key.position.copy(around(-d * 0.35, d, d * 0.5));
-    this.key.target.position.copy(around(0, 0, 0));
-    this.rim.position.copy(around(d * 0.6, d * 0.5, -d));
-    this.rim.target.position.copy(around(0, 0, 0));
-    const cam = this.key.shadow.camera;
-    const span = Math.max(w, h) * 1.4;
-    Object.assign(cam, { left: -span, right: span, top: span, bottom: -span, near: d * 0.2, far: d * 2.5 });
-    cam.updateProjectionMatrix();
-  }
 
   /**
    * Draw at most this many device pixels (the client viewer, which fills the window: the
@@ -1456,7 +1096,7 @@ export class BookScene {
     this.composer.setPixelRatio(ratio);
     this.composer.setSize(w, h);
     this.camera.aspect = w / h;
-    this.#frameCamera();
+    frameCamera(this);
     this.dirty = true;
   }
 
@@ -1481,7 +1121,7 @@ export class BookScene {
     }
     this.idleFrames = 0;
     this.dirty = false;
-    this.#placeCamera();
+    placeCamera(this);
     this.callbacks.onCamera?.(this.camera);
     // The view as this frame draws it (the camera just placed): what it needs (ui/tiles.js).
     if (inMotion) this.callbacks.onViewFrame?.(time);
@@ -1496,7 +1136,7 @@ export class BookScene {
       gl.endQuery(g.timer.TIME_ELAPSED_EXT);
       g.queries.push(query);
     }
-    this.#copyUnder(gl);
+    capture.copyUnder(this, gl);
     const log = this.frameLog;
     log.time[log.n % log.time.length] = started;
     log.cpu[log.n % log.time.length] = performance.now() - started;
@@ -1617,7 +1257,7 @@ export class BookScene {
       if (closed !== this.closed || (closed > 0 && side !== this.closedSide)) {
         this.closed = closed;
         if (closed > 0) this.closedSide = side;
-        this.#frameCamera();
+        frameCamera(this);
         this.geometryDirty = true;
       }
     } else if (this.closeAnim) {
@@ -1633,7 +1273,7 @@ export class BookScene {
           this.closeAnim = null;
         }
       }
-      this.#frameCamera();
+      frameCamera(this);
       animating = true;
     }
     // Turning to or from a cover, or another page asked for: the camera glides there, its
@@ -1647,7 +1287,7 @@ export class BookScene {
       this.coverShift = glide(this.coverShift, coverGoal);
       this.pageFrame = glide(this.pageFrame, frameGoal);
       this.coverFrame = glide(this.coverFrame, coverFrameGoal);
-      this.#frameCamera();
+      frameCamera(this);
       this.cameraChanged = true;
     }
     this.lastFrameTime = time;
@@ -1659,18 +1299,12 @@ export class BookScene {
     }
     // A capture's strips are laid at once (setPageDetails, immediate); one queued otherwise (a
     // clearing) goes at rest.
-    if (this.uploads.size) this.#flushUploads();
-    else if (this.detailQueue.size && this.settled) this.#prepareDetails();
-    // Tiles go up a few a frame, moving or not (they are small, and the view moving is when
-    // they are wanted); one just up fades in over a few frames.
-    if (this.tiles.pending) {
-      for (const folio of this.tiles.flush(TILES_PER_FRAME, time)) this.#bindTiles(folio);
-      this.dirty = true;
-    }
-    if (this.tiles.tick(time)) this.dirty = true;
+    if (this.uploads.size) uploads.flushUploads(this);
+    else if (this.detailQueue.size && this.settled) uploads.prepareDetails(this);
+    if (uploads.flushTiles(this, time)) this.dirty = true;
     // Wheel zoom and pan change the camera outside the rig's own animations: count them
     // as motion too (the tiles the view needs are asked for as it moves, see ui/tiles.js).
-    glideZoom(this, this.#own, time);
+    glideZoom(this, time);
     const moving = this.rig.update(time) || this.cameraChanged;
     this.cameraChanged = false;
     if (this.zoomPercent !== this.shownPercent) {
@@ -1689,31 +1323,6 @@ export class BookScene {
     return { animating, moving };
   }
 
-  #currentTarget() {
-    const p = this.rig.pan;
-    return this.target.clone().add(new THREE.Vector3(p.x, p.y, p.z));
-  }
-
-  #placeCamera() {
-    const { azimuth, elevation, zoom } = this.rig;
-    const d = this.fitDistance * zoom;
-    const t = this.#currentTarget();
-    this.camera.position.set(
-      t.x + d * Math.sin(azimuth) * Math.cos(elevation),
-      t.y + d * Math.sin(elevation),
-      t.z + d * Math.cos(azimuth) * Math.cos(elevation),
-    );
-    this.camera.up.set(0, 1, 0);
-    this.camera.lookAt(t);
-    // Depth range follows the distance: precise enough for 0.1 mm paper at any zoom.
-    this.camera.near = Math.max(0.2, d * 0.02);
-    this.camera.far = d * 40 + 5000;
-    this.camera.updateProjectionMatrix();
-    // From beneath the table (orbited there to see the book's underside), the table and
-    // its shadows aren't there to see.
-    const above = !this.model || this.float || this.camera.position.y > this.model.ground;
-    this.ground.visible = this.contact.visible = above && !this.float;
-  }
 }
 
 /** Whether the renderer draws on an Apple GPU (through Metal, as every browser there does; see makeLeaf). */
@@ -1727,12 +1336,3 @@ function isAppleMetal(renderer) {
   // 15 to 20 fps once the open book's sheet stacks were in view (0.17.97).
   return /Apple/.test(name);
 }
-
-/** An 8-bit sRGB value's linear light (see sampleUnder). */
-const SRGB_TO_LINEAR = Float32Array.from({ length: 256 }, (_, i) => {
-  const c = i / 255;
-  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-});
-
-/** At least one rect with an area. */
-const rects0 = (rects) => rects.some((r) => r.w >= 1 && r.h >= 1);

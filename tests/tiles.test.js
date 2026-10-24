@@ -80,6 +80,25 @@ test("TILES: the index keeps tiles, evicts the least recently drawn that this vi
   eq(index.free, 1);
 });
 
+test("TILES: a tile with an outdated stamp (the profile, a spot plate) is drawn till its new one takes its layer, without a fade", () => {
+  const page = tilePage(1400, A4);
+  const index = new TileIndex(4);
+  index.nextFrame();
+  const key = tileKey(3, 1, 0, 0);
+  eq(index.place(3, 1, 0, 0, page, 1000, "eci|"), 0);
+  index.fade(5000); // faded in
+  ok(index.has(key) && index.has(key, "eci|"), "kept, as drawn");
+  ok(!index.has(key, "swop|"), "not as the new profile wants it: asked for again");
+  const t = index.tables.get(3);
+  const at = ((1 * page.rows + 0) * t.width + 0) * 4;
+  eq([...t.data.subarray(at, at + 4)], [0, 0, 255, 255], "still drawn meanwhile");
+  eq(index.place(3, 1, 0, 0, page, 6000, "swop|"), 0, "the new one in the same layer");
+  ok(index.has(key, "swop|"), "now as wanted");
+  eq(index.free, 3, "no second layer taken");
+  eq(t.data[at + 3], 255, "no fade: the page never shows less in between");
+  ok(!index.fade(6000), "nothing fading");
+});
+
 test("TILES: the budget: a 24th of memory, 256 MB to 1 GB", () => {
   eq(tileBudget(4 * 2 ** 30), 256 * 2 ** 20);
   eq(tileBudget(16 * 2 ** 30), Math.floor((16 * 2 ** 30) / 24));

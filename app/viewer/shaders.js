@@ -30,7 +30,7 @@ export const OTHER_ROWS = Array.from({ length: LEAF_ROWS }, (_, r) => r).filter(
 // large window rather than a point of light: the shadow's blur grows with the distance
 // between what casts it and what receives it. Replaces three's fixed-width filter for the
 // key light's shadow. Units are the shadow map's own (uv across, 0-1 in depth); both scale
-// with the book (see #frameCamera), so one set of numbers fits every page size.
+// with the book (see framing.js frameCamera), so one set of numbers fits every page size.
 // SPREAD: blur per unit of depth gap (a light about 10 degrees across); SEARCH: the widest
 // blur, in uv (about 12 mm on an A5 page).
 const PCSS_GLSL = /* glsl */ `

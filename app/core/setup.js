@@ -18,17 +18,6 @@ import { margins, rect, rectSize, size } from "./units.js";
 
 export const sides = (all = 0) => ({ top: all, bottom: all, inside: all, outside: all });
 
-/** @returns {PageSetup} */
-export function manualSetup(width, height, bleed = 0, slug = 0) {
-  return {
-    mode: "manual",
-    width,
-    height,
-    bleed: typeof bleed === "number" ? sides(bleed) : bleed,
-    slug: typeof slug === "number" ? sides(slug) : slug,
-  };
-}
-
 /** Convert inside/outside to left/right for a page on the given side of the spine. */
 function toLeftRight(s, isRecto) {
   return isRecto
@@ -146,6 +135,7 @@ export function snap(v) {
  * The two-page area on an imposed sheet (PDF user space, mm).
  * With a TrimBox (auto mode) it is the TrimBox. Otherwise the page size from the setup,
  * two pages wide, centred on the media box: robust to any marks margin around it.
+ * (Exported for its tests, tests/v2.test.js: the app uses it only here.)
  */
 export function sheetAreaFor(source, setup) {
   if (setup.mode === "auto" && source.trimBox) return source.trimBox;
