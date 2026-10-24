@@ -2,23 +2,17 @@
 
 ![Screenshot](docs/screenshot.png)
 
-## This software is entirely vibe-coded.
+## AI Disclaimer
 
-This software was built using Claude Code. I wrote no line of code myself. I did however design the software's visual identity and UI, I architected standard workflows from my experience as a print designer and thoroughly tested its functions against my own publications.
+This software is built by iterating with Claude Code. I did not write a single line of code, but I did architect the workflows based on my own experience as a print designer, tested everything I could against my own projects, and designed the visual identity, icons and UI myself. That much is human.
 
 ## What is Printwarden?
 
-Printwarden lets you look at your InDesign PDF as an actual 3D book before it goes to print. You pick the binding and the paper, flip through it and see if the pages end up where you expect them. When you're happy with it, you can export an imposed PDF for your printer, or render screenshots and videos of the book.
+Printwarden lets you import your publication PDF, where it will build a 3D preview for you to interactively navigate through. You can pick the binding type, cover/spine art, paper color and finish to "recreate" your publication digitally. After you recreate your publication digitally, you can export it as a HTML file to send to your client. They can then open it with any conventional browser to receive a self-contained preview of the publication exactly as you constructed it (or you can host the HTML file on your website and send a link instead). Printwarden also lets you impose your PDF: 2 sheets a side, 8 pages a sheet/2 folds and 16 pages a sheet/3 folds. You can then re-import the imposed PDF and visually check that everything is right where it's supposed to be.
 
-It also works the other way around. If you already have imposed sheets, made with Printwarden or with InDesign's Print Booklet, you can import them and Printwarden folds them back into a book so you can check the imposition.
+## Installation
 
-## Folder structure
-
-There's no installer. Printwarden keeps its settings, cache and logs in a folder called `Printwarden Data`, which sits next to `Printwarden.exe` on Windows and inside `Printwarden.app` on macOS. If something goes wrong, delete that folder and the app starts fresh.
-
-## Usage
-
-Download the zip for your system from the Releases page, unzip it into its own folder and run `Printwarden.exe`. Mac users should place `Printwarden.app` in the Applications folder before running. The Mac version runs on both Apple Silicon and Intel.
+Download the macOS or Windows build from the Releases page. macOS users should unzip the downloaded zip file and move the app to the Applications folder. The macOS build works both on Apple Silicon and Intel machines.
 
 I don't sign the builds, so Windows and macOS will complain the first time you open the app:
 
@@ -37,31 +31,28 @@ The first start downloads Electron, which is a few hundred MB. If you want to bu
 
 ## Features
 
-- **Import**: Printwarden automatically detects whether your imported PDF is set up as spreads or single sheets. Imposed sheets work too. Page size, bleed and slug are read from the PDF, but you can also type them in. If you change the page size, the page dimensions are automatically adjusted without touching the content, letting you get a feel for different publication dimensions. Large PDFs with lots of photos open fine: the file is shared between the render threads instead of copied, and CMYK JPEGs are decoded in WebAssembly.
-- **Cover file**: for perfect, sewn and hardcover books you can import the cover as a separate PDF, the way it goes to the printer: one spread with the spine (and flaps, if it has them) and an optional inside spread. Printwarden takes the spine width from it and shows the flaps folded in.
-- **Bindings**: staple, perfect, sewn, hardcover, spiral and wire-o. The spine width is calculated from the PDF. You can also manually enter a spine width, as well as assign it a color or design. Sewn and hardcover books show their folded signatures at the spine; perfect and sewn books have their side glue, which hides a strip of the first and last page and scores the cover; hardcovers get a board thickness, endpapers with flyleaves, a headband color and a square or rounded spine.
-- **Paper**: color, finish and weight, set separately for the pages and the cover. The 3D simulation accounts for cover and paper weight: the pages respond correctly by arching more if the paper weighs more and vice versa. You can type in the paper thickness your printer quotes, so the spine comes out right for bulky or thin stock.
-- **Spot finish**: gold, silver or copper foil and spot UV, taken from a separate PDF of the finish.
-- **3D view**: click and drag to turn the view. It will snap back to the default view. If you hold space and pan around, the view will be "unlocked". You can double tap your space bar to reset the view. There are a variety of different camera presets to test out, you can also center the view on either side of the spread.
-- **Timeline**: your imported PDF in chronological order or in imposed order.
-- **Preflight**: any uncertainties automatically caught by the software will be displayed here.
-- **Imposed PDF export**: you can export an imposed PDF with creep compensation, as 2-up spreads or as folding schemes of 8 or 16 pages per sheet, folded the way a folding machine folds them.
-- **Client viewer**: export the book as a single HTML file that you can send to a client. It opens in any browser, from a folder or hosted on a website, with nothing else attached, and the client can flip through the book in 3D.
-- **Screenshots and videos**: you can render screenshots or a flipbook animation.
-- **Color**: CMYK is rendered with the PDF's output intent if it has one, otherwise with a CMYK profile from your computer. Overprint is shown the way it prints, like Acrobat's overprint preview, and spot colors as their inks. A Separations window switches the plates on and off, like Acrobat's Output Preview.
-- **Your files are safe**: Printwarden only reads the PDF you open and only writes the files you save yourself. It won't overwrite the PDF you imported. It only goes online once at startup to check for a new update.
+- **Importing a PDF**: Printwarden automatically detects your imported PDF and adjusts page size, bleed and slug accordingly (you can modify these after importing).
+- **Cover/Spine art**: In addition to importing a publication PDF you can also import a cover art or spine art PDF. One spread with the spine (and flaps if present), and an optional inside spread. Printwarden will take the spine width from it and render the flaps folded in.
+- **Different bindings**: Staple, perfect, sewn, hardcover, spiral and wire-o binding.
+- **Paper settings**: Color, finish and weight, set separately for the pages and cover.
+- **Spot finish**: Gold, silver or copper foil and spot UV. Must be imported separately.
+- **Process plate separation**: You can manually toggle process plates on and off to check overprint for example.
+- **Preflight**: Any uncertainties that can be automatically detected will be reported to you in the right-side panel.
+- **Imposition**: You can export an imposed PDF with creep compensation as 2 sheets a side, 8 pages a sheet/2 folds or 16 pages a sheet/3 folds.
+- **Self-contained HTML**: Printwarden can export your publication as a self-contained HTML file for viewing without having to install the program (by either sharing the HTML file or uploading it somewhere that serves HTML files).
+- **Screenshots and videos**: You can render screenshots or a flipbook animation of your publication in various resolutions.
 
 ## Controls
 
 - **Drag**: turn the book (it springs back when you let go)
-- **Space + drag**: move the view
+- **Space + drag**: move the view (the view will be unlocked)
 - **Press space twice**: reset the view
 - **Mouse wheel**: zoom
 - **Click a page**: turn the page
 
 ## Color profiles
 
-Printwarden comes with ISO Coated v2 (ECI) and uses it by default, so colors look the same on every computer. It's included with kind permission of the European Color Initiative (Copyright 2026 by European Color Initiative, [www.eci.org](https://www.eci.org)) and isn't covered by Printwarden's license. If your PDF has an output intent (PDF/X), that one is used instead. You can also pick any CMYK profile installed on your computer, from the system's color folders and Adobe's. Your profiles are only read and never changed.
+Printwarden comes with ISO Coated v2 (ECI) and uses it by default. It's included with kind permission of the European Color Initiative (Copyright 2026 by European Color Initiative, [www.eci.org](https://www.eci.org)) and isn't covered by Printwarden's license. If your PDF has an output intent (PDF/X), that one is used instead.
 
 ## Scope
 
