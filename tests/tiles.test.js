@@ -80,6 +80,26 @@ test("TILES: the index keeps tiles, evicts the least recently drawn that this vi
   eq(index.free, 1);
 });
 
+test("TILES: pages numbered anew (a hardcover's endpapers move every page two on) keep their tiles, layers and tables; a page left out is let go", () => {
+  const page = tilePage(1400, A4);
+  const index = new TileIndex(4);
+  index.nextFrame();
+  index.place(3, 1, 0, 0, page, 1000, "inks");
+  index.place(3, 2, 1, 1, page, 1000, "inks");
+  index.place(4, 1, 0, 0, page, 1000, "inks");
+  index.place(9, 1, 0, 0, page, 1000, "inks");
+  const table3 = index.tables.get(3);
+  const layers = [tileKey(3, 1, 0, 0), tileKey(3, 2, 1, 1), tileKey(4, 1, 0, 0)].map((k) => index.byKey.get(k)?.layer);
+  index.renumber(new Map([[3, 5], [4, 6]])); // 9 shown nowhere now
+  eq([tileKey(5, 1, 0, 0), tileKey(5, 2, 1, 1), tileKey(6, 1, 0, 0)].map((k) => index.byKey.get(k)?.layer), layers, "the same layers, under the new folios");
+  ok(index.has(tileKey(5, 1, 0, 0), "inks"), "with their stamps");
+  ok(!index.has(tileKey(3, 1, 0, 0)) && !index.tables.has(3) && !index.tables.has(4), "nothing left under the old folios");
+  eq(index.tables.get(5), table3, "the table goes with its page");
+  ok(!index.has(tileKey(9, 1, 0, 0)) && !index.tables.has(9), "a page shown nowhere let go");
+  eq(index.free, 1, "its layer freed");
+  eq(index.byKey.get(tileKey(6, 1, 0, 0))?.folio, 6);
+});
+
 test("TILES: a tile with an outdated stamp (the profile, a spot plate) is drawn till its new one takes its layer, without a fade", () => {
   const page = tilePage(1400, A4);
   const index = new TileIndex(4);

@@ -85,6 +85,33 @@ export function redrawInks() {
   refreshTiles();
 }
 
+/**
+ * The book laid out anew (state.analysis just replaced): every page's image and tiles kept for the
+ * folio that now shows that part of that page. A binding with endpapers (a hardcover) puts two
+ * before the first page: every page moves two folios on, and was drawn again from scratch until
+ * 2026-10-24, the author: "the entire book re-renders" switching to a hardcover and back. Pages
+ * whose part is shown nowhere now are let go; the same part shown twice keeps its image once.
+ * @returns {Map<number, number> | null} old folio -> new, or null if none moved
+ */
+export function carryPages() {
+  /** @type {Map<string, number>} what a folio showed -> that folio */
+  const was = new Map();
+  for (const [folio, t] of state.textures) if (!t.blank && !was.has(t.key)) was.set(t.key, folio);
+  /** @type {Map<number, number>} old folio -> new */
+  const map = new Map();
+  const n = state.analysis.book.pages.length;
+  for (let folio = 1; folio <= n; folio++) {
+    const from = was.get(textureKey(folio));
+    if (from !== undefined && !map.has(from)) map.set(from, folio);
+  }
+  if ([...state.textures.keys()].every((folio) => map.get(folio) === folio || state.textures.get(folio).blank)) return null; // as they were
+  const textures = new Map();
+  for (const [from, to] of map) textures.set(to, state.textures.get(from));
+  state.textures = textures;
+  scene.renumberPages(map);
+  return map;
+}
+
 export function loadAllTextures() {
   const a = state.analysis;
   const gen = state.generation;

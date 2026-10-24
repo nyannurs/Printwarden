@@ -25,7 +25,7 @@ import { $, addScrollbar, fitPill, showLoad, snapToPixels, toast } from "./dom.j
 import { Filmstrip } from "./filmstrip.js";
 import { importFinish, openFinishDialog } from "./finish.js";
 import { Inspector } from "./inspector.js";
-import { forgetThumbnails, loadAllTextures, thumbnail } from "./pages.js";
+import { carryPages, forgetThumbnails, loadAllTextures, thumbnail } from "./pages.js";
 import { initPlates, refreshPlates, resetPlates } from "./plates.js";
 import { initViewReport } from "./report.js";
 import { applySpine, importSpineArt, openSpinePanel, renderSpineArt, updateSpinePanel } from "./spine-panel.js";
@@ -318,7 +318,14 @@ function reanalyse(opening = scene.opening) {
   }
   state.analysis = analysis;
   state.generation++;
+  const moved = carryPages(); // the pages' images where those pages now are (a hardcover's endpapers move them)
   const { setup, book } = analysis;
+  // Open in the book, the same pages kept in view (shut at a cover, the cover).
+  const last = book.pages.length >> 1;
+  if (moved && opening > 0 && opening < scene.model.leafCount) {
+    const now = moved.get(2 * opening + 1) ?? moved.get(2 * opening);
+    if (now !== undefined) opening = Math.min(last, now >> 1);
+  }
   const size = pageSizeOf(analysis) ?? { width: 148, height: 210 };
   const paper = scenePaper(setup.paper, setup, book.pages.length);
 

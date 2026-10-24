@@ -42,6 +42,30 @@ export function bindTiles(scene, folio) {
   u.uTileOn.value = t ? 1 : 0;
 }
 
+/**
+ * The pages numbered anew (`map`: old folio -> new; ui/pages.js carryPages): their images on the
+ * GPU, those on their way, their spot channels' names and their tiles go with them, and are shown
+ * where they now are. A page not in `map` is let go.
+ * @param {Map<number, number>} map
+ */
+export function renumberPages(scene, map) {
+  const move = (m, free) => {
+    const out = new Map();
+    for (const [folio, v] of m) {
+      if (map.has(folio)) out.set(map.get(folio), v);
+      else free(v);
+    }
+    return out;
+  };
+  scene.pageTextures = move(scene.pageTextures, (tex) => tex.dispose());
+  scene.overrides = move(scene.overrides, (tex) => tex.dispose());
+  scene.uploads = move(scene.uploads, ({ image }) => image?.close());
+  scene.spotNames = move(scene.spotNames, () => {});
+  scene.tiles.renumber(map);
+  showAllPages(scene);
+  scene.dirty = true;
+}
+
 /** A page's tiles let go (its image changed: ui/pages.js). */
 export function forgetTiles(scene, folio) {
   scene.tiles.forgetPage(folio);

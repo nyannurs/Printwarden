@@ -233,6 +233,24 @@ export class TileIndex {
     this.tables.delete(folio);
   }
 
+  /**
+   * The pages numbered anew (`map`: old folio -> new; see TileCache renumber): their tiles keep
+   * their layers, their tables go with them; a page not in `map` is let go.
+   * @param {Map<number, number>} map
+   */
+  renumber(map) {
+    for (const folio of [...this.tables.keys()]) if (!map.has(folio)) this.forgetPage(folio);
+    for (const r of [...this.byKey.values()]) if (!map.has(r.folio)) this.#evict(r);
+    const records = [...this.byKey.values()];
+    this.byKey.clear();
+    for (const r of records) {
+      r.folio = /** @type {number} */ (map.get(r.folio));
+      r.key = tileKey(r.folio, r.level, r.ix, r.iy);
+      this.byKey.set(r.key, r);
+    }
+    this.tables = new Map([...this.tables].map(([folio, t]) => [/** @type {number} */ (map.get(folio)), t]));
+  }
+
   reset() {
     this.slots.fill(null);
     this.byKey.clear();
@@ -430,6 +448,20 @@ export class TileCache {
     this.tableTextures.get(folio)?.dispose();
     this.tableTextures.delete(folio);
     this.queue = this.queue.filter((q) => q.folio !== folio || (q.tile.close?.(), false));
+  }
+
+  /**
+   * The pages numbered anew (`map`: old folio -> new), as a binding with endpapers adds or
+   * drops them before the first page: the same pages' tiles, tables and queued tiles go with
+   * them, none drawn again; a page not in `map` is let go.
+   * @param {Map<number, number>} map
+   */
+  renumber(map) {
+    this.index?.renumber(map);
+    for (const [folio, tex] of this.tableTextures) if (!map.has(folio)) tex.dispose();
+    this.tableTextures = new Map([...this.tableTextures].filter(([folio]) => map.has(folio)).map(([folio, tex]) => [/** @type {number} */ (map.get(folio)), tex]));
+    this.queue = this.queue.filter((q) => map.has(q.folio) || (q.tile.close?.(), false));
+    for (const q of this.queue) q.folio = /** @type {number} */ (map.get(q.folio));
   }
 
   /** Everything let go (a new document); the texture array stays for the next. */

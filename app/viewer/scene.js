@@ -585,6 +585,11 @@ export class BookScene {
     uploads.clearPages(this);
   }
 
+  /** See uploads.js renumberPages. */
+  renumberPages(map) {
+    uploads.renumberPages(this, map);
+  }
+
   /** A page's tiles let go (its image changed: ui/pages.js). */
   forgetTiles(folio) {
     uploads.forgetTiles(this, folio);
