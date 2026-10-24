@@ -22,7 +22,7 @@ export async function runProbe(scene, onProgress) {
     `GPU: ${gpu}`,
     `Screen: pixel ratio ${ratio}, view ${gl.drawingBufferWidth} × ${gl.drawingBufferHeight} px, multisampling ${samples}×, ${navigator.hardwareConcurrency} CPU threads`,
     `Book: ${scene.leaves.length} sheets, ${scene.model?.binding ?? "?"}`,
-    `Multisampled render to texture: ${r.extensions.has("WEBGL_multisampled_render_to_texture") ? "yes" : "no"}, GPU timer: ${scene.motion.timer ? "yes" : "no"}`,
+    `Multisampled render to texture: ${r.extensions.has("WEBGL_multisampled_render_to_texture") ? "yes" : "no"}, GPU timer: ${scene.gpuTime.timer ? "yes" : "no"}`,
   ];
   const frame = () => new Promise((done) => requestAnimationFrame(done));
   // The screen's own pace: frames with nothing drawn.
@@ -44,7 +44,7 @@ export async function runProbe(scene, onProgress) {
     return `${(1000 / q(0.5)).toFixed(0).padStart(4)} fps   p95 ${q(0.95).toFixed(1).padStart(5)} ms   worst ${s[s.length - 1].toFixed(1).padStart(5)} ms   main thread ${median(cpu).toFixed(1)} ms${g}`;
   };
   // The graphics card's time for the frames of a run, where it can be timed (see #adaptResolution).
-  const gpuNow = (since) => (scene.motion.timer && scene.motion.gpuAt > since ? scene.motion.gpu : null);
+  const gpuNow = (since) => (scene.gpuTime.timer && scene.gpuTime.at > since ? scene.gpuTime.ms : null);
   // One run: `step` moves something every frame; frames and main-thread time measured.
   const run = async (label, step) => {
     onProgress?.(label);
@@ -94,11 +94,6 @@ export async function runProbe(scene, onProgress) {
 
   const opening = scene.opening;
   const closed = scene.isClosed;
-  // Measured at full resolution: the adaptive one held (it had motion at this scale).
-  lines.push(`Motion was drawn at ${Math.round(scene.motion.scale * 100)} %`, "");
-  const scale = scene.motion.scale;
-  scene.motion.frozen = true;
-  scene.motion.scale = 1;
   const rig = scene.rig;
   const here = { pan: { ...rig.pan }, zoom: rig.zoom, azimuth: rig.azimuth, elevation: rig.elevation, free: rig.free, bias: scene.zoomBias };
   const putBack = () => {
@@ -182,8 +177,6 @@ export async function runProbe(scene, onProgress) {
       scene.depthFirst = first;
     }
   } finally {
-    scene.motion.scale = scale;
-    scene.motion.frozen = false;
     scene.debugNoPivot = false;
     scene.goTo(opening, { animate: false });
     if (closed) scene.setClosed(true, { animate: false });
@@ -194,7 +187,7 @@ export async function runProbe(scene, onProgress) {
 }
 
 /**
- * Panning by hand, as the app is used (the resolution adapting as it does): how often the
+ * Panning by hand, as the app is used: how often the
  * mouse reports a move while its button is held, how many frames were drawn, the graphics
  * card's time. A frame is only drawn when a move arrives, so a mouse reporting 60 times a
  * second gives 60 frames however fast the card. Waits up to 15 s for the drag to start.
@@ -219,7 +212,7 @@ async function byHand(scene, onProgress, frame, median, gpuNow) {
     const n0 = scene.frameLog.n;
     const t0 = performance.now();
     const gpu = [];
-    const scales = [];
+    let ticks = 0;
     let held = 0;
     for (;;) {
       const t = await frame();
@@ -227,7 +220,7 @@ async function byHand(scene, onProgress, frame, median, gpuNow) {
       if (pressed) held++;
       const g = gpuNow(t - 100);
       if (g != null) gpu.push(g);
-      scales.push(scene.motion.scale);
+      ticks++;
     }
     const seconds = (performance.now() - t0) / 1000;
     const drawn = scene.frameLog.n - n0;
@@ -235,8 +228,7 @@ async function byHand(scene, onProgress, frame, median, gpuNow) {
       `By hand: pointer ${Math.round(moves / seconds)} moves/s`,
       `frames drawn ${Math.round(drawn / seconds)}/s`,
       gpu.length ? `gpu ${median(gpu).toFixed(1)} ms` : null,
-      `drawn at ${Math.round(median(scales) * 100)} %`,
-      held < 0.8 * scales.length ? "(the button wasn't held the whole time)" : null,
+      held < 0.8 * ticks ? "(the button wasn't held the whole time)" : null,
     ];
     return parts.filter(Boolean).join("   ");
   } finally {

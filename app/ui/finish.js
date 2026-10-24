@@ -26,8 +26,10 @@ export async function importFinish(file = null) {
     const n = a.book.pages.length;
     let jobs;
     if (pages.length === a.document.pages.length) {
+      // The document's own pages (a cover file's, C1 to C4, aren't in the finish PDF: their
+      // index is the cover file's, which would ask the finish file for a page it hasn't).
       jobs = a.book.pages
-        .map((p, k) => (p.source && a.geometry[k] ? { folio: k + 1, index: p.source.index, rectMm: a.geometry[k].trim } : null))
+        .map((p, k) => (p.source && p.source.file !== "cover" && a.geometry[k] ? { folio: k + 1, index: p.source.index, rectMm: a.geometry[k].trim } : null))
         .filter(Boolean);
     } else if (pages.length <= 2) {
       const box = (i) => pages[i].trimBox ?? pages[i].mediaBox;

@@ -9,7 +9,7 @@
 // 17 high (Magenta), 289 deep (Yellow within Black: y + 17 k). The shader reads Cyan, Magenta
 // and Yellow by the card's own trilinear filter and Black by two reads it mixes itself.
 
-export const INK_STEPS = 17;
+const INK_STEPS = 17;
 export const LUT_WIDTH = INK_STEPS;
 export const LUT_HEIGHT = INK_STEPS;
 export const LUT_DEPTH = INK_STEPS * INK_STEPS;

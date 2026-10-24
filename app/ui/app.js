@@ -51,7 +51,7 @@ export const state = {
   // folio -> {key, height, edge, blank}: which image each page has (it is on the GPU only;
   // a cover keeps its colour along the spine, see coverEdge)
   textures: new Map(),
-  details: new Map(), // folio -> strips on screen: [{region, pxPerMm}]
+  details: new Map(), // folio -> a capture's strips on screen: [{region, pxPerMm}] (capture.js)
   colour: { options: [], choice: "builtin", inks: [true, true, true, true] }, // CMYK profile options for this document, the plates that print
   inkLut: null, // the chosen profile as the ink table (viewer/inklut.js), once the renderer made it
   flapKey: "", // which flap images the 3D covers show (see applyCoverExtras)
@@ -110,12 +110,13 @@ export async function startImport(file = null) {
 /**
  * The render threads for the open document: the pages' file and, if there is one, the cover
  * file's, as one renderer (routedRenderer). `profile`: the CMYK profile's bytes, or a promise
- * of them. Used on import, and again when the profile changes (colour.js).
+ * of them, which can arrive after the threads start (see createRenderer). A profile chosen later is
+ * handed to the running threads (applyProfile in colour.js).
  * @param {{bytes: Uint8Array, cover?: {bytes: Uint8Array} | null}} files
  */
-export function startRenderers(files, profile) {
-  const main = createRenderer(files.bytes, null, profile);
-  const cover = files.cover ? createRenderer(files.cover.bytes, null, profile) : null;
+function startRenderers(files, profile) {
+  const main = createRenderer(files.bytes, profile);
+  const cover = files.cover ? createRenderer(files.cover.bytes, profile) : null;
   return Promise.all([main, cover]).then(([m, c]) => routedRenderer(m, c));
 }
 
@@ -438,7 +439,7 @@ $("close-btn").addEventListener("click", () => {
 onMenuCommand((command) => {
   if (command === "about") aboutDialog({ name: APP_NAME, version: APP_VERSION }); // the app menu's About (macOS)
   if (command === "import") startImport();
-  if (command === "export" && state.analysis && !state.analysis.imposed) startExport();
+  if (command === "export" && state.analysis) startExport(); // as the button: an imposed file gets the viewer (exportChoiceDialog)
 });
 
 initView();

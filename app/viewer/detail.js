@@ -19,18 +19,6 @@
  *            widthPx: number, heightPx: number}[]}
  */
 /**
- * Whether a page's base image is fine enough for the screen everywhere the plan would put a
- * strip: at least one image pixel per screen pixel at each strip's densest point (a plan's
- * density is the screen's times `supersample`). Then the page keeps its base image: drawn as
- * crisp as a strip would be, and nothing on screen changes as the view comes to rest.
- * @param {ReturnType<typeof planDetail>} plan
- * @param {number} baseDensity the base image's pixels per mm
- */
-export function baseSuffices(plan, baseDensity, supersample) {
-  return plan.every((tile) => tile.pxPerMm / supersample <= baseDensity);
-}
-
-/**
  * How tall a video's page image should be rendered for a frame that needs `px` pixels a
  * millimetre of a page `mm` tall, given the image on hand (`have` px tall, or null): null to
  * keep it, else the new height. The image carries `supersample` pixels a video pixel where

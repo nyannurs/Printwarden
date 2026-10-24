@@ -51,7 +51,7 @@ test("background threads: structure read and export produce the same results", a
 
 test("background threads: render workers start and draw a page", async () => {
   const bytes = await makeSamplePdf({ pages: 4 });
-  const r = await createRenderer(bytes, () => { throw new Error("fell back to the main thread"); });
+  const r = await createRenderer(bytes);
   ok(r.workers?.length >= 2, "worker pool");
   const img = await r.render(0, { x0: 9, y0: 9, x1: 157, y1: 219 }, 300);
   eq([img.width, img.height], [211, 300]);
@@ -60,7 +60,7 @@ test("background threads: render workers start and draw a page", async () => {
 
 test("INKS: a page drawn as its inks, C M Y K a byte each; the ink table from a profile, paper white", async () => {
   const bytes = await makeSamplePdf({ pages: 2 });
-  const r = await createRenderer(bytes, () => { throw new Error("fell back to the main thread"); });
+  const r = await createRenderer(bytes);
   const ink = await r.render(0, { x0: 9, y0: 9, x1: 157, y1: 219 }, 300, 10, { mode: "ink", cache: false });
   eq([ink.width, ink.height, ink.n, ink.data.length], [211, 300, 4, 211 * 300 * 4]);
   ok(ink.data instanceof Uint8Array && !(ink.data instanceof Uint8ClampedArray), "raw bytes");

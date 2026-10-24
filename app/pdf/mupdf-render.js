@@ -60,7 +60,7 @@ export class InkDocument {
     this.count = this.doc.countPages();
     /** @type {any} the chosen CMYK profile as a MuPDF colour space, or null */
     this.profile = null;
-    /** @type {Map<number, {page: any, seps: number, spots: {name: string, cmyk: number[]}[], overprint: boolean}>} */
+    /** @type {Map<number, {page: any, seps: number, spotCount: number}>} */
     this.pages = new Map();
     /** @type {boolean[]} which plates print (Cyan, Magenta, Yellow, Black, then spots by their order on the page) */
     this.inkOn = [];
@@ -114,14 +114,7 @@ export class InkDocument {
     // with overprint honoured (without one MuPDF draws every object knocking out).
     let seps = libmupdf._wasm_pw_page_separations(page.pointer);
     if (!seps) seps = libmupdf._wasm_pw_new_separations();
-    const n = libmupdf._wasm_pw_count_separations(seps);
-    const cmyk = ColorSpace.DeviceCMYK; // the equivalents in the inks' own terms (see draw: the inks are device CMYK)
-    const spots = [];
-    for (let i = 0; i < n; i++) {
-      const name = libmupdf.UTF8ToString(libmupdf._wasm_pw_separation_name(seps, i));
-      spots.push({ name, cmyk: [0, 1, 2, 3].map((c) => libmupdf._wasm_pw_separation_equivalent(seps, i, cmyk.pointer, c)) });
-    }
-    p = { page, seps, spots, overprint: !!libmupdf._wasm_pw_page_uses_overprint(page.pointer) };
+    p = { page, seps, spotCount: libmupdf._wasm_pw_count_separations(seps) };
     this.pages.set(index, p);
     while (this.pages.size > KEEP_PAGES) {
       const [oldest, old] = this.pages.entries().next().value;
@@ -129,12 +122,6 @@ export class InkDocument {
       this.#dropPage(old);
     }
     return p;
-  }
-
-  /** What a page carries: its spot colours (name, CMYK equivalent at full tint) and whether it overprints. */
-  info(index) {
-    const { spots, overprint } = this.page(index);
-    return { spots, overprint };
   }
 
   /**
@@ -192,7 +179,7 @@ export class InkDocument {
     const p = this.page(index);
     const { ctm, width, height: hPx } = this.#place(p, rect, height);
     const ink = mode === "ink";
-    const spotCount = p.spots.length;
+    const spotCount = p.spotCount;
     for (let i = 0; i < spotCount; i++) {
       const on = this.inkOn[4 + i] !== false;
       libmupdf._wasm_pw_set_separation_behavior(p.seps, i, on ? SEP_COMPOSITE : SEP_DISABLED);
@@ -220,9 +207,9 @@ export class InkDocument {
       const n = pix.getNumberOfComponents();
       const data = (ink ? new Uint8Array(width * hPx * n) : new Uint8ClampedArray(width * hPx * 4));
       data.set(pix.getPixels()); // a view into MuPDF's heap: copied out before anything else moves it
-      if (!ink) return { width, height: hPx, data, overprint: p.overprint };
+      if (!ink) return { width, height: hPx, data };
       // (The process plates are switched where the inks are shown: every ink image carries all four.)
-      const out = { width, height: hPx, n, data, spots: p.spots, overprint: p.overprint, mips: undefined };
+      const out = { width, height: hPx, n, data, mips: undefined };
       if (mips > 0) out.mips = mipChain(data, width, hPx, mips);
       return out;
     } finally {

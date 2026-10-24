@@ -268,7 +268,7 @@ function* checkFolioStart({ book }) {
   }
 }
 
-function* reportLayout({ book, layout, setup }) {
+function* reportLayout({ book, layout, setup, rule }) {
   if (!layout) return;
   const n = book.pages.length;
   const centre = centreSpread(n);
@@ -276,7 +276,10 @@ function* reportLayout({ book, layout, setup }) {
     yield finding("info", "centre-spread",
       `Center spread is pages ${label(book, centre[0])} • ${label(book, centre[1])}.`, { folios: centre });
   }
-  const folded = layout.coverSheet ? imposedCount(book) - 4 : n;
+  // The pages that fold into signatures: those between the covers where the cover is made
+  // apart, whether or not it has a sheet here (a cover file's hasn't). (Until 2026-10-24 the
+  // covers came off only with a cover sheet: "2.5 signatures of 16 pages" with a cover file.)
+  const folded = foldedPages(rule, imposedCount(book));
   if (imposedCount(book) < n) {
     yield finding("info", "endpapers",
       "Endpapers: an unprinted leaf at each end of the block (E1 to E4), as every case binding has; " +

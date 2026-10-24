@@ -32,7 +32,7 @@ const deps = {
   onSetup: noop, onGoToFolio: noop, onPaperPreview: noop, onWirePreview: noop, onHeadbandPreview: noop, onSpine: noop, onFinish: noop,
   onColourProfile: noop, onOverprint: noop, onBackground: noop, background: () => "#56575b", onAbout: noop,
 };
-const colour = { options: [{ id: "included", name: "Included: ISO Coated v2 (ECI)" }, { id: "builtin", name: "Built-in: US coated (GRACoL)" }], choice: "included", overprint: true };
+const colour = { options: [{ id: "included", name: "Included: ISO Coated v2 (ECI)" }, { id: "builtin", name: "Built-in: US coated (GRACoL)" }], choice: "included" };
 
 const frac = (v) => Math.abs(v - Math.round(v));
 

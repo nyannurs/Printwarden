@@ -11,10 +11,9 @@ World space is millimeters. The book lies on a table, the spine along z, the hea
 | `leaf.js` | One sheet in 3D: its mesh, materials, cut edges, flaps, the sheets texture, picking. |
 | `shaders.js` | The shaders: three.js's own, changed as text, plus the sheet builder, page shading, spot finishes, holes, show-through, soft shadows. |
 | `extras.js` | What each binding adds: a spine slab, threads, signature folds, staples, a case with boards and headbands, a coil; the contact shadow and the table. |
-| `scene.js` | The scene: lights, camera, animations, page images, the frame loop, motion resolution. The `BookScene` class is the 3D view's whole interface to the rest of the app. |
+| `scene.js` | The scene: lights, camera, animations, page images, the frame loop. The `BookScene` class is the 3D view's whole interface to the rest of the app. |
 | `camera.js` | The camera presets and the camera's two modes. |
 | `input.js` | Mouse and keyboard on the view. |
-| `motion.js` | How small to draw while things move on a slow graphics card (not used: motion is drawn at full size). |
 | `draw.js` | Drawing a frame: shadows only when needed, sheets nearest first. |
 | `tiles.js` | The tile cache: the pages' sharper levels kept on the graphics card as a map keeps its tiles. |
 | `detail.js` | Planning a capture's sharp strips. |
@@ -166,21 +165,15 @@ Image uploads are spread over frames, two a frame (`UPLOADS_PER_FRAME`), tiles t
 - **Reading back**: `visiblePages`, `sampleUnder`, `frameStats`.
 
 Each frame (`#frame`):
-1. **Update**: animations to the clock, the camera, the layout.
-2. **Fades**: the sharp strips' fade-in, the motion resolution.
-3. **Draw**, only if something changed: an animation, input, a page image arriving, a fade. At rest nothing is drawn, and back at rest after motion drawn small, one more frame at full resolution.
-4. **Uploads**: the next page images.
+1. **Update**: animations to the clock, the camera, the layout; the tiles up (three a frame) and fading in.
+2. **Draw**, only if something changed: an animation, input, a page image or a tile arriving. At rest nothing is drawn.
+3. **Uploads**: the next page images.
 
 Multisampling is 4× on a high-density screen, 8× otherwise, as far as the card allows. The canvas is drawn at the screen's resolution, up to twice the CSS pixels, within the pixel budget.
 
-### Motion resolution
+### Motion
 
-Motion is drawn at full size, like still frames, screenshots and videos. (A rule in motion.js that drew motion a step smaller when frames came late is switched off: the frames that came late were mostly a document loading or tiles going up, and the pages went soft the moment anything moved.)
-- **What it measures**: over 30 frames in motion, the card's own time per frame where it can be timed (else the time between frames), and the share of frames that reached the screen a refresh or more late.
-- **Stepping down**: when the drawing takes over 70 % of a refresh, or more than a tenth of frames are late.
-- **Stepping up**: after four easy rounds, under 40 % with almost no late frames.
-- **Taking a step back**: a step down that made frames neither a tenth faster nor late half as often is undone, and no smaller step is tried until the window size changes. The frames were waiting on something other than drawing.
-- Screens faster than 120 Hz aren't chased with a smaller picture.
+Motion is drawn at full size, like still frames, screenshots and videos. (Until 1.0.2 a rule drew motion a step smaller when frames came late; the frames that came late were mostly a document loading or tiles going up, and the pages went soft the moment anything moved. It was removed.)
 
 ## The camera and input
 

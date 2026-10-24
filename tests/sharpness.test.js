@@ -1,9 +1,8 @@
-// What keeps pages sharp on screen and in videos (0.17.75 to 0.17.80): when a page keeps its
-// base image and when sharp strips are made, that strips cover the page to its edges, how a
-// video sizes its page images frame by frame, and that strips go to the GPU like any page
-// image.
+// What keeps pages sharp in captures and videos: a capture's strips plan by the density on
+// screen, cover the page to its edges, and go to the GPU like any page image; a video sizes its
+// page images frame by frame. (The view's own sharpness is the tile cache's: tiles.test.js.)
 
-import { baseSuffices, planDetail, videoImageHeight } from "../app/viewer/detail.js";
+import { planDetail, videoImageHeight } from "../app/viewer/detail.js";
 import { BookScene } from "../app/viewer/scene.js";
 import { eq, near, ok, test } from "./harness.js";
 
@@ -24,17 +23,9 @@ const flatView = (pxPerMm) => ({
 });
 const pageMm = { width: 148, height: 210 };
 
-test("sharp strips: none while the base image has a pixel for every screen pixel, strips once it hasn't", () => {
-  const base = 1345 / 210; // a 1345 px image of a 210 mm page: 6.4 px/mm
-  for (const screen of [3, 4.5, 6.4]) {
+test("sharp strips: planned at 1.25 image pixels a screen pixel, at the density on screen", () => {
+  for (const screen of [3, 6.5, 12]) {
     const plan = planDetail(flatView(screen), pageMm, { supersample: 1.25 });
-    ok(baseSuffices(plan, base, 1.25), `at ${screen} px/mm on screen the base's ${base.toFixed(1)} px/mm is enough`);
-  }
-  for (const screen of [6.5, 8, 12]) {
-    const plan = planDetail(flatView(screen), pageMm, { supersample: 1.25 });
-    ok(!baseSuffices(plan, base, 1.25), `at ${screen} px/mm on screen the base is too coarse`);
-    // The strips then carry 1.25 image pixels a screen pixel: finer than the base.
-    ok(plan.every((t) => t.pxPerMm > base), "every strip is finer than the base");
     near(plan[0].pxPerMm, screen * 1.25, 1e-9);
   }
 });
@@ -176,17 +167,7 @@ test("sharp strips go to the GPU as page images do: mipmapped, the image freed, 
     const image = await createImageBitmap(canvas);
     scene.setPageDetails(5, [{ image, region: { u0: 0.1, v0: 0, u1: 0.9, v1: 1 } }], { immediate: true });
     const u = scene.leaves[2].front.userData.uniforms; // page 5: leaf 2's front
-    eq(u.uDetailCount.value, 1);
-    // New over the base image: they fade in over a few frames (DETAIL_FADE_MS), then stay.
-    eq(u.uDetailFade.value, 0, "the fade starts at the base image");
-    scene.debugSample(0.5, 0.5);
-    ok(u.uDetailFade.value > 0 && u.uDetailFade.value < 1, `a frame later: part way (${u.uDetailFade.value.toFixed(2)})`);
-    // A frame counts at most 100 ms of it (a stalled frame doesn't skip the fade): frames.
-    for (let k = 0; k < 4; k++) {
-      await new Promise((r) => setTimeout(r, 80));
-      scene.debugSample(0.5, 0.5);
-    }
-    eq(u.uDetailFade.value, 1, "faded in");
+    eq(u.uDetailCount.value, 1, "in at once: a capture draws no frames between (a one-tile screenshot showed the base image)");
     const tex = u.uDetail0.value;
     ok(tex.generateMipmaps, "mipmapped (for when the view moves on)");
     eq(tex.anisotropy, scene.renderer.capabilities.getMaxAnisotropy());
@@ -196,6 +177,30 @@ test("sharp strips go to the GPU as page images do: mipmapped, the image freed, 
     scene.setPageDetails(5, [], { immediate: true });
     eq(u.uDetailCount.value, 0);
     eq(u.uDetail0.value, scene.white, "cleared: the placeholder again");
+  } finally {
+    box.remove();
+  }
+});
+
+test("REGRESSION: a page showing a video's image draws that, not tiles kept from the view (they may be coarser)", async () => {
+  const { scene, box } = makeScene();
+  try {
+    scene.setBook({ pageCount: 8, pageSize: { width: 148, height: 210 }, binding: "saddle", paper });
+    // A tile kept for page 5 (any content: what counts is that the page has a table).
+    const { tilePage, TILE, TILE_MIPS } = await import("../app/viewer/tiles.js");
+    const page = tilePage(800, { width: 148, height: 210 });
+    const mips = Array.from({ length: TILE_MIPS }, (_, i) => new Uint8Array((TILE >> (i + 1)) ** 2 * 4));
+    scene.tiles.queueTile(5, 1, 0, 0, page, { data: new Uint8Array(TILE * TILE * 4), mips });
+    scene.debugSample(0.5, 0.5); // a frame: the tile goes up, the table is bound
+    const u = scene.leaves[2].front.userData.uniforms; // page 5
+    eq(u.uTileOn.value, 1, "the page draws from its tiles");
+    const canvas = new OffscreenCanvas(64, 64);
+    canvas.getContext("2d").fillRect(0, 0, 64, 64);
+    const image = await createImageBitmap(canvas);
+    scene.showPageImage(5, image);
+    eq(u.uTileOn.value, 0, "showing a video's image: no tiles");
+    scene.showPageImage(5, null);
+    eq(u.uTileOn.value, 1, "its own again: its tiles again");
   } finally {
     box.remove();
   }

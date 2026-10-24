@@ -301,7 +301,6 @@ function pageMaterial(scene, isFront, holesOf = null) {
       [`uDetailRect${i}`, { value: new THREE.Vector4(0, 0, 0, 0) }],
     ]).flat()),
     uDetailCount: { value: 0 },
-    uDetailFade: { value: 1 }, // strips fading in over the base image (see #prepareDetails in scene.js)
     // The page's tiles (viewer/tiles.js): its table and its pyramid's shape, bound by the scene (#bindTiles).
     uTileTable: { value: scene.tiles.emptyTable },
     uTilePage: { value: new THREE.Vector4(1, 1, 0, 1) },

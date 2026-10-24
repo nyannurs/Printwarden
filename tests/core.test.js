@@ -455,3 +455,14 @@ test("side glue: perfect and sewn books of 6 pages or more only; wire: the metal
   eq(sideGlueMm(Binding.PERFECT, 0, 40), 0);
   eq([wireIsMetal("#C9CBD0"), wireIsMetal("#c8a24e"), wireIsMetal("#1f2023"), wireIsMetal("#123456")], [true, true, false, false]);
 });
+
+test("REGRESSION: the sheet summary counts the pages between the covers, with a cover file too (it said 2.5 signatures of 16)", () => {
+  const mk = (index, w, h) => ({ index, mediaBox: rect(0, 0, w, h), trimBox: rect(3, 3, w - 3, h - 3), bleedBox: rect(0, 0, w, h), rotation: 0 });
+  const pages = Array.from({ length: 32 }, (_, i) => mk(i, 154, 216));
+  const cover = { name: "cover", pages: [mk(0, 154 * 2 + 70, 256)] };
+  for (const [binding, signatures] of [["hardcover", "2 signatures of 16"], ["sewn", "2 signatures of 16"], ["perfect", "8 signatures of 4"]]) {
+    const a = analyse({ pages, cover }, { binding });
+    const sheets = a.findings.find((f) => f.code === "sheets");
+    ok(sheets?.message.includes(signatures), `${binding}: ${sheets?.message}`);
+  }
+});

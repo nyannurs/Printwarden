@@ -19,7 +19,6 @@ import { bindInput, glideZoom, panBy } from "./input.js";
 import { layoutLeaves } from "./layout.js";
 import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, pageHit, fillerMaterial } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
-import { motionReset, motionState, motionStep } from "./motion.js";
 import { MAX_DETAIL, sheetShader } from "./shaders.js";
 import { naiveLut } from "./inklut.js";
 import { disposeTexture, freeImage, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeInkTexture, makeWarmer, makeWhite } from "./textures.js";
@@ -35,15 +34,11 @@ const FAST_SCRUB_MS = 160; // requests closer than this count as quick successio
 // meet, however much the two overlap: tests/scene.test.js, frame by frame.)
 const CLOSE_OVERLAP = 0.5;
 const SETTLE_MS = 120; // quiet time before the view counts as settled
-// After pages turned: longer, so pages only flipped past aren't sharpened (rendered from the
-// PDF and sent to the GPU, four times the pixels on a Retina screen) as the next click comes.
+// After pages turned: longer, so the at-rest tile requests (the next finer level, the spreads
+// either side: ui/tiles.js) aren't made for pages only flipped past as the next click comes.
 const TURN_SETTLE_MS = 350;
 const UPLOADS_PER_FRAME = 2;
-const MOTION_DOWNSCALE = false; // see #adaptResolution
 const TILES_PER_FRAME = 3; // tiles to the GPU a frame (5.5 MB each with its mips: a frame at 130 Hz takes about three)
-// Sharp strips arriving on a page that had none fade in over the base image this long: the
-// swap no longer reads as the page's pixels shifting as it comes to rest.
-const DETAIL_FADE_MS = 220;
 // Page images are filtered as stored (sRGB values) and only then turned into light: type
 // keeps its weight, the way browsers and Acrobat antialias it. Filtered as light, the grey
 // edge pixels of dark type on white come out too light, and text looks thin and grey.
@@ -176,16 +171,12 @@ export class BookScene {
     this.composer = new EffectComposer(r, target());
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.composer.addPass(output());
-    // The same, at a lower resolution, for motion on a graphics card too slow for the screen
-    // (see #adaptResolution); scaled up to the window as it is drawn.
-    this.motionComposer = new EffectComposer(r, target());
-    this.motionComposer.addPass(new RenderPass(this.scene, this.camera));
-    this.motionComposer.addPass(output());
-    this.motion = {
-      scale: 1, step: motionState(), refresh: [], frames: [], intervals: [], lastFrame: 0, rendered: false, low: false,
-      // How long the graphics card takes to draw a frame, where it can be timed.
-      timer: r.getContext().getExtension("EXT_disjoint_timer_query_webgl2"), queries: [], gpu: 0, gpuAt: -Infinity,
-    };
+    // Every frame is drawn at full size, in motion too. (Until 2026-10-24 motion was drawn
+    // smaller when frames came late, through a second composer: the pages went soft the moment
+    // a turn or a drag began, and the late frames were mostly a document loading or tiles going
+    // up, not a slow graphics card; the author's M4 Pro holds 120 fps at full size.)
+    // How long the graphics card takes to draw a frame, where it can be timed (the frame counter).
+    this.gpuTime = { timer: r.getContext().getExtension("EXT_disjoint_timer_query_webgl2"), queries: [], ms: 0, at: -Infinity };
     this.frameLog = { time: new Float64Array(256), cpu: new Float64Array(256), n: 0 }; // drawn frames (frameStats)
     this.casters = { current: false }; // see nearestCasters
 
@@ -300,7 +291,6 @@ export class BookScene {
     this.shadowState = null; // what the shadow map was last drawn for (draw.js)
     this.uploads = new Map(); // folio -> image waiting for GPU upload
     this.detailQueue = new Map(); // folio -> detail strips being prepared
-    this.fading = new Set(); // page uniforms whose strips are fading in (uDetailFade < 1)
     // The zoom shown is the camera's distance to its pivot against the preset's framing; the
     // pivot moves onto the paper under the view's middle when panning (input.js
     // pivotOnPaper) without the camera moving, which changes that distance: this factor takes
@@ -312,7 +302,6 @@ export class BookScene {
     this.debugStackFill = null;
     this.debugFillerInk = true;
     this.debugNoPivot = false; // the performance check's "no re-pivot" run (input.js)
-    this.lastFadeTime = null;
     this.dirty = true;
     this.geometryDirty = false;
     this.lastMotion = 0;
@@ -531,7 +520,7 @@ export class BookScene {
     this.dirty = true;
   }
 
-  /** Forget every page's image, vector text and small image (a new file). */
+  /** Forget every page's image and tiles (a new file). */
   clearPages() {
     for (const { image } of this.uploads.values()) image?.close();
     this.uploads.clear();
@@ -545,12 +534,16 @@ export class BookScene {
     }
   }
 
-  /** A page's tiles (its table and its pyramid's shape) on its material; none, the empty table. */
+  /**
+   * A page's tiles (its table and its pyramid's shape) on its material; none, the empty table.
+   * A page showing an image for now (a video's, showPageImage) shows that: it was rendered for
+   * the frame, and tiles kept from the view may be coarser.
+   */
   #bindTiles(folio) {
     const leaf = this.leaves[Math.ceil(folio / 2) - 1];
     if (!leaf) return;
     const u = (folio % 2 ? leaf.front : leaf.back).userData.uniforms;
-    const t = this.tiles.pageUniforms(folio);
+    const t = this.overrides.has(folio) ? null : this.tiles.pageUniforms(folio);
     u.uTileTable.value = t?.table ?? this.tiles.emptyTable;
     if (t) u.uTilePage.value.fromArray(t.page);
     u.uTileOn.value = t ? 1 : 0;
@@ -985,6 +978,7 @@ export class BookScene {
     if (image) this.overrides.set(folio, this.#pageTexture(image));
     else this.overrides.delete(folio);
     this.#showPage(folio);
+    this.#bindTiles(folio);
     this.dirty = true;
   }
 
@@ -1107,9 +1101,10 @@ export class BookScene {
   }
 
   /**
-   * Sharp strips of a page (each: an ImageBitmap and its region in texture uv), drawn
-   * over its base image. Replaces the page's previous strips; pass [] to clear. The
-   * images are owned: closed when replaced.
+   * A capture's sharp strips of a page (each: an image and its region in texture uv), drawn
+   * over its base image and its tiles. Replaces the page's previous strips; pass [] to clear.
+   * The images are owned: closed when replaced. `immediate`: on the GPU now (a capture draws
+   * no frames between), else one a frame.
    */
   setPageDetails(folio, strips, { immediate = false } = {}) {
     // Replaces any set still being prepared for this page.
@@ -1149,23 +1144,16 @@ export class BookScene {
         return; // one per frame
       }
       const u = (folio % 2 ? leaf.front : leaf.back).userData.uniforms;
-      const had = u.uDetailCount.value > 0;
       for (let i = 0; i < MAX_DETAIL; i++) {
         disposeTexture(u[`uDetail${i}`].value, this.blank);
         u[`uDetail${i}`].value = job.textures[i] ?? this.blank;
         const r = job.strips[i]?.region;
         if (r) u[`uDetailRect${i}`].value.set(r.u0, r.v0, r.u1, r.v1);
       }
+      // In at once: strips are a capture's, drawn the moment they are laid. (They faded in over
+      // the base image for the view's own strips, until 2026-10-24; a capture draws no frames
+      // between, so a screenshot of one tile showed every page's base image.)
       u.uDetailCount.value = job.textures.length;
-      // New strips over the base image fade in (see DETAIL_FADE_MS); sharper strips replacing
-      // strips, or strips going, change at once (fading to or from the base would soften).
-      if (job.textures.length && !had) {
-        u.uDetailFade.value = 0;
-        this.fading.add(u);
-      } else {
-        u.uDetailFade.value = 1;
-        this.fading.delete(u);
-      }
       this.detailQueue.delete(folio);
       this.dirty = true;
       return;
@@ -1360,7 +1348,6 @@ export class BookScene {
       leaf.first.material[1].dispose();
     }
     this.leaves = [];
-    this.fading.clear();
     for (const flap of this.flaps.values()) freeFlap(this, flap); // the flaps lay on them
     this.flaps.clear();
     // Sharp strips still on their way to the GPU were for the old book's leaves.
@@ -1468,9 +1455,6 @@ export class BookScene {
     this.renderer.domElement.style.height = `${h}px`;
     this.composer.setPixelRatio(ratio);
     this.composer.setSize(w, h);
-    this.motionComposer.setPixelRatio(ratio * this.motion.scale);
-    this.motionComposer.setSize(w, h);
-    motionReset(this.motion.step); // a new size: smaller may help again
     this.camera.aspect = w / h;
     this.#frameCamera();
     this.dirty = true;
@@ -1487,19 +1471,8 @@ export class BookScene {
     // own frames mustn't advance animations under it.
     const { animating, moving } = this.#update(this.clock ?? time);
     const inMotion = animating || moving;
-    // Back at rest after frames drawn smaller: once more, at full resolution.
-    if (!inMotion && this.motion.low) this.dirty = true;
-    if (this.fading.size) {
-      const dt = this.lastFadeTime == null ? 1000 / 60 : Math.min(100, time - this.lastFadeTime);
-      for (const u of this.fading) {
-        u.uDetailFade.value = Math.min(1, u.uDetailFade.value + dt / DETAIL_FADE_MS);
-        if (u.uDetailFade.value >= 1) this.fading.delete(u);
-      }
-      this.dirty = true;
-    }
-    this.lastFadeTime = time;
     const draw = inMotion || this.dirty;
-    this.#adaptResolution(time, inMotion && draw);
+    this.#readGpuTime();
     if (!draw) {
       // At rest, settled, nothing waiting to go to the GPU: no more frames until something
       // changes (asking for them every refresh kept a CPU core 7 % busy for nothing).
@@ -1514,18 +1487,16 @@ export class BookScene {
     if (inMotion) this.callbacks.onViewFrame?.(time);
     shadows(this);
     drawOrder(this);
-    const low = inMotion && this.motion.scale < 1 && this.clock == null;
-    const m = this.motion;
+    const g = this.gpuTime;
     const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
-    const query = m.timer && inMotion && m.queries.length < 4 ? gl.createQuery() : null;
-    if (query) gl.beginQuery(m.timer.TIME_ELAPSED_EXT, query);
-    (low ? this.motionComposer : this.composer).render();
+    const query = g.timer && inMotion && g.queries.length < 4 ? gl.createQuery() : null;
+    if (query) gl.beginQuery(g.timer.TIME_ELAPSED_EXT, query);
+    this.composer.render();
     if (query) {
-      gl.endQuery(m.timer.TIME_ELAPSED_EXT);
-      m.queries.push(query);
+      gl.endQuery(g.timer.TIME_ELAPSED_EXT);
+      g.queries.push(query);
     }
     this.#copyUnder(gl);
-    m.low = low;
     const log = this.frameLog;
     log.time[log.n % log.time.length] = started;
     log.cpu[log.n % log.time.length] = performance.now() - started;
@@ -1535,8 +1506,8 @@ export class BookScene {
   /**
    * How drawing went over the last second, for the frame counter: frames a second while
    * things move (null at rest, where nothing is drawn; a lone redraw, a page image arriving,
-   * doesn't count), the main thread's time a frame, the graphics card's (where it can be
-   * timed, else null) and the scale motion is drawn at (see #adaptResolution).
+   * doesn't count), the main thread's time a frame and the graphics card's (where it can be
+   * timed, else null; see #readGpuTime).
    */
   get frameStats() {
     const { time, cpu, n } = this.frameLog;
@@ -1556,68 +1527,28 @@ export class BookScene {
       }
     }
     const moving = gaps > 0 && now - time[recent[recent.length - 1]] < 250;
-    const m = this.motion;
+    const g = this.gpuTime;
     return {
       fps: moving ? (1000 * gaps) / span : null,
       cpu: recent.length ? recent.reduce((sum, i) => sum + cpu[i], 0) / recent.length : 0,
-      gpu: m.timer && now - m.gpuAt < 1000 ? m.gpu : null,
-      scale: m.scale,
+      gpu: g.timer && now - g.at < 1000 ? g.ms : null,
     };
   }
 
-  /**
-   * Keep motion as smooth as the screen (see motion.js for the steps). The screen's refresh
-   * is the shortest time between two animation frames with nothing drawn (frames cost
-   * nothing then). In motion, what a frame costs: the graphics card's own time to draw it
-   * where it can be timed (a frame's pace alone misleads where the system doesn't hold
-   * drawing to the screen's), else the time between frames drawn, over 30 frames. Videos
-   * and tests (a set clock) are always drawn at full size.
-   */
-  #adaptResolution(time, drawingInMotion) {
-    const m = this.motion;
-    const dt = m.lastFrame ? time - m.lastFrame : 0;
-    m.lastFrame = time;
-    const wasDrawing = m.rendered;
-    m.rendered = drawingInMotion;
+  /** The graphics card's time for the frames timed, as their results come in (a few frames later). */
+  #readGpuTime() {
+    const g = this.gpuTime;
+    if (!g.timer) return;
     const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
-    // Timed frames, as their results come in (a few frames later).
-    while (m.queries.length && gl.getQueryParameter(m.queries[0], gl.QUERY_RESULT_AVAILABLE)) {
-      const q = m.queries.shift();
+    while (g.queries.length && gl.getQueryParameter(g.queries[0], gl.QUERY_RESULT_AVAILABLE)) {
+      const q = g.queries.shift();
       const ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
       gl.deleteQuery(q);
-      if (!gl.getParameter(m.timer.GPU_DISJOINT_EXT) && this.clock == null) {
-        m.frames.push(ms);
-        m.gpu = ms; // for the frame counter (frameStats)
-        m.gpuAt = performance.now();
+      if (!gl.getParameter(g.timer.GPU_DISJOINT_EXT) && this.clock == null) {
+        g.ms = ms;
+        g.at = performance.now();
       }
     }
-    if (this.clock != null || m.frozen || !(dt > 0 && dt < 200)) return; // frozen: see probe.js
-    // Motion is drawn at full size, always (2026-10-24): drawn smaller when frames came late, the
-    // pages went soft the moment a turn or a drag began and sharp again at rest, and the frames
-    // that came late were mostly a document loading or tiles going up, not a slow card (the
-    // author's M4 Pro: 120 fps at full size; "the contents blur heavily" on every click). The
-    // sharpness of the pages is what the app is for. (motion.js keeps the rule, unused.)
-    if (!MOTION_DOWNSCALE) return;
-    if (!drawingInMotion && !wasDrawing) {
-      m.refresh.push(dt);
-      if (m.refresh.length > 120) m.refresh.shift();
-      return;
-    }
-    if (drawingInMotion && wasDrawing) {
-      if (!m.timer) m.frames.push(dt);
-      m.intervals.push(dt); // as the screen got them: a refresh or more late counts (motionStep)
-      if (m.intervals.length > 240) m.intervals.shift();
-    }
-    if (m.frames.length < 30 || m.refresh.length < 10) return;
-    const refresh = Math.min(...m.refresh);
-    const mean = m.frames.reduce((x, y) => x + y, 0) / m.frames.length;
-    const late = m.intervals.length ? m.intervals.filter((d) => d > refresh * 1.5).length / m.intervals.length : 0;
-    m.frames.length = 0;
-    m.intervals.length = 0;
-    const scale = motionStep(m.step, mean, refresh, !!m.timer, late);
-    if (scale === m.scale) return;
-    m.scale = scale;
-    this.motionComposer.setPixelRatio(this.renderer.getPixelRatio() * m.scale);
   }
 
   /** Advance every animation to `time` and lay the book out; drawing is up to the caller. */
@@ -1726,8 +1657,8 @@ export class BookScene {
       this.geometryDirty = false;
       this.dirty = true;
     }
-    // Sharp strips go to the GPU only at rest: uploaded mid-motion they stalled frames (four
-    // times the pixels on a Retina screen); they are for a view that has stopped anyway.
+    // A capture's strips are laid at once (setPageDetails, immediate); one queued otherwise (a
+    // clearing) goes at rest.
     if (this.uploads.size) this.#flushUploads();
     else if (this.detailQueue.size && this.settled) this.#prepareDetails();
     // Tiles go up a few a frame, moving or not (they are small, and the view moving is when
@@ -1738,7 +1669,7 @@ export class BookScene {
     }
     if (this.tiles.tick(time)) this.dirty = true;
     // Wheel zoom and pan change the camera outside the rig's own animations: count them
-    // as motion too, or the pages would never re-sharpen after a zoom.
+    // as motion too (the tiles the view needs are asked for as it moves, see ui/tiles.js).
     glideZoom(this, this.#own, time);
     const moving = this.rig.update(time) || this.cameraChanged;
     this.cameraChanged = false;
@@ -1797,10 +1728,6 @@ function isAppleMetal(renderer) {
   return /Apple/.test(name);
 }
 
-/**
- * The mean colour of an artwork's first and last columns (u 0: the front cover's side of a
- * spine, u 1: the back's), as CSS colours: the spine's tone where it folds round each corner.
- */
 /** An 8-bit sRGB value's linear light (see sampleUnder). */
 const SRGB_TO_LINEAR = Float32Array.from({ length: 256 }, (_, i) => {
   const c = i / 255;

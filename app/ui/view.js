@@ -102,14 +102,13 @@ export function setBackground(color, commit) {
 
 // Frame counter, top left of the view: frames a second while anything moves (nothing while
 // nothing does), the main
-// thread's and (where it can be timed) the graphics card's time a frame, and the resolution
-// motion is drawn at when the card can't keep up (see motion.js). Updated four times a second.
+// thread's and (where it can be timed) the graphics card's time a frame. Updated four times a
+// second.
 const fpsHud = $("fps-hud");
 function showFrameStats() {
   const s = scene.frameStats;
   const parts = s.fps == null ? [] : [`${Math.round(s.fps)} fps`, `cpu ${s.cpu.toFixed(1)} ms`];
   if (s.fps != null && s.gpu != null) parts.push(`gpu ${s.gpu.toFixed(1)} ms`);
-  if (s.fps != null && s.scale < 1) parts.push(`res ${Math.round(s.scale * 100)} %`);
   const text = parts.join("  •  ");
   if (fpsHud.textContent !== text) fpsHud.textContent = text;
 }

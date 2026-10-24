@@ -36,7 +36,6 @@ node tools/make-testfiles.mjs
 | `fold.test.js` | A stapled booklet's folds: each sheet's fold stays inside the one round it while opening and closing, at three paper thicknesses; no kink at the gutter mid-turn; the staples' legs only at the center spread. |
 | `scene.test.js` | Every kind of sheet drawn once: three.js's shaders, changed as text, still compile. |
 | `sharpness.test.js` | When a page keeps its base image and when it gets strips; strips reach the page's edges; a video's page images per frame, the turning page included; strips go to the graphics card like any page image. |
-| `motion.test.js` | The motion resolution's steps, including real figures from a report. |
 | `checklist.test.js` | Points from designer testing that numbers can settle: endpapers, boards and the headband on the spine, side glue in Preflight, staples and creep, signatures nesting with creep, switching bindings on one book. |
 | `panel.test.js` | The side panel, built with the app's own stylesheets at several window sizes: every control and label on whole pixels. |
 | `bundle.test.js` | The client viewer's bundle: the right modules, no import left pointing at a file. |

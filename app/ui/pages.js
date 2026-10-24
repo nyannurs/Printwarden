@@ -92,7 +92,7 @@ export function loadAllTextures() {
   showLoad(pending ? (n - pending) / n : null);
 }
 
-/** Thumbnails made again (a new file, a new CMYK profile). */
+/** Thumbnails made again (a new file; the profile and the plates need none: they are inks). */
 export function forgetThumbnails() {
   thumbs.clear();
 }

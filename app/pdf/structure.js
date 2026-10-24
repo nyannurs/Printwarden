@@ -1,5 +1,5 @@
-// Read a PDF's page boxes and embedded settings with pdf-lib (pdf.js doesn't expose
-// TrimBox or BleedBox). No DOM: runs in a worker (tasks-worker.js) or directly in tests.
+// Read a PDF's page boxes, page labels and embedded settings with pdf-lib (the boxes are read
+// as the file states them, no rendering library needed). No DOM: runs in a worker (tasks-worker.js) or directly in tests.
 
 import {
   decodePDFRawStream, ParseSpeeds, PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream,

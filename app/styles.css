@@ -240,9 +240,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .pill.icon[data-icon="spread"]::before { mask-image: url("icons/spread.svg"); }
 .pill.icon[data-icon="screenshot"]::before { mask-image: url("icons/screenshot.svg"); }
 .pill.icon[data-icon="video"]::before { mask-image: url("icons/video.svg"); }
-/* Separations: no icon yet (the author's, to come: app/icons/plates.svg, then a mask-image line
-   as above); until then the pill is empty. */
-.pill.icon[data-icon="plates"]::before { display: none; }
+.pill.icon[data-icon="plates"]::before { mask-image: url("icons/separations.svg"); }
 .menu { position: relative; }
 .menu-list { position: absolute; top: 0; right: calc(100% - var(--stroke)); display: flex; flex-direction: column; z-index: 5; }
 /* Reading order / Press sheets: bottom left (see filmstrip.js). */

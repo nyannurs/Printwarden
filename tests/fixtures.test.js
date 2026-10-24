@@ -97,9 +97,10 @@ test("fixtures: colour-profiles-intent carries an output intent (From PDF), colo
 });
 
 /** A page of a test file drawn by the render workers, at 2 px/mm, as RGBA. */
-async function draw(name, pageIndex, overprint) {
+async function draw(name, pageIndex) {
   const { bytes, pages } = await open(name);
-  const r = await createRenderer(bytes, () => { throw new Error("fell back to the main thread"); }, null, overprint);
+  const r = await createRenderer(bytes);
+  ok(r.workers?.length >= 1, "drawn by the render threads, not the main thread");
   try {
     const m = pages[pageIndex].trimBox ?? pages[pageIndex].mediaBox;
     const img = await r.render(pageIndex, m, Math.round(2 * (m.y1 - m.y0)));
@@ -118,7 +119,7 @@ const px = (f, xMm, yMmFromTop) => {
 };
 
 test("fixtures: spot-image.pdf: an image in a spot ink is drawn as the ink, as bright as the flat fill beside it", async () => {
-  const f = await draw("spot-image.pdf", 0, false);
+  const f = await draw("spot-image.pdf", 0);
   const [fr, fg, fb] = px(f, 40, 210 - 110);
   const [ir, ig, ib] = px(f, 108, 210 - 110);
   ok(fr > 200 && fg < 130, `the flat fill is pink (${fr}, ${fg}, ${fb})`);
@@ -126,7 +127,7 @@ test("fixtures: spot-image.pdf: an image in a spot ink is drawn as the ink, as b
 });
 
 test("fixtures: overprint.pdf: the overprinting yellow box turns green on the cyan panel, the knockout box stays yellow (overprint as the press prints it)", async () => {
-  const f = await draw("overprint.pdf", 0, true);
+  const f = await draw("overprint.pdf", 0);
   // The yellow boxes: 50 × 28 mm from x 16 (knockout) and x 80 (overprint), y 108 to 136 from the foot.
   const knock = [41, 210 - 122];
   const over = [105, 210 - 122];

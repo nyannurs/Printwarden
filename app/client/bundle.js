@@ -32,7 +32,7 @@ export async function bundleModules(entry = CLIENT_ENTRY) {
 }
 
 /** Where a key's file is: three.js and its addons in vendor/, the rest under app/. */
-export function urlOf(key) {
+function urlOf(key) {
   if (key === "three") return new URL("../../vendor/three.module.js", import.meta.url);
   if (key.startsWith("three/addons/")) return new URL(`../../vendor/three-addons/${key.slice("three/addons/".length)}`, import.meta.url);
   return new URL(`../${key}`, import.meta.url);

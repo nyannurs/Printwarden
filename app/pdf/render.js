@@ -2,12 +2,12 @@
 // press prints them (mupdf-render.js: overprint, spot colours, the chosen CMYK profile).
 //
 // A pool of background workers does the drawing (mupdf-worker.js), several pages at once, so
-// the interface never stalls. Results are ImageBitmaps (or a page's inks, `mode: "ink"`). If
+// the interface never stalls. Results are a page's inks (`mode: "ink"`: what the 3D view and
+// the timeline show, see mupdf-render.js) or ImageBitmaps in sRGB (what leaves the app). If
 // workers can't start, a main-thread renderer takes over (same drawing, the interface waits).
 //
-// Requests: one image per page (sized to a memory budget), a small one per page (the
-// timeline's thumbnail, and the page where it is small on screen), and on-demand sharp
-// strips for the pages in view, at the resolution they're shown at.
+// Requests: a base image per page (sized to a memory budget), a thumbnail per page, the view's
+// tiles (ui/tiles.js), a capture's strips, and one-offs (flaps, spine artwork, finish masks).
 
 import { COVER_BASE } from "../core/document.js";
 import { SYSTEM_MEMORY } from "../platform.js";
@@ -52,7 +52,6 @@ export function routedRenderer(main, cover) {
   const of = (index) => (index >= COVER_BASE ? [cover, index - COVER_BASE] : [main, index]);
   return {
     render(index, ...rest) { const [r, i] = of(index); return r.render(i, ...rest); },
-    info(index) { const [r, i] = of(index); return r.info(i); },
     setInks(inkOn) { main.setInks(inkOn); cover.setInks(inkOn); },
     setProfile(bytes) { main.setProfile(bytes); cover.setProfile(bytes); },
     inkLut(bytes) { return main.inkLut(bytes); },
@@ -66,14 +65,13 @@ export function routedRenderer(main, cover) {
  * `cmykProfile` (ICC bytes, or a promise of them, optional): plain CMYK is read in it and RGB
  * content converted through it; without it, MuPDF's own. Embedded ICC profiles are always
  * honoured. The workers start loading right away and wait for the profile only before opening.
- * (`fallback` and `overprint` are kept for callers from before MuPDF: overprint is always drawn
- * as the press prints it.)
- * @param {boolean | Promise<boolean>} [overprint]
+ * @param {Uint8Array} bytes
+ * @param {Uint8Array | null | Promise<Uint8Array | null>} [cmykProfile]
  */
-export async function createRenderer(bytes, _fallback = null, cmykProfile = null, overprint = true) {
+export async function createRenderer(bytes, cmykProfile = null) {
   try {
     const slots = takeSpareWorkers(poolSize(bytes.byteLength));
-    return await WorkerPool.start(bytes, slots, cmykProfile, overprint);
+    return await WorkerPool.start(bytes, slots, cmykProfile);
   } catch (err) {
     console.warn("Background rendering unavailable, using the main thread:", err);
     const { InkDocument } = await import("./mupdf-render.js");
@@ -177,11 +175,6 @@ class Scheduler {
     this.cache.clear();
   }
 
-  /** A page's spot colours (name, CMYK equivalent) and whether it overprints (see mupdf-render.js). */
-  info() {
-    return Promise.resolve({ spots: [], overprint: false });
-  }
-
   /** The CMYK profile (ICC bytes, or null for MuPDF's own) for the sRGB images drawn from now on. */
   setProfile(bytes) {
     this.profile = bytes;
@@ -263,11 +256,10 @@ class WorkerPool extends Scheduler {
     /** @type {any[]} the threads (slots), once started */
     this.workers = [];
     this.owner = new Map(); // page index -> first slot to read it (its images are cached there)
-    this.infoJobs = new Map(); // id -> resolve
+    this.lutJobs = new Map(); // id -> resolve (ink tables asked of a thread)
   }
 
-  /** @param {boolean | Promise<boolean>} [overprint] */
-  static async start(bytes, slots, cmykProfile, overprint = true) {
+  static async start(bytes, slots, cmykProfile) {
     const pool = new WorkerPool();
     const shared = bytes.byteLength >= SHARED_FILE_BYTES ? new Blob([bytes]) : null;
     pool.workers = await Promise.all(slots.map((slot) => new Promise((resolve, reject) => {
@@ -296,8 +288,8 @@ class WorkerPool extends Scheduler {
           worker.postMessage({ type: "open", bytes: copy }, [copy.buffer]);
         }
       }, reject);
-      Promise.all([cmykProfile, overprint]).then(([profile, shown]) => {
-        worker.postMessage({ type: "profile", bytes: profile ?? null, overprint: shown });
+      Promise.resolve(cmykProfile).then((profile) => {
+        worker.postMessage({ type: "profile", bytes: profile ?? null });
         profiled = true;
         maybeReady();
       }, reject);
@@ -311,17 +303,15 @@ class WorkerPool extends Scheduler {
 
   /**
    * A worker keeps the pages it read last (their decoded images above all), so later renders
-   * of one (sharper, other regions) are quickest there. Pages therefore go to a worker that
-   * knows them: normally the one that first read it; sharp strips ("flex" jobs) to any worker
-   * that knows the page, or any free one (MuPDF reads a page in milliseconds; a photo page's
-   * JPEG once more on another thread). A page nobody knows yet goes to whichever is free.
+   * of one are quickest there. A page's renders therefore go to the worker that first read it;
+   * tiles and strips ("flex" jobs) to any free one (MuPDF reads a page in milliseconds; a photo
+   * page's JPEG once more on another thread). A page nobody has read goes to whichever is free.
    */
   pump() {
     if (this.closed) return;
     clearTimeout(this.resting);
     for (const slot of this.workers) {
       if (slot.job) continue;
-      slot.knows ??= new Set();
       let best = -1;
       for (let i = 0; i < this.queue.length; i++) {
         const job = this.queue[i];
@@ -339,18 +329,10 @@ class WorkerPool extends Scheduler {
       slot.job = job;
       slot.worker.postMessage({ type: "render", id: job.id, index: job.index, rect: job.rect, height: job.height, mode: job.mode, mips: job.mips });
     }
-    if (!this.queue.length && !this.infoJobs?.size && this.workers.every((s) => !s.job)) {
+    if (!this.queue.length && !this.lutJobs.size && this.workers.every((s) => !s.job)) {
       this.resting = setTimeout(() => {
         for (const slot of this.workers) slot.worker.postMessage({ type: "rest" });
       }, REST_MS);
-    }
-  }
-
-  /** Queued work is dropped (a render in a thread's hands runs on: milliseconds). */
-  cancel(predicate) {
-    super.cancel(predicate);
-    for (const slot of this.workers) {
-      if (slot.job && !slot.job.cancelled && predicate(slot.job)) slot.job.cancelled = true;
     }
   }
 
@@ -371,39 +353,30 @@ class WorkerPool extends Scheduler {
     const id = `l${++jobIds}`;
     clearTimeout(this.resting);
     return new Promise((resolve) => {
-      this.infoJobs.set(id, resolve);
+      this.lutJobs.set(id, resolve);
       slot.worker.postMessage({ type: "lut", id, bytes: bytes ?? null });
     });
   }
 
-  /** @returns {Promise<{spots: {name: string, cmyk: number[]}[], overprint: boolean}>} */
-  info(index) {
-    if (this.closed) return super.info();
-    const slot = this.owner?.get(index) ?? this.workers[index % this.workers.length];
-    const id = `i${++jobIds}`;
-    clearTimeout(this.resting);
-    return new Promise((resolve) => {
-      this.infoJobs.set(id, resolve);
-      slot.worker.postMessage({ type: "info", id, index });
-    });
+  /** Every ink table still asked for, answered with none (a thread crashed, or the pool ends). */
+  #dropLutJobs() {
+    for (const resolve of this.lutJobs.values()) resolve(null);
+    this.lutJobs.clear();
   }
 
   #finished(slot, msg) {
-    if (msg.type === "info" || msg.type === "lut") {
-      const resolve = this.infoJobs.get(msg.id);
-      this.infoJobs.delete(msg.id);
-      resolve?.(msg.type === "lut" ? msg.data ?? null : { spots: msg.spots ?? [], overprint: !!msg.overprint });
+    if (msg.type === "lut") {
+      const resolve = this.lutJobs.get(msg.id);
+      this.lutJobs.delete(msg.id);
+      resolve?.(msg.data ?? null);
       this.pump();
       return;
     }
-    if (msg.crashed) {
-      for (const [id, resolve] of this.infoJobs) { this.infoJobs.delete(id); resolve(id.startsWith("l") ? null : { spots: [], overprint: false }); }
-    }
+    if (msg.crashed) this.#dropLutJobs();
     const job = slot.job;
     slot.job = null;
     if (job) {
       if (msg.type === "done") {
-        (slot.knows ??= new Set()).add(job.index);
         if (msg.ink) msg.ink.close = () => { msg.ink.data = null; }; // as an ImageBitmap's: its bytes let go
         job.resolve(msg.bitmap ?? msg.ink);
       } else {
@@ -416,7 +389,7 @@ class WorkerPool extends Scheduler {
   destroy() {
     this.close();
     clearTimeout(this.resting);
-    for (const [id, resolve] of this.infoJobs) { this.infoJobs.delete(id); resolve(id.startsWith("l") ? null : { spots: [], overprint: false }); }
+    this.#dropLutJobs();
     for (const slot of this.workers) slot.worker.terminate();
   }
 }
@@ -465,10 +438,6 @@ export class MainThreadRenderer extends Scheduler {
 
   inkLut(bytes) {
     return Promise.resolve(this.doc.lut(bytes ?? null));
-  }
-
-  info(index) {
-    return Promise.resolve(this.doc.info(index));
   }
 
   destroy() {

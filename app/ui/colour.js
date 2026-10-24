@@ -9,6 +9,7 @@ import { filmstrip, inkView, inspector, scene, state } from "./app.js";
 import { applySpine, renderSpineArt } from "./spine-panel.js";
 
 const PROFILE_PREF = "cmykProfile"; // remembered choice (localStorage)
+let profileRun = 0; // see applyProfile
 
 // Shipped with the app by the European Color Initiative's permission (see vendor/icc/README.txt):
 // the default everywhere, so colours look the same on every computer, whatever is installed.
@@ -78,10 +79,14 @@ export async function setColourProfile(id) {
 export async function applyProfile() {
   const renderer = state.renderer;
   if (!renderer) return;
+  // The newest call wins: two switches in quick succession could finish in the other order
+  // (reading a profile, making its table), the older table applied last.
+  const run = ++profileRun;
   const bytes = await profileBytes(state.colour, state.colour.choice);
+  if (run !== profileRun || state.renderer !== renderer) return;
   renderer.setProfile(bytes);
   const lut = (await renderer.inkLut(bytes)) ?? naiveLut();
-  if (state.renderer !== renderer) return; // another document since
+  if (run !== profileRun || state.renderer !== renderer) return; // a newer profile, or another document, since
   state.inkLut = lut;
   scene.setInkLut(lut);
   inkView.setLut(lut);
@@ -116,5 +121,11 @@ export function setPlates(inkOn) {
   inkView.setInksOn(process);
   filmstrip.refreshInk();
   applySpine();
-  if (inkOn.slice(4).includes(false)) state.renderer?.setInks(inkOn); // a spot left out: drawn again without it
+  // Spots: drawn again, without the ones left out, when that changes (both ways).
+  const spots = inkOn.slice(4).map(Boolean).join();
+  if (spots !== spotsSent) {
+    spotsSent = spots;
+    state.renderer?.setInks(inkOn);
+  }
 }
+let spotsSent = ""; // the spot plates the renderer was last told (see setPlates)

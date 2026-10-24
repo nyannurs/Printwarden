@@ -108,7 +108,7 @@ export async function renderVideo(preset = null) {
   let cancelled = false;
   const busy = showBusy("Rendering video…", () => { cancelled = true; });
   const before = { opening: scene.opening, closed: scene.isClosed, turnMs: scene.turnMs, closeMs: scene.closeMs };
-  /** @type {Map<number, {image: ImageBitmap, height: number}>} its image at the video's resolution, while it may be in view */
+  /** @type {Map<number, {image: {close: () => void}, height: number}>} its inks at the video's resolution, while it may be in view */
   const sharp = new Map();
   let writer = null;
   state.capturing = true;
@@ -170,11 +170,11 @@ export async function renderVideo(preset = null) {
  * Every page in the frame at the resolution the frame needs (`need`: px per mm by folio, see
  * recordVideo; 0: may be in the picture, kept as it is), rendering what's missing or no longer
  * right (videoImageHeight in detail.js); images of pages that can't be in the picture are let
- * go. Exported for the tests.
- * @param {Map<number, {image: ImageBitmap, height: number}>} sharp
+ * go.
+ * @param {Map<number, {image: {close: () => void}, height: number}>} sharp
  * @param {Map<number, number>} need
  */
-export async function sharpenForVideo(sharp, need) {
+async function sharpenForVideo(sharp, need) {
   const a = state.analysis;
   const maxHeight = Math.min(DETAIL_MAX_SIDE, scene.maxTextureSize);
   for (const [folio, { image }] of sharp) {

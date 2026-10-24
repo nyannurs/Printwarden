@@ -1,6 +1,6 @@
 // Units, sizes and rectangles. Everything inside core/ is millimetres.
 
-export const MM_PER_PT = 25.4 / 72;
+const MM_PER_PT = 25.4 / 72;
 export const ptToMm = (pt) => pt * MM_PER_PT;
 export const mmToPt = (mm) => mm / MM_PER_PT;
 
