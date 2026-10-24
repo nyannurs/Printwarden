@@ -31,7 +31,7 @@ A test checks that the bundle holds the viewer, the 3D code and three.js, and th
 
 Then it adds its own controls:
 - **Top row**: the title (cut short with an ellipsis if long), **Performance check**, and "Made with Printwarden" and the version.
-- **Bottom bar**: **Previous**, the page numbers, **Next**, **Open book / Close book**, and the camera menu. It wraps onto a second row on a narrow screen.
+- **Bottom bar**: **Previous**, the page numbers, **Next**, **Open book / Close book**, and the camera menu, as wide as the view it shows. It wraps onto a second row on a narrow screen.
 - **Keys**: the arrow keys and Page Up / Page Down turn pages; Home and End go to the covers.
 - **Mouse and touch**: drag, pan, zoom and click exactly as in the app, because the input code is the app's own.
 

@@ -588,42 +588,58 @@ export function stretch(scene, sheets) {
 // --- motion ----------------------------------------------------------------------------------
 
 /**
- * A recorder of motion, frame by frame: per sheet (and the coil, as one), how far its vertices
- * moved since the frame before (the most of any), and the jumps: a frame where one moved more
- * than `factor` times as far as in the frames either side, and over `floor` mm (a flip, a snap,
- * a part that "spazzes"; smooth motion, however fast, changes little from frame to frame).
+ * A recorder of motion, frame by frame: per part (each sheet, the coil, the spine), the most any
+ * of its vertices changed its motion at a frame (the second difference of its places: the
+ * frame's step against the one before; mm), and the jumps: a frame where that is more than
+ * `factor` times the most at the frames either side, and over `floor` mm. Smooth motion, however
+ * fast, changes its steps evenly (a fore-edge sweeping 15 mm a frame changes by a millimetre or
+ * so); a snap, a flip, a part that "spazzes" changes them at once, at a frame or two. (Steps
+ * alone hid a board's root snapping 5 mm while its fore-edge swept 15: the author's report.)
  */
 export function motionRecorder({ factor = 4, floor = 1 } = {}) {
-  /** @type {Map<string, Float32Array>} */
-  let last = new Map();
-  /** @type {Map<string, number[]>} */
-  const moves = new Map();
+  /** @type {Map<string, Float32Array>[]} the last two frames' places */
+  let recent = [];
+  /** @type {Map<string, number[]>} per part, per frame: the most change of motion (NaN: unknown) */
+  const changes = new Map();
   const frames = [];
   return {
-    /** A frame's places: name -> flat xyz (the same count each frame). */
+    /** A frame's places: name -> flat xyz (the same count each frame; another count starts afresh). */
     add(frame, places) {
-      const next = new Map();
+      const [a, b] = recent; // two and one frames ago
       for (const [name, xyz] of places) {
-        const before = last.get(name);
-        let most = 0;
-        if (before && before.length === xyz.length) {
+        const p1 = b?.get(name), p0 = a?.get(name);
+        if (!changes.has(name)) changes.set(name, frames.map(() => NaN));
+        // The change at the frame before this one (it needs this one's place).
+        let most = NaN;
+        if (p0 && p1 && p0.length === xyz.length && p1.length === xyz.length) {
+          most = 0;
           for (let v = 0; v < xyz.length; v += 3) {
-            most = Math.max(most, Math.hypot(xyz[v] - before[v], xyz[v + 1] - before[v + 1], xyz[v + 2] - before[v + 2]));
+            const dx = xyz[v] - 2 * p1[v] + p0[v];
+            const dy = xyz[v + 1] - 2 * p1[v + 1] + p0[v + 1];
+            const dz = xyz[v + 2] - 2 * p1[v + 2] + p0[v + 2];
+            most = Math.max(most, Math.hypot(dx, dy, dz));
           }
         }
-        if (!moves.has(name)) moves.set(name, []);
-        moves.get(name).push(before ? most : 0);
-        next.set(name, xyz);
+        const list = changes.get(name);
+        if (list.length) list[list.length - 1] = most;
+        list.push(NaN);
       }
-      last = next;
+      recent = [b, places];
       frames.push(frame);
     },
     jumps() {
       const out = [];
-      for (const [name, m] of moves) {
-        for (let t = 1; t < m.length; t++) {
-          const around = Math.max(m[t - 1] ?? 0, m[t + 1] ?? 0);
-          if (m[t] > floor && m[t] > factor * around) out.push({ part: name, frame: frames[t], moved: m[t], around });
+      const median = (xs) => {
+        const v = xs.filter((x) => !Number.isNaN(x)).sort((x, y) => x - y);
+        return v.length ? v[v.length >> 1] : 0;
+      };
+      for (const [name, c] of changes) {
+        for (let t = 0; t < c.length; t++) {
+          if (Number.isNaN(c[t]) || c[t] <= floor) continue;
+          if (!(c[t] >= (c[t - 1] ?? 0) && c[t] >= (c[t + 1] ?? 0))) continue; // the peak of a snap
+          // The motion's own changes round it, the snap's frames either side left out.
+          const around = median([...c.slice(Math.max(0, t - 6), Math.max(0, t - 1)), ...c.slice(t + 2, t + 7)]);
+          if (c[t] > factor * around) out.push({ part: name, frame: frames[t], moved: c[t], around });
         }
       }
       return out;

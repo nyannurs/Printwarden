@@ -79,7 +79,15 @@ export async function start(data, root) {
   prev.addEventListener("click", () => scene.goTo(scene.opening - 1));
   next.addEventListener("click", () => scene.goTo(scene.opening + 1));
   openClose.addEventListener("click", () => (scene.isClosed ? scene.open() : scene.close()));
-  camera.addEventListener("change", () => scene.setPreset(camera.value));
+  camera.addEventListener("change", () => {
+    scene.setPreset(camera.value);
+    fitSelect(camera);
+  });
+  // A menu is as wide as its longest choice: as wide as the one it shows instead (and again
+  // when the font changes, a phone's larger one past the breakpoint, or a web font arriving).
+  fitSelect(camera);
+  window.addEventListener("resize", () => fitSelect(camera));
+  document.fonts?.ready.then(() => fitSelect(camera));
   window.addEventListener("keydown", (e) => {
     if (e.target instanceof HTMLSelectElement) return;
     if (e.key === "ArrowRight" || e.key === "PageDown") scene.goTo(scene.opening + 1);
@@ -177,6 +185,19 @@ function pageLoader(scene, data) {
       }
     },
   };
+}
+
+/** A pill menu as wide as the choice it shows (not its longest), in whole pixels. */
+let measure = null;
+/** @param {HTMLSelectElement} select */
+function fitSelect(select) {
+  const style = getComputedStyle(select);
+  const context = (measure ??= document.createElement("canvas").getContext("2d"));
+  if (!context) return;
+  context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const text = select.selectedOptions[0]?.text ?? "";
+  const sides = ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"].reduce((sum, k) => sum + parseFloat(style[k]), 0);
+  select.style.width = `${Math.ceil(context.measureText(text).width + sides)}px`;
 }
 
 /** @param {string | Node[]} [children] */

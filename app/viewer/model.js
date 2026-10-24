@@ -860,80 +860,133 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
     }
     const back = { x: X.x * Math.cos(alpha) + Y.x * Math.sin(alpha), y: X.y * Math.cos(alpha) + Y.y * Math.sin(alpha) };
     // Hung from the case's spine corner by the covering across its joint, which doesn't
-    // stretch: along its own line, the board's inner edge as far from that corner as when the
-    // book is shut (a joint's width and the depth behind the block's spine). Pages arching up
-    // out of the gutter draw their fore-edge in; the board stays where it is, overhanging them
-    // more. (Until 1.1 the inner edge was a joint's width along the board from where the sheet
-    // leaves the spine: as the board swung, the case's outside grew 27.2 to 27.5 mm and then
-    // shrank to 20.7 open, its joints 9.8, 12.4, 6.9 mm: "the spine extends", the author.)
+    // stretch or slacken: the board's inner edge where the pages would put it (a joint's width
+    // along it from where the sheet leaves the spine), drawn onto the covering's reach (the
+    // nearest point a joint's width and the depth behind the block's spine from that corner),
+    // the board tilting on its fore-edge, where it rests, to meet it. Nearest point, so the
+    // inner edge follows the pages smoothly however they move: no choice to switch between and
+    // no sliding fast along its line where that line just touches the reach.
+    // Tilting away from the pages it lifts off them. Tilting toward them, it presses those it
+    // carries (turning with it) flat where they bulge into it (pressPages, below: the board is
+    // stiff and the covering doesn't give, they do); the others, lying in a pile, hold it: it
+    // goes only as far as they let it, the largest part of the tilt that keeps it clear of them
+    // (found by halving; the covering giving the least it can). The sheet it rests on while
+    // turning is a stand-in, not paper: only the pages count.
+    // (Until 1.1 the inner edge was where the pages put it: as the board swung, the case's
+    // outside grew 27.2 to 27.5 mm and then shrank to 20.7 open, its joints 9.8, 12.4, 6.9 mm:
+    // "the spine extends", the author. Then, until 2026-10-24, the board stayed on its own
+    // line where that crossed the reach, or tilted to touch it, or stayed put where the pages
+    // held it, the covering stretching up to 5 mm: three placements and three switches, the
+    // board's inner edge and the case's spine snapping up to 9 mm a frame as a stack was flung
+    // over, the author's view report.)
     const S0 = S(0);
     const toRoot = (S0.x - E.x) * back.x + (S0.y - E.y) * back.y;
     const reach0 = Math.max(0, toRoot - style.joint);
+    const N = { x: E.x + back.x * reach0, y: E.y + back.y * reach0 }; // where the pages put it
+    const fallback = { ...N, phi: Math.atan2(-back.x, -back.y) };
     const H = hinge(bi);
-    // Along its own line, the board's inner edge where the covering reaches (from the fore-edge
-    // `F`), or null if the line passes further from the corner than it reaches.
-    const onLine = (F) => {
-      const dx = F.x - H.x;
-      const dy = F.y - H.y;
-      const along = dx * back.x + dy * back.y;
-      const disc = along * along - (dx * dx + dy * dy) + H.length * H.length;
-      return disc >= 0 ? Math.max(0, -along - Math.sqrt(disc)) : null;
-    };
-    const fallback = { x: E.x + back.x * reach0, y: E.y + back.y * reach0, phi: Math.atan2(-back.x, -back.y) };
     if (!H) return fallback;
-    const r = onLine(E);
-    if (r !== null) return { x: E.x + back.x * r, y: E.y + back.y * r, phi: Math.atan2(-back.x, -back.y) };
-    // The line misses the covering's reach: a thick block, the board lying open low beside its
-    // tall spine, or in the air, resting on a stand-in sheet that rises from the spine at an
-    // angle. The covering doesn't stretch (until 2026-10-23 it did here, 7 to 25 mm on a 23 mm
-    // block: a wedge of covering at the spine, the author), so the board goes where it lets it:
-    // moved in toward the corner along its normal, or pivoted on its fore-edge where it rests,
-    // its inner edge lifted onto the reach (as a thick hardcover's board rises toward the
-    // spine). Whichever keeps clear of every page; if neither does, as before.
-    const nrm = { x: -back.y, y: back.x };
-    if (nrm.x * Y.x + nrm.y * Y.y < 0) { nrm.x = -nrm.x; nrm.y = -nrm.y; }
+    // Where on the reach: well within it, where its own line crosses it (the board lying as the
+    // pages have it); else the point nearest where the pages would put it; between, blended
+    // round the reach, all of the first only where the line runs through the corner, none of
+    // it where the line just touches. (The crossing runs fast along the line as the line comes
+    // to touch the reach: blended out there, it never shows. Blended over half that, a flung
+    // board's inner edge still turned 1.2 mm in a frame.)
+    const L = H.length;
+    const toE = { x: E.x - H.x, y: E.y - H.y };
+    const along = toE.x * back.x + toE.y * back.y;
+    const disc = along * along - (toE.x * toE.x + toE.y * toE.y) + L * L; // L² less the line's distance²
+    const w = Math.min(1, Math.max(0, disc / (L * L)));
+    const blend = w * w * (3 - 2 * w);
+    let at = Math.atan2(N.y - H.y, N.x - H.x);
+    if (blend > 0) {
+      const r = Math.max(0, -along - Math.sqrt(disc));
+      const cross = Math.atan2(E.y + back.y * r - H.y, E.x + back.x * r - H.x);
+      at += blend * Math.atan2(Math.sin(cross - at), Math.cos(cross - at));
+    }
+    const P = { x: H.x + Math.cos(at) * L, y: H.y + Math.sin(at) * L };
+    const reach = Math.hypot(P.x - E.x, P.y - E.y); // from the fore-edge
+    if (reach < 1e-9) return fallback;
+    const own = Math.atan2(back.x, back.y); // angles as phi: (sin, cos) is the direction
+    const angle = Math.atan2(P.x - E.x, P.y - E.y);
+    const tilt = Math.atan2(Math.sin(angle - own), Math.cos(angle - own));
+    // The board tilted by `f` of the way, its inner edge as far along (all of it: on the reach).
+    const tilted = (f) => {
+      const a = own + f * tilt;
+      const along = reach0 + f * (reach - reach0);
+      return { x: E.x + Math.sin(a) * along, y: E.y + Math.cos(a) * along, phi: Math.atan2(-Math.sin(a), -Math.cos(a)) };
+    };
+    const lifting = Math.sin(angle) * Y.x + Math.cos(angle) * Y.y >= back.x * Y.x + back.y * Y.y;
+    if (lifting) return tilted(1);
     const width = leaves[bi].s[leaves[bi].s.length - 1];
-    const clear = (P, dir) => { // the board from inner edge P, running `dir` toward the fore-edge
-      const tx = dir.x, ty = dir.y, nx = -ty, ny = tx;
+    // The pages it carries lie between it and the rest, pressed as thin as they go.
+    let carried = 0;
+    for (let j = 1; j < n - 1; j++) if (leaves[bi].group && leaves[j].group === leaves[bi].group) carried += thickness[j];
+    const clear = (P) => { // the board from inner edge P toward its fore-edge, clear of the rest
+      const tx = Math.sin(P.phi), ty = Math.cos(P.phi), nx = -ty, ny = tx;
       for (let j = 1; j < n - 1; j++) {
+        if (leaves[bi].group && leaves[j].group === leaves[bi].group) continue; // pressed instead
         const q2 = leaves[j].profile;
-        const gap = (thickness[bi] + thickness[j]) / 2;
+        const gap = (thickness[bi] + thickness[j]) / 2 + carried;
         for (let k = 0; k < q2.x.length; k++) {
           const rx = q2.x[k] - P.x, ry = q2.y[k] - P.y;
           const a = rx * tx + ry * ty;
           if (a < -0.5 || a > width + 0.5) continue;
-          if (Math.abs(rx * nx + ry * ny) < gap) return false;
+          if (Math.abs(rx * nx + ry * ny) < gap - 0.02) return false; // (touching is clear)
         }
       }
       return true;
     };
-    const fromInner = (P) => {
-      const fx = E.x - P.x, fy = E.y - P.y;
-      const l = Math.hypot(fx, fy) || 1;
-      return { x: P.x, y: P.y, phi: Math.atan2(fx / l, fy / l) };
+    if (clear(tilted(1))) return tilted(1);
+    let lo = 0, hi = 1;
+    for (let k = 0; k < 16; k++) {
+      const mid = (lo + hi) / 2;
+      if (clear(tilted(mid))) lo = mid;
+      else hi = mid;
+    }
+    return tilted(lo);
+  };
+  // The pages board `bi` carries (turning with it, the same group), pressed onto it where they
+  // bulge into it: the page next to it moved straight out from the board's face to just
+  // touching it, and those behind moved with it as far, where they lie across the board (so
+  // the stack keeps its own spacing; their roots stay at the spine, their slopes as they were,
+  // a degree or two off where pressed, never a crease where pressing starts).
+  const pressPages = (bi) => {
+    const b = leaves[bi].profile;
+    const width = leaves[bi].s[leaves[bi].s.length - 1];
+    const tx = Math.sin(b.phi[0]);
+    const ty = Math.cos(b.phi[0]);
+    const step = bi === 0 ? 1 : -1;
+    const nx = Math.cos(b.phi[0]) * step; // the board's face toward the pages
+    const ny = -Math.sin(b.phi[0]) * step;
+    const across = (x, y) => [(x - b.x[0]) * tx + (y - b.y[0]) * ty, (x - b.x[0]) * nx + (y - b.y[0]) * ny];
+    // How far the next page is pushed, along the board.
+    const first = leaves[bi + step].profile;
+    const to = (thickness[bi] + thickness[bi + step]) / 2 - 0.02; // (just touching is near enough)
+    const at = [];
+    const push = [];
+    for (let k = 1; k < first.x.length; k++) {
+      const [along, out] = across(first.x[k], first.y[k]);
+      if (at.length && along <= at[at.length - 1]) continue;
+      at.push(along);
+      push.push(along >= 0 && along <= width ? Math.max(0, to - out) : 0);
+    }
+    if (!push.some((v) => v > 0)) return;
+    const pushAt = (along) => {
+      if (along <= at[0]) return push[0];
+      let k = 0;
+      while (k < at.length - 2 && at[k + 1] < along) k++;
+      const t = Math.min(1, (along - at[k]) / Math.max(1e-9, at[k + 1] - at[k]));
+      return push[k] + (push[k + 1] - push[k]) * t;
     };
-    const candidates = [];
-    // Moved in: the line brought within reach, the edge where it meets the reach.
-    const inward = -((H.x - E.x) * nrm.x + (H.y - E.y) * nrm.y);
-    if (inward > 0) {
-      const m = inward - H.length * 0.999;
-      const F = { x: E.x - nrm.x * m, y: E.y - nrm.y * m };
-      const rr = onLine(F);
-      if (rr !== null) candidates.push({ x: F.x + back.x * rr, y: F.y + back.y * rr, phi: Math.atan2(-back.x, -back.y) });
+    for (let j = bi + step; j > 0 && j < n - 1 && leaves[j].group === leaves[bi].group; j += step) {
+      const q = leaves[j].profile;
+      for (let k = 1; k < q.x.length; k++) {
+        const v = pushAt(across(q.x[k], q.y[k])[0]);
+        q.x[k] += nx * v;
+        q.y[k] += ny * v;
+      }
     }
-    // Pivoted on the fore-edge: the inner edge on the reach, as far from the fore-edge as it was.
-    const d = Math.hypot(H.x - E.x, H.y - E.y) || 1;
-    const ux = (H.x - E.x) / d, uy = (H.y - E.y) / d;
-    const a0 = (reach0 * reach0 - H.length * H.length + d * d) / (2 * d);
-    const hh = reach0 * reach0 - a0 * a0;
-    if (hh >= 0) {
-      const h = Math.sqrt(hh);
-      for (const sgn of [1, -1]) candidates.push(fromInner({ x: E.x + ux * a0 - sgn * uy * h, y: E.y + uy * a0 + sgn * ux * h }));
-    }
-    // The nearest to where it was that keeps clear of the pages.
-    candidates.sort((p1, p2) => Math.hypot(p1.x - fallback.x, p1.y - fallback.y) - Math.hypot(p2.x - fallback.x, p2.y - fallback.y));
-    for (const c of candidates) if (clear(c, { x: Math.sin(c.phi), y: Math.cos(c.phi) })) return c;
-    return fallback;
   };
   // The case's spine corner at board `bi`'s side (as writeCaseSpine in extras.js builds it:
   // across the block's outer sheets by the boards' thickness, behind its spine by the folds,
@@ -1001,6 +1054,7 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
       p.y[k] = a.y + Math.cos(a.phi) * l.s[k];
       p.phi[k] = a.phi;
     }
+    if (l.group && l.group === leaves[page].group) pressPages(bi);
   }
   glueCovers(book, leaves);
 }

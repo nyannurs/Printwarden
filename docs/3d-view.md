@@ -64,7 +64,7 @@ Heavier stock is stiffer, as the cube of its thickness, for little more weight, 
 - **A turning leaf** blends, point by point, from its shape in the right pile to its shape in the left. Its fore-edge leads as it lifts and trails as it settles, so it never dips into the pages beneath (`turnCurl`).
 - **Ordering.** Several leaves in the air at once are kept in order by isotonic regression: the closest non-decreasing sequence of angles, each leaf weighted. One leaf weighing a million times more holds its place. A page underneath can then carry the one on it.
 - **A stack turning together**, such as a pile swung over to close the book, is laid out as one stack.
-- **A hardcover's boards** are rigid: flat under a pile, resting on top of one, turning about the joint.
+- **A hardcover's boards** are rigid: flat under a pile, resting on top of one, turning about the joint. The covering across the joint keeps its length: the board's inner edge always lies that far from the case's spine corner, at the point nearest where the pages would put it, the board tilting on its fore-edge to meet it. Pages a board carries as it swings over are pressed flat against it where they bulge into it; pages lying in a pile hold it back.
 - **Coil books** have their own model. Pages hang on the ring through their holes, every hole on the wire, sloping gently down to the table. Closed, the ring wraps the spine edge and the book rests tilted on it.
 
 ### The stapled peel
@@ -149,7 +149,7 @@ A page's look comes from three sources:
    - A tile is rendered from the PDF once, when the view first needs it, and kept on the graphics card in one texture array (a 24th of the computer's memory, 256 MB to 1 GB), the least recently drawn going first when the room is needed. A view that was on screen before draws from the cache at once.
    - While the view moves (every 24 ms), each density sample on the pages in view asks for the tile at the level that part needs (the first with 1.25 texels a screen pixel), the tiles one sample's spacing around it (the gaps between samples, and a margin past the screen's edge, so panning finds them there) and the level under it. At rest, the next finer level too, so a zoom in finds it there. What is no longer wanted but not yet drawn is cancelled.
    - The page shader looks each fragment's tile up in the page's table (`TILE_GLSL`) and falls back to coarser levels, in the end the base image, for what isn't there yet. So zooming out never shows less than what is kept, and zooming in shows the coarser level for the few frames its tiles take: a text tile about 25 ms in a render thread, three to the graphics card a frame, each with two mips made where it was drawn (pdf/mips.js). A tile fades in over 160 ms.
-3. **A capture's strips** (detail.js, ui/capture.js): a screenshot or a video frame renders the pages at exactly its resolution, in up to four strips laid over the page. (The view sharpened itself this way until 1.0.2: strips rendered only at rest and dropped on every move, so panning back rendered again and a zoom showed the base image first.)
+3. **A capture's strips** (detail.js, ui/capture.js): a screenshot or a video frame renders the pages at exactly its resolution, in up to four strips laid over the page. (The view sharpened itself this way until 1.1: strips rendered only at rest and dropped on every move, so panning back rendered again and a zoom showed the base image first.)
 
 How much of each page is on screen, and at what density, is measured by casting rays from a grid of screen points onto the pages (`visiblePages`). The rays meet the cross-section curve itself, not the triangles, so the result is exact at any zoom and angle.
 
@@ -174,7 +174,7 @@ Multisampling is 4× on a high-density screen, 8× otherwise, as far as the card
 
 ### Motion
 
-Motion is drawn at full size, like still frames, screenshots and videos. (Until 1.0.2 a rule drew motion a step smaller when frames came late; the frames that came late were mostly a document loading or tiles going up, and the pages went soft the moment anything moved. It was removed.)
+Motion is drawn at full size, like still frames, screenshots and videos. (Until 1.1 a rule drew motion a step smaller when frames came late; the frames that came late were mostly a document loading or tiles going up, and the pages went soft the moment anything moved. It was removed.)
 
 ## The camera and input
 

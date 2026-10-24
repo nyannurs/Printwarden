@@ -184,7 +184,7 @@ html, body { margin: 0; height: 100%; background: #56575b; color: #fff; font: 13
 #root .pill:disabled { opacity: 0.4; cursor: default; }
 @media (hover: hover) { #root .pill:disabled:hover, #root .pill.label:hover { background: #000; color: #fff; } }
 #root .pill.label { cursor: default; }
-#root select.pill { appearance: none; -webkit-appearance: none; padding-right: 14px; }
+#root select.pill { appearance: none; -webkit-appearance: none; padding-right: 14px; box-sizing: border-box; }
 /* Touch: buttons a finger's size, the menu's text at 16 px (smaller, iOS zooms the page in on it). */
 @media (pointer: coarse) {
   #root .pill { height: 40px; border-radius: 20px; padding: 0 16px; font-size: 15px; }

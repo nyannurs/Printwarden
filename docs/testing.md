@@ -42,6 +42,7 @@ node tools/make-testfiles.mjs
 | `bundle.test.js` | The client viewer's bundle: the right modules, no import left pointing at a file. |
 | `export.test.js` | The imposed export's dialog: the sheet layout chosen in it is the one exported, even with Export pressed at once; the last choice wins. |
 | `drawn.test.js` | The geometry audit's own trustworthiness: the sheets it reads back are where the GPU draws them (every binding, at rest and mid-turn), its coil check finds a wire in the paper, its crossings check finds a sheet pushed through another, a view report rebuilds the scene it came from. |
+| `reports.test.js` | The author's view reports, kept in `reports/` without their pictures: each rebuilt and played on frame by frame, with what looked wrong in it checked (a hardcover's board and case spine turning without a jump). |
 | `harness.js` | The small test harness: `test`, `ok`, `eq`, `near`, `throws`. |
 | `helpers.js` | Helpers only the tests use (`partnerMap`, `manualSetup`). The few things the app exports only for its tests say so where they are defined. |
 

@@ -68,11 +68,18 @@ test("AUDIT: the crossings check finds a sheet pushed through its neighbour", ()
   ok(found.some((c) => c.a === `sheet ${i}` || c.b === `sheet ${i}`), JSON.stringify(found.slice(0, 3)));
 }));
 
-test("AUDIT: a jump is a frame that moves far more than the frames either side", () => {
-  const m = motionRecorder();
-  const at = (y) => new Map([["part", Float32Array.from([0, y, 0])]]);
-  [0, 1, 2, 3, 30, 31, 32].forEach((y, frame) => m.add(frame, at(y)));
-  eq(m.jumps().map((j) => j.frame), [4]);
+test("AUDIT: a jump is a sudden change of motion, not fast motion", () => {
+  const record = (ys) => {
+    const m = motionRecorder();
+    ys.forEach((y, frame) => m.add(frame, new Map([["part", Float32Array.from([0, y, 0])]])));
+    return m.jumps().map((j) => j.frame);
+  };
+  const fast = Array.from({ length: 20 }, (_, f) => 15 * f + 0.05 * f * f); // 15 mm a frame, speeding up
+  eq(record(fast), [], "fast, smooth: none");
+  const snapped = fast.map((y, f) => (f === 9 ? y + 5 : y)); // one frame 5 mm off
+  ok(record(snapped).includes(9), `a frame 5 mm off in fast motion: ${record(snapped)}`);
+  const stepped = fast.map((y, f) => (f >= 9 ? y + 5 : y)); // 5 mm off from then on
+  ok(record(stepped).some((f) => f === 8 || f === 9), `a step in fast motion: ${record(stepped)}`);
 });
 
 test("AUDIT: a view report rebuilds the scene it was taken from: the same sheets, where they were", () => withScene((scene) => {
