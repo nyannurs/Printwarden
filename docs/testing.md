@@ -41,8 +41,24 @@ node tools/make-testfiles.mjs
 | `panel.test.js` | The side panel, built with the app's own stylesheets at several window sizes: every control and label on whole pixels. |
 | `bundle.test.js` | The client viewer's bundle: the right modules, no import left pointing at a file. |
 | `export.test.js` | The imposed export's dialog: the sheet layout chosen in it is the one exported, even with Export pressed at once; the last choice wins. |
+| `drawn.test.js` | The geometry audit's own trustworthiness: the sheets it reads back are where the GPU draws them (every binding, at rest and mid-turn), its coil check finds a wire in the paper, its crossings check finds a sheet pushed through another, a view report rebuilds the scene it came from. |
 | `harness.js` | The small test harness: `test`, `ok`, `eq`, `near`, `throws`. |
 | `helpers.js` | Helpers only the tests use (`partnerMap`, `manualSetup`). The few things the app exports only for its tests say so where they are defined. |
+
+### The geometry audit (`drawn.js`, `audit.html`)
+
+The geometry proof checks the book's model; the audit checks what is drawn. The sheets are built on the graphics card from their cross-sections, so the audit reads every sheet's vertices back from it, through the very shader code the frame uses, and takes the coil, the spine and the folds from their meshes. On that:
+- **Crossings**: the drawn surfaces sliced across the spine at every row of the sheets' meshes and between; two slices crossing are two solids passing through each other. Allowed: neighbors in a stack swung over together (drawn a hair thicker on purpose, `STACK_FILL`), and a spine's part meeting a sheet at its root (a joint, reported as such).
+- **The coil**: along the wire, the clearance between its surface and the nearest paper, the punched holes cut out of the paper as the page shader cuts them.
+- **Stretch**: how much a sheet's drawn faces differ from the paper's size.
+- **Jumps**: frame by frame, a sheet or the coil moving far more in one frame than in the frames either side.
+- **Sequences**: turns, closing and opening at random times (seeded), run frame by frame on the scene's clock; a failing sequence is cut down to the fewest actions that still fail.
+
+Open `tests/audit.html` on the development server; `window.audit` has the book builder, the checks, `fuzz` (random sequences over the bindings) and `loadReport` (a view report rebuilt, with its checks and its picture drawn again).
+
+### View reports
+
+In the app, **Ctrl+Shift+G** (Cmd+Shift+G on a Mac) with a document open saves a view report: the scene's snapshot (the book as built, the paper, the camera, every sheet's motion at that moment), the setup, the file's name and size (not its contents) and a picture of the view. `loadReport` in the audit page rebuilds the same frame from it, without the PDF, and runs the checks on it. A report is what to send with "this looks wrong here".
 
 ### Writing a test
 
@@ -68,7 +84,7 @@ They run the real app from source, off-screen and never focused, so you can keep
 | `proof.mjs` | The geometry proof in Node, spread over all processor cores. `node tools/proof.mjs hardcover` runs the tests whose name contains "hardcover". |
 | `replay.py` | Click sequences in the real app on its own clock, checking every frame for sheets passing through each other, row by row. |
 | `input.py` | Mouse and keyboard on the app's clock: wheel, drag, pan, double space, clicks. Records where the camera and the book end up, to compare two versions. |
-| `renders.py` | Fixed views of a document, saved and compared: a change that shouldn't alter the picture must leave every pixel within 1 or 2 levels. |
+| `renders.py` | Fixed views of a document, saved and compared: a change that shouldn't alter the picture must leave every pixel within 1 or 2 levels. `sheet` makes a contact sheet of two sets: per view before, after, and the pixels that changed in red. |
 | `exports.py` | A 4K screenshot and a short MP4 through the app's own save, timed. |
 | `perf.py` | The frame loop at rest (no frames at all) and dragging (one per refresh), then the performance check's report. |
 | `memory.py` | Memory and idle activity with every page visited. At rest the app should use no processor time. |

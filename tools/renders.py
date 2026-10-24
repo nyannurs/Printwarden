@@ -8,6 +8,8 @@
 #   python tools/renders.py save after perfect spiral  just these bindings
 #   python tools/renders.py compare before after       per view: largest difference, share off
 #   python tools/renders.py compare before after --images   and difference pictures (x8)
+#   python tools/renders.py sheet before after         a contact sheet: per view before, after,
+#                                                      and where they differ (red), one PNG
 #
 # Pictures go to _build/test-out/renders/<label>/.
 import base64, glob, json, os, sys, time
@@ -96,6 +98,48 @@ def compare(a, b, images):
     return worst > 2
 
 
+def sheet(a, b, scale=0.35):
+    """One picture of every view: before | after | where they differ (red over a faint after),
+    a row a view, labelled; for reviewing a change before it is handed over."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    fa_dir, fb_dir = (os.path.join(OUT, "renders", x) for x in (a, b))
+    names = sorted(os.path.basename(f) for f in glob.glob(os.path.join(fa_dir, "*.png")))
+    names = [n for n in names if os.path.exists(os.path.join(fb_dir, n))]
+    if not names:
+        raise SystemExit(f"no views in both {a} and {b}")
+    rows = []
+    for name in names:
+        x = Image.open(os.path.join(fa_dir, name)).convert("RGB")
+        y = Image.open(os.path.join(fb_dir, name)).convert("RGB")
+        w, h = int(x.width * scale), int(x.height * scale)
+        xa, ya = np.asarray(x).astype(int), np.asarray(y).astype(int)
+        changed = np.abs(xa - ya).max(axis=2) > 2
+        faint = (ya * 0.35 + 255 * 0.65).astype(np.uint8)
+        faint[changed] = [220, 30, 30]
+        # Changes a pixel wide still show once scaled down: grown before shrinking.
+        diff = Image.fromarray(faint).resize((w, h), Image.Resampling.BOX)
+        if changed.any():
+            mask = Image.fromarray((changed * 255).astype(np.uint8)).resize((w, h), Image.Resampling.BOX)
+            red = Image.new("RGB", (w, h), (220, 30, 30))
+            diff.paste(red, (0, 0), mask.point(lambda v: 255 if v > 0 else 0))
+        row = Image.new("RGB", (3 * w + 40, h + 28), "white")
+        for k, im in enumerate([x.resize((w, h), Image.Resampling.LANCZOS), y.resize((w, h), Image.Resampling.LANCZOS), diff]):
+            row.paste(im, (10 + k * (w + 10), 24))
+        share = changed.mean() * 100
+        ImageDraw.Draw(row).text((10, 6), f"{name[:-4]}   before | after | changed: {share:.3f} % of the view", fill="black")
+        rows.append(row)
+    out = Image.new("RGB", (rows[0].width, sum(r.height for r in rows)), "white")
+    y = 0
+    for r in rows:
+        out.paste(r, (0, y))
+        y += r.height
+    path = os.path.join(OUT, "renders", f"sheet-{a}-{b}.png")
+    out.save(path)
+    print(f"{len(rows)} views: {path}")
+    return path
+
+
 if __name__ == "__main__":
     pdf, args = pdf_arg(sys.argv[1:])
     if len(args) >= 2 and args[0] == "save":
@@ -105,4 +149,7 @@ if __name__ == "__main__":
         sys.exit(1 if save(args[1], args[2:] or BINDINGS, pdf) else 0)
     if len(args) >= 3 and args[0] == "compare":
         sys.exit(1 if compare(args[1], args[2], "--images" in args) else 0)
-    raise SystemExit("python tools/renders.py save <label> [--pdf FILE] [binding ...] | compare <a> <b> [--images]")
+    if len(args) >= 3 and args[0] == "sheet":
+        sheet(args[1], args[2])
+        sys.exit(0)
+    raise SystemExit("python tools/renders.py save <label> [--pdf FILE] [binding ...] | compare <a> <b> [--images] | sheet <a> <b>")

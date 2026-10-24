@@ -47,6 +47,7 @@ Along the top are **Import**, **Export** and the document's name.
 | Mouse wheel | Zooms toward the middle of the view, gliding. Over a page, the camera stops at the paper instead of passing through. |
 | Click a page | Turns it: right of the spine forward, left of it back. A closed book opens. |
 | Ctrl+Shift+P (Cmd+Shift+P on a Mac) | Runs the performance check (see below). |
+| Ctrl+Shift+G (Cmd+Shift+G on a Mac) | Saves a view report: the view as it is this moment, to send the developer with what looks wrong in it. |
 
 The buttons over the view:
 - **Camera** opens the presets: **Reading view, Isometric, Top down, Front, Side, Floating**. Floating lifts the book off the table and tilts it in space. The reading view differs for an open and a closed book.

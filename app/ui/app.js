@@ -27,6 +27,7 @@ import { importFinish, openFinishDialog } from "./finish.js";
 import { Inspector } from "./inspector.js";
 import { forgetThumbnails, loadAllTextures, thumbnail } from "./pages.js";
 import { initPlates, refreshPlates, resetPlates } from "./plates.js";
+import { initViewReport } from "./report.js";
 import { applySpine, importSpineArt, openSpinePanel, renderSpineArt, updateSpinePanel } from "./spine-panel.js";
 import { initView, setBackground, showZoom } from "./view.js";
 import { resetTiles, tileStats, updateTiles } from "./tiles.js";
@@ -458,6 +459,7 @@ onMenuCommand((command) => {
 
 initView();
 initPlates();
+initViewReport();
 scene.setPageKind("ink"); // the pages' textures are their inks (pdf/mupdf-render.js), before any book
 
 // Load the render workers while the app sits idle: the first import starts instantly.

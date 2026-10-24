@@ -406,6 +406,40 @@ export class BookScene {
     uploads.refreshSpots(this);
   }
 
+  /**
+   * Everything the frame on screen is made from, as plain data (a view report, ui/report.js):
+   * the book as built (setBook's spec) and its paper, the camera, and every sheet's motion
+   * at this moment, its times relative to now. tests/drawn.js restoreView builds the same
+   * frame from it, on a scene of its own: the geometry needs no PDF.
+   */
+  snapshot() {
+    const now = this.#now();
+    const rel = (t) => (t == null ? null : t - now);
+    const rig = this.rig;
+    return {
+      book: this.bookSpec,
+      paper: this.paper,
+      preset: this.preset,
+      opening: this.opening,
+      closed: this.closed,
+      closedSide: this.closedSide,
+      closeAnim: this.closeAnim ? { ...this.closeAnim, start: rel(this.closeAnim.start) } : null,
+      coverShift: this.coverShift,
+      pageFrame: this.pageFrame,
+      coverFrame: this.coverFrame,
+      focus: this.focus,
+      turnMs: this.turnMs,
+      closeMs: this.closeMs,
+      leaves: this.leaves.map((l) => ({
+        theta: l.theta, from: l.from, to: l.to, start: rel(l.start), duration: l.duration,
+        curl: l.curl, curlFrom: l.curlFrom, settle: l.settle,
+      })),
+      rig: { azimuth: rig.azimuth, elevation: rig.elevation, zoom: rig.zoom, pan: { ...rig.pan }, free: rig.free },
+      zoomBias: this.zoomBias,
+      canvas: { width: this.renderer.domElement.width, height: this.renderer.domElement.height, pixelRatio: this.renderer.getPixelRatio() },
+    };
+  }
+
   /** See uploads.js queueTile. */
   queueTile(folio, level, ix, iy, page, tile, stamp) {
     uploads.queueTile(this, folio, level, ix, iy, page, tile, stamp);
@@ -421,6 +455,7 @@ export class BookScene {
    */
   setBook(spec) {
     this.#disposeBook();
+    this.bookSpec = spec; // as given: a view report rebuilds the book from it (snapshot)
     const { width, height } = spec.pageSize;
     this.model = makeBook({
       pageCount: spec.pageCount,

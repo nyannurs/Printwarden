@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Printwarden geometry audit</title>
+  <style>
+    body { font: 13px/1.5 system-ui, sans-serif; margin: 24px; background: #fff; color: #222; }
+    pre { white-space: pre-wrap; }
+    #view { position: fixed; left: -2000px; top: 0; width: 640px; height: 400px; }
+  </style>
+</head>
+<body>
+  <div id="view"></div>
+  <pre id="out">Loading…</pre>
+  <script type="importmap">{ "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/three-addons/" } }</script>
+  <script type="module">
+    // The geometry audit (tests/drawn.js), for development: open with ?binding=spiral&pages=44
+    // to look at one book; the scripts in tools/ drive it. window.audit holds the API.
+    import { BookScene } from "../app/viewer/scene.js";
+    import * as drawn from "./drawn.js";
+    const stock = { color: "#ffffff", roughness: 0.85, specular: 0.3, clearcoat: 0, show: 0.1 };
+    const paperOf = (thickness = 0.1, cover = 0.3) => ({ ...stock, cover: { ...stock, color: "#d8d0c0" }, thickness, coverThickness: cover, gsm: 120, finish: "uncoated" });
+    const scene = new BookScene(document.getElementById("view"));
+    const book = (binding, pageCount, paper = paperOf()) => {
+      scene.setBook({ pageCount, pageSize: { width: 148, height: 210 }, binding, paper, signaturePages: 16 });
+      scene.clock = 1e6;
+      scene.debugStep();
+    };
+    /**
+     * Random sequences on books (bindings × page counts), each checked frame by frame; each
+     * failing one cut down to its fewest actions. Runs in the background: progress and results
+     * in window.audit.result as they come.
+     */
+    async function fuzz({ bindings = ["saddle", "perfect", "sewn", "hardcover", "spiral", "wire-o"], pages = [44], seeds = 4, actions = 8, every = 2, between = 1, cut = true } = {}) {
+      const result = { done: false, runs: 0, faults: [] };
+      window.audit.result = result;
+      for (const binding of bindings) {
+        for (const count of pages) {
+          for (let seed = 1; seed <= seeds; seed++) {
+            book(binding, count);
+            const seq = drawn.randomSequence(seed, scene.model.leafCount, { actions });
+            const options = { every, between };
+            const run = drawn.runSequence(scene, seq, options);
+            result.runs++;
+            if (run.faults.length) {
+              const short = cut ? drawn.shrink(scene, seq, options) : seq;
+              const again = drawn.runSequence(scene, short, options);
+              result.faults.push({ binding, pages: count, seed, sequence: short, first: again.faults.slice(0, 4) });
+            }
+            await new Promise((r) => setTimeout(r, 0));
+          }
+        }
+      }
+      result.done = true;
+      return result;
+    }
+    /**
+     * A view report (the app's Cmd/Ctrl+Shift+G) rebuilt: the view sized as it was, the scene
+     * put into its state, its checks, and the picture drawn again here (pages blank: the
+     * geometry is what this is for) beside the one in the report.
+     */
+    async function loadReport(report) {
+      const { width, height, pixelRatio } = report.scene.canvas;
+      const view = document.getElementById("view");
+      view.style.width = `${Math.round(width / pixelRatio)}px`;
+      view.style.height = `${Math.round(height / pixelRatio)}px`;
+      scene.renderer.setPixelRatio(pixelRatio);
+      scene.setPixelBudget(Infinity);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      drawn.restoreView(scene, report);
+      const checks = drawn.checkNow(scene);
+      const picture = await scene.captureImage({ width, height });
+      return { checks, picture: URL.createObjectURL(picture), theirs: report.picture };
+    }
+    window.audit = { scene, drawn, book, paperOf, fuzz, loadReport };
+    document.getElementById("out").textContent = "ready";
+  </script>
+</body>
+</html>

@@ -25,6 +25,7 @@ What it adds is the window, the controls, and the bookkeeping of which page has 
 | `finish.js` | Spot finishes. |
 | `compass.js` | The view's compass. |
 | `probe.js` | The performance check. |
+| `report.js` | The view report (Ctrl/Cmd+Shift+G): the scene's snapshot, the setup and a picture, saved as one file (see [Testing](testing.md#view-reports)). |
 | `dom.js` | Shared pieces: toasts, the loading bar, the progress window, pills, the app's own scrollbars and dropdown lists, whole-pixel placement. |
 
 Beside them, `app/platform.js` is the only place that knows whether the app runs in the desktop shell or a browser. It covers:
