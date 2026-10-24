@@ -6,7 +6,7 @@ import { rememberDroppedFile } from "../platform.js";
 import { CAMERA_PRESETS } from "../viewer/camera.js";
 import { inspector, scene, startImport, state } from "./app.js";
 import { reportDialog } from "./dialogs.js";
-import { $, fitPill, toast } from "./dom.js";
+import { $, addMenu, fitPill, menuOpening, toast } from "./dom.js";
 import { runProbe } from "./probe.js";
 
 const VIEW_PREF = "cameraPreset";
@@ -44,6 +44,7 @@ function choosePreset(id, { remember = true } = {}) {
   }
 }
 function toggleViewMenu(open = viewMenu.hidden) {
+  if (open) menuOpening(viewMenu.parentElement);
   viewMenu.hidden = !open;
   viewBtn.setAttribute("aria-expanded", String(open));
   if (open) /** @type {HTMLElement} */ (viewMenu.querySelector('[aria-checked="true"]'))?.focus();
@@ -147,9 +148,7 @@ export function initView() {
     viewMenu.append(b);
   }
   viewBtn.addEventListener("click", () => toggleViewMenu());
-  document.addEventListener("pointerdown", (e) => {
-    if (!viewMenu.hidden && !/** @type {Element} */ (e.target).closest(".menu")) toggleViewMenu(false);
-  });
+  addMenu(viewMenu.parentElement, () => { if (!viewMenu.hidden) toggleViewMenu(false); });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !viewMenu.hidden) toggleViewMenu(false);
   });

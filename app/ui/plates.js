@@ -12,7 +12,7 @@
 import { naiveLut, inkToRgb } from "../viewer/inklut.js";
 import { state } from "./app.js";
 import { setPlates } from "./colour.js";
-import { $ } from "./dom.js";
+import { $, addMenu, menuOpening } from "./dom.js";
 
 // The process inks on the screen as ISO Coated v2 prints them solid (C 0/159/227, M 229/0/125,
 // Y 255/237/0, K 29/29/27): what the circles show.
@@ -59,9 +59,7 @@ export function initPlates() {
   makeRow("Process plates", null, () => setInks(inkOn.every(Boolean) ? [false, false, false, false] : [true, true, true, true]));
   PROCESS.forEach((ink, i) => makeRow(ink.name, ink.color, () => setInks(inkOn.map((on, j) => (j === i ? !on : on)))));
   button.addEventListener("click", () => toggle());
-  document.addEventListener("pointerdown", (e) => {
-    if (!panel.hidden && !/** @type {Element} */ (e.target).closest("#plates-btn, #plates-panel")) toggle(false);
-  });
+  addMenu(panel.parentElement, () => { if (!panel.hidden) toggle(false); });
   panel.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       toggle(false);
@@ -76,6 +74,7 @@ export function initPlates() {
 }
 
 function toggle(open = panel.hidden) {
+  if (open) menuOpening(panel.parentElement);
   panel.hidden = !open;
   button.setAttribute("aria-expanded", String(open));
   if (open) {

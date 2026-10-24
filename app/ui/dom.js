@@ -3,6 +3,27 @@
 
 export const $ = (id) => document.getElementById(id);
 
+/**
+ * The menus beside the 3D view (the camera's, the Separations'): one open at a time. A menu
+ * registers how it closes; opening one closes the others, however it was opened, and a press
+ * anywhere outside a menu's own button and list closes it. (Until 1.1.0 each closed on a press
+ * outside any menu: the author opened the Separations with the camera menu open, and both stayed.)
+ * @type {{root: Element, close: () => void}[]}
+ */
+const menus = [];
+export function addMenu(root, close) {
+  menus.push({ root, close });
+  if (menus.length === 1) {
+    document.addEventListener("pointerdown", (e) => {
+      for (const m of menus) if (!m.root.contains(/** @type {Node} */ (e.target))) m.close();
+    });
+  }
+}
+/** A menu opening: the others close. */
+export function menuOpening(root) {
+  for (const m of menus) if (m.root !== root) m.close();
+}
+
 // --- whole pixels ------------------------------------------------------------------------
 //
 // The layout is made of whole pixels (theme.css), but what the browser centres (a dialog, the
