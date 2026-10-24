@@ -180,13 +180,10 @@ export function makeLeaf(scene, i) {
   first.raycast = () => {};
   mesh.add(first);
   const profile = { x: new Float32Array(n), y: new Float32Array(n), phi: new Float32Array(n) };
-  // Paper never lines up perfectly: each leaf a fixed hair off at the fore-edge and along
-  // the spine (tenths of a millimetre).
-  const jitter = { fore: (hash(i * 2 + 1) - 0.5) * 0.16, along: (hash(i * 2 + 2) - 0.5) * 0.1 };
   // The faces between a flying stack's sheets (see layoutLeaves): each its page's image,
   // unlit (see inkFiller).
   const fillers = [inkFiller(scene, front), inkFiller(scene, back)];
-  const leaf = { i, mesh, first, geo, front, back, fillers, profile, jitter, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
+  const leaf = { i, mesh, first, geo, front, back, fillers, profile, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
@@ -525,7 +522,7 @@ export function pageHit(model, leaf, ray, front, near = 0, far = Infinity) {
     const facing = d.x * Math.cos(f) - d.y * Math.sin(f) > 0;
     if (front !== null && facing !== front) continue;
     const z = o.z + d.z * t;
-    const v = (z - leaf.jitter.along + model.height / 2) / model.height;
+    const v = (z + model.height / 2) / model.height;
     if (v < -0.05 || v > 1.05) continue;
     const u = (leaf.uStart + s[k] + (s[k + 1] - s[k]) * a) / model.width;
     best = t;
@@ -601,8 +598,8 @@ function twin(m, base) {
 
 /**
  * Write a sheet into the sheets texture (layout: makeSheets): its settings (the bow of each
- * row; half its drawn thickness; where it starts along the spine and how tall it is; how far
- * its fore-edge sits out; whether its rows differ; its point count), its middle cross-
+ * row; half its drawn thickness; where it starts along the spine and how tall it is; whether
+ * its rows differ; its point count), its middle cross-
  * section, and while a corner leads, its other rows: per point x, y, angle, and how far it
  * is from the spine (straight across, over the sheet's width: the bow grows with it).
  */
@@ -618,18 +615,13 @@ export function packSheet(leaf, sheets, thickness) {
   data[o + 8] = b[8];
   const fill = leaf.fill ?? LEAF_FILL;
   data[o + 9] = (thickness * fill) / 2;
-  // Sheets of a stack swung over together (STACK_FILL, see layoutLeaves) end flush: between
-  // them no face is drawn, so a sheet standing a hair past its neighbour left a window the
-  // hair wide straight through the stack, at every sheet. Seen from the fore-edge or the
-  // head, with multisampling a faint line a sheet; without it (ANGLE over Metal gives the
-  // canvas none), at a lowered motion resolution, dashes of background across the stack's
-  // edges: the author's "see-through, flickering stack" (0.17.83 to 0.17.87).
-  const flush = fill >= 1;
-  data[o + 10] = -leaf.height / 2 + (flush ? 0 : leaf.jitter.along);
+  // Every sheet's edges flush with the others'. (Until 1.1 each stood a fixed hair off, at
+  // the fore-edge and along the spine, "as paper never lines up": it looked ragged, and a
+  // stitched book's spine, drawn as one solid, didn't meet its sheets; the author, 2026-10-24.)
+  data[o + 10] = -leaf.height / 2;
   data[o + 11] = leaf.height;
-  data[o + 12] = flush ? 0 : leaf.jitter.fore;
-  data[o + 13] = leaf.rowsActive ? 1 : 0;
-  data[o + 14] = n;
+  data[o + 12] = leaf.rowsActive ? 1 : 0;
+  data[o + 13] = n;
   const row = (p, y) => {
     let q = 4 * (y * width + x0);
     const ox = p.x[0];
@@ -658,8 +650,8 @@ function sheetBounds(leaf, thickness) {
       y0 = Math.min(y0, p.y[k]); y1 = Math.max(y1, p.y[k]);
     }
   }
-  const out = (thickness * LEAF_FILL) / 2 + Math.max(...leaf.bows.map(Math.abs)) + Math.abs(leaf.jitter.fore);
-  _bounds.center.set((x0 + x1) / 2, (y0 + y1) / 2, leaf.jitter.along);
+  const out = (thickness * LEAF_FILL) / 2 + Math.max(...leaf.bows.map(Math.abs));
+  _bounds.center.set((x0 + x1) / 2, (y0 + y1) / 2, 0);
   _bounds.radius = Math.hypot(x1 - x0, y1 - y0, leaf.height) / 2 + out;
   return _bounds;
 }
@@ -712,7 +704,7 @@ function writeLeafGeometry(leaf, geo, t) {
   // Each row its own cross-section while the leaf turns by a corner (see layoutRows).
   const rowOf = (r) => (leaf.rowsActive ? leaf.rows[r] : leaf.profile);
   const half = t * LEAF_FILL / 2;
-  const z0 = -height / 2 + leaf.jitter.along;
+  const z0 = -height / 2;
   const set = (v, px, py, pz) => {
     pos[3 * v] = px;
     pos[3 * v + 1] = py;
@@ -728,8 +720,6 @@ function writeLeafGeometry(leaf, geo, t) {
   const ROOT = FORE + 2 * R;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; // for the bounding sphere
   for (let k = 0; k < n; k++) {
-    // The fore-edge sits a hair out or in (paper never lines up perfectly).
-    const ext = k === n - 1 ? leaf.jitter.fore : 0;
     // Per cross-section, worked out once (the rows share one unless a corner leads).
     let p = null, nx = 0, ny = 0, cx = 0, cy = 0, a = 0;
     for (let r = 0; r < R; r++) {
@@ -739,8 +729,8 @@ function writeLeafGeometry(leaf, geo, t) {
         const cos = Math.cos(p.phi[k]);
         nx = -cos;
         ny = sin;
-        cx = p.x[k] + sin * ext;
-        cy = p.y[k] + cos * ext;
+        cx = p.x[k];
+        cy = p.y[k];
         a = Math.min(1, Math.hypot(p.x[k] - p.x[0], p.y[k] - p.y[0]) / width); // 0 at the spine, 1 at the fore-edge
       }
       const zz = (2 * r) / (R - 1) - 1;
@@ -776,10 +766,4 @@ function writeLeafGeometry(leaf, geo, t) {
   const sphere = (geo.boundingSphere ??= new THREE.Sphere());
   sphere.center.set((x0 + x1) / 2, (y0 + y1) / 2, z0 + height / 2);
   sphere.radius = Math.hypot(x1 - x0, y1 - y0, height) / 2;
-}
-
-/** A fixed pseudo-random number in [0, 1) for an integer (the same every time). */
-function hash(n) {
-  const v = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-  return v - Math.floor(v);
 }

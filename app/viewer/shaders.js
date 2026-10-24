@@ -200,7 +200,6 @@ bool sheetRowsOn;
 float sheetHalf;
 float sheetZ0;
 float sheetHeight;
-float sheetFore;
 vec4 sheetBowsA;
 vec4 sheetBowsB;
 float sheetBow8;
@@ -217,9 +216,8 @@ void sheetLoad( int sheet ) {
   sheetHalf = a.y;
   sheetZ0 = a.z;
   sheetHeight = a.w;
-  sheetFore = b.x;
-  sheetRowsOn = b.y > 0.5;
-  sheetN = int( b.z + 0.5 );
+  sheetRowsOn = b.x > 0.5;
+  sheetN = int( b.y + 0.5 );
 }
 float sheetBow( int r ) {
   return r < 4 ? sheetBowsA[ r ] : r < 8 ? sheetBowsB[ r - 4 ] : sheetBow8;
@@ -230,10 +228,9 @@ vec3 sheetPoint( int k, int r, float side ) {
   vec4 t = texelFetch( uSheets, sheetBlock + ivec2( k, y ), 0 );
   float s = sin( t.z );
   float c = cos( t.z );
-  float ext = k == sheetN - 1 ? sheetFore : 0.0;
   float zz = 2.0 * float( r ) / float( SHEET_ROWS - 1 ) - 1.0;
   float d = sheetBow( r ) * t.w * t.w * ( 0.4 + 0.6 * zz * zz );
-  vec2 p = t.xy + vec2( s, c ) * ext + vec2( - c, s ) * ( side * ( sheetHalf + uSheetLift ) + d );
+  vec2 p = t.xy + vec2( - c, s ) * ( side * ( sheetHalf + uSheetLift ) + d );
   return vec3( p, sheetZ0 + sheetHeight * float( r ) / float( SHEET_ROWS - 1 ) );
 }
 vec3 sheetPosition() {
