@@ -649,7 +649,8 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 /* ---------- separations (plates.js) ---------- */
 /* A column of pills to the Separations button's left, as the camera menu's (.menu-list): four
    squares wide, a pill a plate, sharing lines. A pill: its ink's circle in the middle of its
-   first square, its name from the second square. Not inverted while its plate prints (most
+   first square, its name centred on the pill as the camera menu's are (a square kept clear at
+   either end, so a long name never runs under the circle). Not inverted while its plate prints (most
    do, most of the time: a white column): the circle says it. Printing, it is filled with the
    ink (ringed, as the swatches, so black shows on the black); left out, it is an outline in the
    ink and the name is muted. Process plates: an empty circle, ringed white. (Until 1.1.0 one
@@ -658,8 +659,7 @@ select.open, select:focus-visible:not([data-pointer]) { background-color: var(--
 .pill.plate-item {
   --dot: var(--control); /* as large as the panel's swatches */
   position: relative;
-  padding-left: var(--u);
-  text-align: left;
+  padding-inline: var(--u);
 }
 .pill.plate-item[aria-checked] { background-color: var(--ink); color: var(--wire); }
 .pill.plate-item:hover:not(:disabled, .pressed) { background-color: var(--ink-raised); }
