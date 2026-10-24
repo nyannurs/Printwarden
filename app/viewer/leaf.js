@@ -167,13 +167,11 @@ export function makeLeaf(scene, i) {
   mesh.frustumCulled = false;
   mesh.customDepthMaterial = scene.sheetDepth;
   scene.block.add(mesh);
-  // On Apple's GPUs, the faces' depth alone, drawn for every sheet before any is shaded:
-  // then only the face in front is shaded at each point. (There, every shader drawing with
-  // multisampling also writes which samples it covers: Chromium's ANGLE works so over
-  // Metal. The GPU then can't skip hidden points before shading them: an open book's piles
-  // were shaded sheet by sheet, half the frame at full resolution. Elsewhere, drawn
-  // nearest first, hidden points are skipped anyway, and the extra pass only costs: 1-2 ms
-  // a frame at 4K on an RTX 4060.)
+  // When switched on (scene.depthFirst; off since 2026-10-24, see scene.js), the faces' depth
+  // alone, drawn for every sheet before any is shaded: then only the face in front is shaded
+  // at each point. (Over Metal, ANGLE has every shader drawing with multisampling write which
+  // samples it covers, so the GPU can't skip hidden points: an open book's piles were shaded
+  // sheet by sheet. On the author's M4 Pro the pass now costs more than it saves.)
   const first = new THREE.Mesh(geo, [firstMaterial(scene, true), firstMaterial(scene, false), scene.noDraw, ...scene.holesFirst]);
   first.frustumCulled = false;
   first.visible = scene.depthPass;

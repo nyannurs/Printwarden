@@ -4,8 +4,10 @@
 // the image switched off each time, then turns pages quickly; times every frame as the
 // screen shows it. The parts that change the result most are what limits this computer.
 // Last, it asks for a few seconds of panning by hand and measures the mouse's own rate and
-// what was drawn: a frame can only be drawn when the mouse reports a move. About 35 seconds
-// and the hand panning; everything is put back as it was.
+// what was drawn: a frame can only be drawn when the mouse reports a move. Then the sheets'
+// depth drawn first or not (see makeLeaf), dragging round three more views: the closed book,
+// the open book as framed, its piles from low at the fore-edge. About 50 seconds and the hand
+// panning; everything is put back as it was.
 
 const SECONDS = 2.2; // each run; the first 0.4 s isn't counted (shaders compiling)
 
@@ -175,6 +177,33 @@ export async function runProbe(scene, onProgress) {
       await turning(first ? "  sheets' depth not first" : "  sheets' depth first");
     } finally {
       scene.depthFirst = first;
+    }
+    // The sheets' depth first or not, by view: each dragged round both ways, from its own place.
+    const views = [
+      { label: "Closed book", open: () => {
+        scene.goTo(0, { animate: false });
+        scene.setClosed(true, { animate: false });
+      }, at: { zoom: 1, azimuth: rig.home.azimuth, elevation: rig.home.elevation } },
+      { label: "Open book, framed", open: () => {
+        scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
+      }, at: { zoom: 1, azimuth: rig.home.azimuth, elevation: rig.home.elevation } },
+      { label: "Low at the fore-edge", open: () => {
+        scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
+      }, at: { zoom: 0.6, azimuth: rig.home.azimuth + Math.PI / 2, elevation: 0.12 } },
+    ];
+    for (const { label, open, at } of views) {
+      lines.push("");
+      open();
+      const place = () => {
+        rig.free = true;
+        rig.pan = { x: 0, y: 0, z: 0 };
+        Object.assign(rig, at);
+        scene.zoomBias = 1;
+      };
+      place();
+      await dragging(`${label}, as is`);
+      place();
+      await dragging(first ? "  sheets' depth not first" : "  sheets' depth first", () => { scene.depthFirst = !first; }, () => { scene.depthFirst = first; });
     }
   } finally {
     scene.debugNoPivot = false;

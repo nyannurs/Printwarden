@@ -246,7 +246,11 @@ export class BookScene {
     this.sheetDepth.onBeforeCompile = (shader) => sheetShader(shader, this.shared);
     this.sheetDepth.customProgramCacheKey = () => "bookview-sheet";
     this.noDraw = new THREE.MeshBasicMaterial({ visible: false });
-    this.depthPass = isAppleMetal(r); // the sheets' depth drawn first (see makeLeaf)
+    // The sheets' depth drawn first (see makeLeaf): off. (On by Apple's GPUs until 2026-10-24,
+    // where it halved the frame's shading; the author's M4 Pro now measures it the other way:
+    // dragging round a 120-sheet book, 34 fps with it, 61 without. Kept switchable for the
+    // performance check's comparison, by view, until its runs on both computers agree.)
+    this.depthPass = false;
     this.holesFirst = [firstMaterial(this, true, true), firstMaterial(this, false, true)]; // a coil's (see makeLeaf)
     this.sheetFiller = fillerMaterial(this); // the faces between a flying stack's sheets (see layoutLeaves)
     // Cotton headbands: the bead and its cloth tail (a single sheet: seen from either side).
@@ -1348,14 +1352,3 @@ export class BookScene {
 
 }
 
-/** Whether the renderer draws on an Apple GPU (through Metal, as every browser there does; see makeLeaf). */
-function isAppleMetal(renderer) {
-  const gl = renderer.getContext();
-  const info = gl.getExtension("WEBGL_debug_renderer_info");
-  const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
-  // Chromium and the app name the chip ("ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro…)");
-  // Safari, and every browser on an iPhone or iPad (they all run Safari's engine), say only
-  // "Apple GPU". Asking for "Metal" too, the client viewer there drew without the depth pass:
-  // 15 to 20 fps once the open book's sheet stacks were in view (0.17.97).
-  return /Apple/.test(name);
-}
