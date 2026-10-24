@@ -167,21 +167,11 @@ export function makeLeaf(scene, i) {
   mesh.frustumCulled = false;
   mesh.customDepthMaterial = scene.sheetDepth;
   scene.block.add(mesh);
-  // When switched on (scene.depthFirst; off since 2026-10-24, see scene.js), the faces' depth
-  // alone, drawn for every sheet before any is shaded: then only the face in front is shaded
-  // at each point. (Over Metal, ANGLE has every shader drawing with multisampling write which
-  // samples it covers, so the GPU can't skip hidden points: an open book's piles were shaded
-  // sheet by sheet. On the author's M4 Pro the pass now costs more than it saves.)
-  const first = new THREE.Mesh(geo, [firstMaterial(scene, true), firstMaterial(scene, false), scene.noDraw, ...scene.holesFirst]);
-  first.frustumCulled = false;
-  first.visible = scene.depthPass;
-  first.raycast = () => {};
-  mesh.add(first);
   const profile = { x: new Float32Array(n), y: new Float32Array(n), phi: new Float32Array(n) };
   // The faces between a flying stack's sheets (see layoutLeaves): each its page's image,
   // unlit (see inkFiller).
   const fillers = [inkFiller(scene, front), inkFiller(scene, back)];
-  const leaf = { i, mesh, first, geo, front, back, fillers, profile, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
+  const leaf = { i, mesh, geo, front, back, fillers, profile, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
@@ -285,7 +275,6 @@ function pageMaterial(scene, isFront, holesOf = null) {
     specularIntensity: 0.2,
     clearcoat: 0.001,
     clearcoatRoughness: 0.3,
-    depthWrite: !scene.depthPass, // else already drawn (see makeLeaf)
   });
   m.userData.uniforms = holesOf?.userData.uniforms ?? {
     uBack: { value: scene.blank },
@@ -466,26 +455,6 @@ export function fillerMaterial(scene) {
   const m = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   m.onBeforeCompile = (shader) => sheetShader(shader, scene.shared);
   m.customProgramCacheKey = () => "bookview-sheet-filler";
-  return m;
-}
-
-/** A sheet face's depth alone (see makeLeaf); `holes`: a coil's, punched as on the page. */
-export function firstMaterial(scene, isFront, holes = false) {
-  const m = new THREE.MeshDepthMaterial({ colorWrite: false, map: holes ? scene.white : null });
-  m.onBeforeCompile = (shader) => {
-    sheetShader(shader, scene.shared);
-    if (!holes) return;
-    Object.assign(shader.uniforms, { uHoles: scene.shared.uHoles, uPageSize: scene.shared.uPageSize, uSpineAtU0: { value: isFront ? 1 : 0 } });
-    shader.fragmentShader = patchShader(shader.fragmentShader, [
-      ["void main() {", `uniform vec4 uHoles;
-uniform vec2 uPageSize;
-uniform float uSpineAtU0;
-void main() {
-${HOLE_DISCARD}`],
-      ["#include <map_fragment>", ""],
-    ]);
-  };
-  m.customProgramCacheKey = () => (holes ? "bookview-first-holes" : "bookview-first");
   return m;
 }
 

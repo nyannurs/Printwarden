@@ -4,10 +4,12 @@
 // the image switched off each time, then turns pages quickly; times every frame as the
 // screen shows it. The parts that change the result most are what limits this computer.
 // Last, it asks for a few seconds of panning by hand and measures the mouse's own rate and
-// what was drawn: a frame can only be drawn when the mouse reports a move. Then the sheets'
-// depth drawn first or not (see makeLeaf), dragging round three more views: the closed book,
-// the open book as framed, its piles from low at the fore-edge. About 50 seconds and the hand
-// panning; everything is put back as it was.
+// what was drawn: a frame can only be drawn when the mouse reports a move. Then dragging round
+// three more views: the closed book, the open book as framed, its piles from low at the
+// fore-edge. Turning pages, the main thread's time is broken down by part (FRAME_PARTS in
+// scene.js). About 45 seconds and the hand panning; everything is put back as it was.
+
+import { FRAME_PARTS } from "../viewer/scene.js";
 
 const SECONDS = 2.2; // each run; the first 0.4 s isn't counted (shaders compiling)
 
@@ -47,8 +49,9 @@ export async function runProbe(scene, onProgress) {
   };
   // The graphics card's time for the frames of a run, where it can be timed (see #adaptResolution).
   const gpuNow = (since) => (scene.gpuTime.timer && scene.gpuTime.at > since ? scene.gpuTime.ms : null);
-  // One run: `step` moves something every frame; frames and main-thread time measured.
-  const run = async (label, step) => {
+  // One run: `step` moves something every frame; frames and main-thread time measured;
+  // `parts`: that time by part too, on a line of its own.
+  const run = async (label, step, { parts = false } = {}) => {
     onProgress?.(label);
     const log = scene.frameLog;
     const ivals = [];
@@ -73,6 +76,14 @@ export async function runProbe(scene, onProgress) {
     }
     for (let k = n0; k < log.n; k++) cpu.push(log.cpu[k % log.time.length]);
     lines.push(`${label.padEnd(28)} ${ivals.length ? stats(ivals, cpu.length ? cpu : [0], gpu) : "no frames"}`);
+    if (parts && log.n > n0) {
+      const mean = (a) => {
+        let sum = 0;
+        for (let k = n0; k < log.n; k++) sum += a[k % log.time.length];
+        return sum / (log.n - n0);
+      };
+      lines.push(`  main thread by part:  ${FRAME_PARTS.map((name, i) => `${name} ${mean(log.parts[i]).toFixed(1)}`).join("   ")}  (ms a frame)`);
+    }
   };
   const orbit = (k) => scene.rig.drag(Math.cos(k * 2.1) * 7, Math.sin(k * 1.4) * 5);
   const dragging = async (label, apply, undo) => {
@@ -156,29 +167,34 @@ export async function runProbe(scene, onProgress) {
     }, () => {
       for (const l of scene.leaves) l.mesh.visible = true;
     });
-    const first = scene.depthFirst;
-    await dragging(first ? "  sheets' depth not first" : "  sheets' depth first", () => { scene.depthFirst = !first; }, () => { scene.depthFirst = first; });
     lines.push("");
     // Pages turned quickly: one every 150 ms, forward then back.
-    const turning = async (label) => {
+    const turning = async (label, apply, undo) => {
       scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2) - 6), { animate: false });
       let turned = 0;
-      await run(label, (k) => {
-        const want = Math.floor(k / 0.15);
-        while (turned < want) {
-          turned++;
-          scene.goTo(scene.opening + (turned <= 7 ? 1 : -1));
-        }
-      });
+      apply?.();
+      try {
+        await run(label, (k) => {
+          const want = Math.floor(k / 0.15);
+          while (turned < want) {
+            turned++;
+            scene.goTo(scene.opening + (turned <= 7 ? 1 : -1));
+          }
+        }, { parts: true });
+      } finally {
+        undo?.();
+      }
     };
     await turning("Turning pages quickly");
-    scene.depthFirst = !first;
-    try {
-      await turning(first ? "  sheets' depth not first" : "  sheets' depth first");
-    } finally {
-      scene.depthFirst = first;
-    }
-    // The sheets' depth first or not, by view: each dragged round both ways, from its own place.
+    await turning("  no shadows", () => {
+      scene.key.castShadow = false;
+      for (const m of pages()) m.needsUpdate = true;
+    }, () => {
+      scene.key.castShadow = true;
+      r.shadowMap.needsUpdate = true;
+      for (const m of pages()) m.needsUpdate = true;
+    });
+    // Dragging round more views, each from its own place.
     const views = [
       { label: "Closed book", open: () => {
         scene.goTo(0, { animate: false });
@@ -191,8 +207,8 @@ export async function runProbe(scene, onProgress) {
         scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
       }, at: { zoom: 0.6, azimuth: rig.home.azimuth + Math.PI / 2, elevation: 0.12 } },
     ];
+    lines.push("");
     for (const { label, open, at } of views) {
-      lines.push("");
       open();
       const place = () => {
         rig.free = true;
@@ -201,9 +217,7 @@ export async function runProbe(scene, onProgress) {
         scene.zoomBias = 1;
       };
       place();
-      await dragging(`${label}, as is`);
-      place();
-      await dragging(first ? "  sheets' depth not first" : "  sheets' depth first", () => { scene.depthFirst = !first; }, () => { scene.depthFirst = first; });
+      await dragging(label);
     }
   } finally {
     scene.debugNoPivot = false;

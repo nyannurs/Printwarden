@@ -101,7 +101,6 @@ In a stack turning together, a sheet's face against the next sheet can't be seen
 ### Order and depth
 
 - **Nearest first** (draw.js `drawOrder`): sheets are sorted by distance from the camera, so the graphics card skips what lies behind a sheet already drawn.
-- **Depth first** (`depthFirst`): the sheets' depth drawn in a pass before their color, so a tile-based GPU shades only the sheet in front. Off since 2026-10-24: on the author's M4 Pro it now costs more than it saves (dragging round a 120-sheet book, 34 fps with it, 61 without). It was on for Apple GPUs from 0.17.97, when the client viewer's open stacks dropped to 15 to 20 fps on an iPhone and in Safari without it: to measure again there before the pass goes for good. The performance check compares it, by view.
 
 ## Shading
 

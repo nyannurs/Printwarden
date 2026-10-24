@@ -23,7 +23,7 @@ import { layoutGround, makeExtras } from "./extras.js";
 import { frameCamera, placeCamera, visiblePages } from "./framing.js";
 import { bindInput, glideZoom, panBy } from "./input.js";
 import { layoutLeaves } from "./layout.js";
-import { firstMaterial, freeFlap, isCover, makeFlap, makeLeaf, makeSheets, fillerMaterial } from "./leaf.js";
+import { freeFlap, isCover, makeFlap, makeLeaf, makeSheets, fillerMaterial } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
 import { MAX_DETAIL, sheetShader } from "./shaders.js";
 import { naiveLut } from "./inklut.js";
@@ -53,6 +53,17 @@ const KEY_INTENSITY = 1.57 * LIGHT;
 const ENV_INTENSITY = 0.35 * LIGHT;
 const RIM_INTENSITY = 0.29 * LIGHT;
 const VIEW_FOV = 30; // the live view's lens (vertical, degrees): about 45 mm full-frame
+
+/**
+ * The parts of a frame's main-thread time (frameLog.parts): the animations and the camera
+ * brought on (update), the sheets laid out (layout: their shapes, to the GPU), page images and
+ * tiles to the GPU (uploads), the tiles the view needs found (tiles: rays from the screen),
+ * whether the shadow map is drawn again (shadows: three draws it with the frame, so its cost is
+ * in draw; the performance check's run without shadows shows it), the sheets sorted (order),
+ * the frame's draw calls (draw).
+ */
+export const FRAME_PARTS = ["update", "layout", "uploads", "tiles", "shadows", "order", "draw"];
+const PART = Object.fromEntries(FRAME_PARTS.map((name, i) => [name, i]));
 
 const easeTurn = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t); // gentle, like a hand
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
@@ -170,7 +181,10 @@ export class BookScene {
     // up, not a slow graphics card; the author's M4 Pro holds 120 fps at full size.)
     // How long the graphics card takes to draw a frame, where it can be timed (the frame counter).
     this.gpuTime = { timer: r.getContext().getExtension("EXT_disjoint_timer_query_webgl2"), queries: [], ms: 0, at: -Infinity };
-    this.frameLog = { time: new Float64Array(256), cpu: new Float64Array(256), n: 0 }; // drawn frames (frameStats)
+    // Drawn frames (frameStats): when, the main thread's time, and that time by part (the
+    // performance check's breakdown, see FRAME_PARTS).
+    this.frameLog = { time: new Float64Array(256), cpu: new Float64Array(256), parts: FRAME_PARTS.map(() => new Float64Array(256)), n: 0 };
+    this.partTimes = new Float64Array(FRAME_PARTS.length); // this frame's, as they are measured
     this.casters = { current: false }; // see nearestCasters
 
     this.root = new THREE.Group();
@@ -245,13 +259,6 @@ export class BookScene {
     this.sheetDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     this.sheetDepth.onBeforeCompile = (shader) => sheetShader(shader, this.shared);
     this.sheetDepth.customProgramCacheKey = () => "bookview-sheet";
-    this.noDraw = new THREE.MeshBasicMaterial({ visible: false });
-    // The sheets' depth drawn first (see makeLeaf): off. (On by Apple's GPUs until 2026-10-24,
-    // where it halved the frame's shading; the author's M4 Pro now measures it the other way:
-    // dragging round a 120-sheet book, 34 fps with it, 61 without. Kept switchable for the
-    // performance check's comparison, by view, until its runs on both computers agree.)
-    this.depthPass = false;
-    this.holesFirst = [firstMaterial(this, true, true), firstMaterial(this, false, true)]; // a coil's (see makeLeaf)
     this.sheetFiller = fillerMaterial(this); // the faces between a flying stack's sheets (see layoutLeaves)
     // Cotton headbands: the bead and its cloth tail (a single sheet: seen from either side).
     this.headbandMat = new THREE.MeshStandardMaterial({ color: 0xece4d2, roughness: 0.85, side: THREE.DoubleSide });
@@ -971,20 +978,6 @@ export class BookScene {
     this.under.request = { rects, done };
   }
 
-  /** Whether the sheets' depth is drawn first (see makeLeaf). */
-  get depthFirst() {
-    return this.depthPass;
-  }
-
-  set depthFirst(on) {
-    this.depthPass = on;
-    for (const leaf of this.leaves) {
-      leaf.first.visible = on;
-      for (const m of leaf.mesh.material) if (m.userData.uniforms) m.depthWrite = !on; // the faces'
-    }
-    this.dirty = true;
-  }
-
   /** For the performance check: a pan by (dx, dy) screen pixels, as the space bar and a drag make it. */
   debugPan(dx, dy) {
     panBy(this, dx, dy);
@@ -1080,8 +1073,6 @@ export class BookScene {
       }
       for (const m of leaf.mesh.material.slice(3)) m.dispose(); // a coil page's twins (their textures are the page's)
       if (leaf.mesh.material[2].userData.edgeOf) leaf.mesh.material[2].dispose(); // its edges' (the same)
-      leaf.first.material[0].dispose();
-      leaf.first.material[1].dispose();
     }
     this.leaves = [];
     for (const flap of this.flaps.values()) freeFlap(this, flap); // the flaps lay on them
@@ -1134,9 +1125,12 @@ export class BookScene {
   #frame(time) {
     if (this.capturing) return; // a capture owns the renderer
     const started = performance.now();
+    const parts = this.partTimes;
+    parts.fill(0);
     // A set clock (a video, or a test stepping through frames) is the only time: the screen's
     // own frames mustn't advance animations under it.
     const { animating, moving } = this.#update(this.clock ?? time);
+    parts[PART.update] = performance.now() - started - parts[PART.layout] - parts[PART.uploads];
     const inMotion = animating || moving;
     const draw = inMotion || this.dirty;
     this.#readGpuTime();
@@ -1151,9 +1145,13 @@ export class BookScene {
     placeCamera(this);
     this.callbacks.onCamera?.(this.camera);
     // The view as this frame draws it (the camera just placed): what it needs (ui/tiles.js).
+    let t = performance.now();
     if (inMotion) this.callbacks.onViewFrame?.(time);
+    parts[PART.tiles] = -t + (t = performance.now());
     shadows(this);
+    parts[PART.shadows] = -t + (t = performance.now());
     drawOrder(this);
+    parts[PART.order] = -t + (t = performance.now());
     const g = this.gpuTime;
     const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
     const query = g.timer && inMotion && g.queries.length < 4 ? gl.createQuery() : null;
@@ -1164,9 +1162,12 @@ export class BookScene {
       g.queries.push(query);
     }
     capture.copyUnder(this, gl);
+    parts[PART.draw] = performance.now() - t;
     const log = this.frameLog;
-    log.time[log.n % log.time.length] = started;
-    log.cpu[log.n % log.time.length] = performance.now() - started;
+    const at = log.n % log.time.length;
+    log.time[at] = started;
+    log.cpu[at] = performance.now() - started;
+    parts.forEach((ms, i) => { log.parts[i][at] = ms; });
     log.n++;
   }
 
@@ -1319,16 +1320,20 @@ export class BookScene {
     }
     this.lastFrameTime = time;
     if (this.model && (animating || this.geometryDirty)) {
+      const t0 = performance.now();
       this.shared.uOpenness.value = 1 - this.closed;
       layoutLeaves(this);
       this.geometryDirty = false;
       this.dirty = true;
+      this.partTimes[PART.layout] = performance.now() - t0;
     }
     // A capture's strips are laid at once (setPageDetails, immediate); one queued otherwise (a
     // clearing) goes at rest.
+    const t1 = performance.now();
     if (this.uploads.size) uploads.flushUploads(this);
     else if (this.detailQueue.size && this.settled) uploads.prepareDetails(this);
     if (uploads.flushTiles(this, time)) this.dirty = true;
+    this.partTimes[PART.uploads] = performance.now() - t1;
     // Wheel zoom and pan change the camera outside the rig's own animations: count them
     // as motion too (the tiles the view needs are asked for as it moves, see ui/tiles.js).
     glideZoom(this, time);

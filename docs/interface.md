@@ -139,10 +139,11 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 - The refresh rate, from frames with nothing drawn.
 - **Panning where the view is**: as is, at half the pixels, without re-pivoting onto the paper.
 - **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, and every sheet but the two open pages.
-- **Turning pages quickly.**
-- **Panning by hand**: the mouse's moves per second, frames drawn per second, the card's time, the resolution drawn at.
+- **Turning pages quickly**: as is and without shadows, each with the main thread's time by part (`FRAME_PARTS` in scene.js: the animations, laying out the sheets, uploads, finding the tiles the view needs, whether the shadow map is drawn again, sorting, the draw calls: the shadow map itself is drawn with them).
+- **Dragging round three more views**: the closed book, the open book as framed, its piles from low at the fore-edge.
+- **Panning by hand**: the mouse's moves per second, frames drawn per second, the card's time.
 
-Each run reports frames per second, the 95th-percentile and worst frame time, the main thread's time, and the graphics card's time where it can be timed. The check freezes the motion resolution while it runs and puts everything back afterwards. The client viewer bundles the same file.
+Each run reports frames per second, the 95th-percentile and worst frame time, the main thread's time, and the graphics card's time where it can be timed. The check puts everything back afterwards. The client viewer bundles the same file.
 
 ## Shared pieces (`dom.js`)
 

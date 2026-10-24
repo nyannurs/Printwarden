@@ -146,7 +146,6 @@ export function drawOrder(scene) {
   const order = scene.leaves.map((_, i) => i).sort((a, b) => depth[a] - depth[b]);
   order.forEach((i, rank) => {
     scene.leaves[i].mesh.renderOrder = -1000 + rank;
-    scene.leaves[i].first.renderOrder = -1000 - order.length + rank; // before them all (see makeLeaf)
   });
   showFlaps(scene);
 }

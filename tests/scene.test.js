@@ -20,20 +20,15 @@ test("scene: three.js shaders take our changes, and every kind of sheet draws", 
     errors.push((gl.getShaderInfoLog(fs) || gl.getShaderInfoLog(vs) || gl.getProgramInfoLog(program) || "a shader failed").trim());
   };
   try {
-    // Glued (plain sheets), then a coil (sheets with punched holes); each also with the
-    // sheets' depth drawn first (as on Apple's graphics).
+    // Glued (plain sheets), then a coil (sheets with punched holes).
     for (const binding of ["perfect", "spiral"]) {
       scene.setBook({ pageCount: 8, pageSize: { width: 148, height: 210 }, binding, paper });
-      for (const depthFirst of [false, true]) {
-        scene.depthFirst = depthFirst;
-        scene.goTo(2, { animate: false });
-        scene.debugSample(0.5, 0.5); // compiles what this view draws
-      }
+      scene.goTo(2, { animate: false });
+      scene.debugSample(0.5, 0.5); // compiles what this view draws
     }
     eq(errors, []);
     ok(scene.renderer.info.programs.length >= 4, `${scene.renderer.info.programs.length} shader programs`);
   } finally {
-    scene.depthFirst = false;
     box.remove();
   }
 });
