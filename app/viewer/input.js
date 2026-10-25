@@ -22,8 +22,11 @@ export function bindInput(scene, own) {
   for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) el.addEventListener(type, () => own.wake(), { capture: true, passive: true });
   for (const type of ["keydown", "keyup"]) window.addEventListener(type, () => own.wake(), { capture: true, passive: true });
 
-  // Space pans unless it types; a focused slider (zoom) doesn't type.
-  const typing = (e) => e.target.closest?.("input:not([type=range]), select, textarea, [contenteditable], dialog");
+  // Space is the view's wherever the focus is, but where it types (a text field) or in a
+  // dialog: a dropdown or a button just clicked keeps the focus, and Space opened the list or
+  // pressed the button again instead of panning (the author, 1.1.0: change the binding, then
+  // space-drag). A focused slider (zoom) doesn't type.
+  const typing = (e) => e.target.closest?.("input:not([type=range]), textarea, [contenteditable], dialog");
   window.addEventListener("keydown", (e) => {
     if (e.code !== "Space" || typing(e)) return;
     e.preventDefault();
@@ -36,6 +39,7 @@ export function bindInput(scene, own) {
   });
   window.addEventListener("keyup", (e) => {
     if (e.code !== "Space") return;
+    if (!typing(e)) e.preventDefault(); // (a button presses itself when Space comes up)
     scene.space = false;
     el.style.cursor = "";
   });

@@ -228,7 +228,7 @@ export class InkDocument {
    * a pixel: C, M, Y, K; spots: Uint8Array | null, 4 bytes a pixel: the page's first
    * SPOT_CHANNELS spots' tints (0 where it has fewer), spotNames: theirs}, its further spots
    * composited into the four (or left out). `mips`: smaller copies (half, quarter, ...: see
-   * mips.js) of both, `mips` and `spotMips`.
+   * mips.js) of both, `mips` and `spotMips`; -1, every one down to a texel.
    */
   draw(index, rect, height, mode = "rgb", { mips = 0 } = {}) {
     const p = this.page(index);
@@ -269,9 +269,10 @@ export class InkDocument {
       }
       // (Every plate is switched where the inks are shown: every ink image carries them all.)
       const out = { width, height: hPx, n: 4, data, spots, spotNames: p.spots.slice(0, channels), mips: undefined, spotMips: undefined };
-      if (mips > 0) {
-        out.mips = mipChain(data, width, hPx, mips);
-        if (spots) out.spotMips = mipChain(spots, width, hPx, mips);
+      const levels = mips < 0 ? Math.floor(Math.log2(Math.max(width, hPx))) : mips;
+      if (levels > 0) {
+        out.mips = mipChain(data, width, hPx, levels);
+        if (spots) out.spotMips = mipChain(spots, width, hPx, levels);
       }
       return out;
     } finally {

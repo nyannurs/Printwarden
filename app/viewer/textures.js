@@ -12,25 +12,38 @@ import { LUT_DEPTH, LUT_HEIGHT, LUT_WIDTH } from "./inklut.js";
  * any, are a second texture alike (userData.spots, disposed with it) and their names
  * (userData.spotNames: which spot each channel is). The image's bytes are its own until it is
  * on the GPU (freeImage).
- * @param {{width: number, height: number, data: Uint8Array, spots?: Uint8Array | null, spotNames?: string[]}} image
+ * @param {{width: number, height: number, data: Uint8Array, spots?: Uint8Array | null, spotNames?: string[], mips?: Uint8Array[], spotMips?: Uint8Array[]}} image
+ *   (`mips`, `spotMips`: their smaller copies, if made: see rawTexture)
  */
 export function makeInkTexture(image, anisotropy) {
-  const t = rawTexture(image.data, image.width, image.height, anisotropy);
+  const t = rawTexture(image.data, image.width, image.height, anisotropy, image.mips);
   t.userData.ink = true;
   t.userData.spotNames = image.spotNames ?? [];
   if (image.spots) {
-    const spots = rawTexture(image.spots, image.width, image.height, anisotropy);
+    const spots = rawTexture(image.spots, image.width, image.height, anisotropy, image.spotMips);
     t.userData.spots = spots;
     t.addEventListener("dispose", () => spots.dispose());
   }
   return t;
 }
 
-function rawTexture(data, width, height, anisotropy) {
+/**
+ * `mips`: its every smaller copy, made exactly (pdf/mips.js), uploaded as they are; else the GPU
+ * makes them (some halve an odd size a half texel off: a page at a slant shifted where they met).
+ */
+function rawTexture(data, width, height, anisotropy, mips = null) {
   const t = new THREE.DataTexture(/** @type {any} */ (data), width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
   t.flipY = false;
   t.colorSpace = THREE.NoColorSpace;
-  t.generateMipmaps = true;
+  t.generateMipmaps = !mips?.length;
+  if (mips?.length) {
+    let w = width, h = height;
+    t.mipmaps = [{ data, width, height }, ...mips.map((m) => {
+      w = Math.max(1, w >> 1);
+      h = Math.max(1, h >> 1);
+      return { data: m, width: w, height: h };
+    })];
+  }
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.magFilter = THREE.LinearFilter;
   t.anisotropy = anisotropy;
@@ -89,8 +102,9 @@ export function freeImage(tex) {
   if (tex.userData.spots) freeImage(tex.userData.spots);
   const { image } = tex;
   if (!image) return;
-  if (image.data) { // an ink image: its bytes go, the size stays
+  if (image.data) { // an ink image: its bytes go (its smaller copies' too), the size stays
     tex.image = { width: image.width, height: image.height, data: null };
+    tex.mipmaps = [];
     return;
   }
   if (!image.close) return;

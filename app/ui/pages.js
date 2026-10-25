@@ -149,7 +149,9 @@ export function loadAllTextures() {
     };
     // Per page: its image, nearest first.
     pending++;
-    pageImage(folio, height, 100 + distance, { mode: "ink", cache: "pending" })
+    // With every smaller copy made exactly (pdf/mips.js), not by the GPU: some halve an odd size
+    // a half texel off, and a page at a slant shifted where they switched (the author's Mac).
+    pageImage(folio, height, 100 + distance, { mode: "ink", cache: "pending", mips: -1 })
       .then(apply(height))
       .catch(() => {})
       .finally(() => {

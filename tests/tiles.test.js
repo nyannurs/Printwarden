@@ -150,13 +150,34 @@ test("TILES: the budget: a 24th of memory, 256 MB to 1 GB", () => {
   eq(tileBudget(64 * 2 ** 30), 2 ** 30);
 });
 
-test("MIPS: half size is the mean of 2 × 2, odd edges take what's there", () => {
+test("MIPS: every level registered on the image, odd sizes too: a ramp across a page image 1128 texels wide reads at each level as it is there (half sizes floored, as the GPU sizes them)", () => {
+  // At an odd size the halves can't be 2 × 2: halved naively, a level sat up to half a texel off
+  // the one above, and where the GPU switched levels on a page seen at a slant the picture
+  // jumped sideways, a line moving as the view panned (the author, 1.1.0, on a Mac).
+  const w = 1128, h = 3;
+  const data = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data.set([Math.round((255 * (x + 0.5)) / w), 0, 0, 255], (y * w + x) * 4);
+  const chain = mipChain(data, w, h, 8);
+  let width = w, worst = 0, where = "";
+  chain.forEach((level, k) => {
+    width = Math.max(1, width >> 1);
+    for (let x = 0; x < width; x++) {
+      const off = Math.abs(level[x * 4] - (255 * (x + 0.5)) / width);
+      if (off > worst) { worst = off; where = `level ${k + 1} (${width} wide), texel ${x}`; }
+    }
+  });
+  ok(worst <= 1, `off by ${worst.toFixed(2)} of 255 at ${where}`);
+});
+
+test("MIPS: half size is the mean of what each texel stands for: 2 × 2, or at an odd size all of the image's part, edges in part", () => {
   const w = 3, h = 2;
   const data = new Uint8Array(w * h * 4);
   for (let i = 0; i < w * h; i++) data.set([i * 10, 100, 0, 255], i * 4);
   const m = halve(data, w, h);
   eq([m.width, m.height], [1, 1]);
-  eq([...m.data], [Math.round((0 + 10 + 30 + 40) / 4), 100, 0, 255]);
+  eq([...m.data], [25, 100, 0, 255], "the one texel: the whole 3 × 2");
+  const even = halve(Uint8Array.from([0, 0, 0, 0, 40, 0, 0, 0, 80, 0, 0, 0, 120, 0, 0, 0]), 2, 2);
+  eq(even.data[0], 60, "2 × 2: their mean");
   const chain = mipChain(new Uint8Array(8 * 8 * 4).fill(200), 8, 8, 2);
   eq(chain.map((c) => c.length), [4 * 4 * 4, 2 * 2 * 4]);
   ok(chain[1].every((v) => v === 200), "flat stays flat");

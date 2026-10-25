@@ -440,7 +440,8 @@ for (const type of ["keydown", "focusout"]) {
 document.addEventListener("keydown", (e) => {
   const select = e.target;
   if (!(select instanceof HTMLSelectElement) || openList) return;
-  if (e.key === " " || e.key === "Enter" || (e.altKey && e.key === "ArrowDown") || e.key === "F4") {
+  // (Not Space: that is the 3D view's, see viewer/input.js.)
+  if (e.key === "Enter" || (e.altKey && e.key === "ArrowDown") || e.key === "F4") {
     e.preventDefault();
     openSelect(select);
   }
