@@ -122,8 +122,15 @@ export function setPageTexture(scene, folio, image) {
  */
 export function showPageImage(scene, folio, image) {
   disposeTexture(scene.overrides.get(folio), scene.blank);
-  if (image) scene.overrides.set(folio, pageTexture(scene, image));
-  else scene.overrides.delete(folio);
+  if (image) {
+    const tex = pageTexture(scene, image);
+    scene.overrides.set(folio, tex);
+    // Bytes (with their smaller copies): on the GPU now, and let go (an image is the caller's).
+    if (image.data) {
+      warm(scene, tex);
+      freeImage(tex);
+    }
+  } else scene.overrides.delete(folio);
   showPage(scene, folio);
   bindTiles(scene, folio);
   scene.dirty = true;

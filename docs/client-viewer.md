@@ -61,7 +61,7 @@ The viewer runs the app's own code, so a change to the 3D book reaches the next 
 
 Separate by design:
 - **The controls.** The app's side panel and timeline don't belong in a client's file.
-- **The page loader.** It decodes JPEGs rather than rendering from a PDF; its policy is the app's. It is the one place where a change in the app needs a matching change here, and its comment says so.
+- **The page loader.** It decodes JPEGs rather than rendering from a PDF; its policy is the app's. Each decoded page gets its smaller copies made exactly in a background worker, with the app's own code (pdf/mips.js), not by the graphics card, so a page at a slant doesn't shift on a Mac; a browser that can't (no OffscreenCanvas in workers) leaves them to the graphics card. It is the one place where a change in the app needs a matching change here, and its comment says so.
 - **The look of the buttons.** Black pills (`CLIENT_CSS` in ui/client.js), independent of the app's panel.
 
 ## What it doesn't carry

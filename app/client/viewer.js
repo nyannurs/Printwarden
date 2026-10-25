@@ -7,6 +7,7 @@
 import { BookScene } from "../viewer/scene.js";
 import { CAMERA_PRESETS } from "../viewer/camera.js";
 import { runProbe } from "../ui/probe.js";
+import { MIPS_WORKER_SOURCE } from "../pdf/mips.js";
 
 /**
  * @typedef {{
@@ -137,6 +138,35 @@ function addCheck(top, scene) {
  * stuttered). All pages at full size were as much texture memory as the app's at their most,
  * twice as much at 2048 px.
  */
+/**
+ * A page image with every smaller copy made exactly, in a worker (pdf/mips.js), as the app makes
+ * its pages': left to the GPU, some (Apple's) halve an odd size a half texel off, and a page seen
+ * at a slant shifted where the GPU switched between them (the author's Mac, 1.1.0). Where no
+ * worker can be had, the image as it is (the GPU's copies).
+ */
+let mipsWorker;
+const waiting = new Map(); // id -> its resolve
+let ids = 0;
+function exact(bitmap) {
+  if (mipsWorker === undefined) {
+    try {
+      mipsWorker = new Worker(URL.createObjectURL(new Blob([MIPS_WORKER_SOURCE], { type: "text/javascript" })));
+      mipsWorker.onmessage = (e) => {
+        waiting.get(e.data.id)?.(e.data.image ?? e.data.bitmap);
+        waiting.delete(e.data.id);
+      };
+    } catch {
+      mipsWorker = null;
+    }
+  }
+  if (!mipsWorker) return Promise.resolve(bitmap);
+  const id = ++ids;
+  return new Promise((resolve) => {
+    waiting.set(id, resolve);
+    mipsWorker.postMessage({ id, bitmap }, [bitmap]);
+  });
+}
+
 function pageLoader(scene, data) {
   const n = data.pages.length;
   const blobs = new Map(); // folio -> its image, as a Blob (decoded when needed)
@@ -153,7 +183,7 @@ function pageLoader(scene, data) {
   const loaded = (async () => {
     for (const folio of near()) {
       if (!data.pages[folio - 1]) continue;
-      const image = await createImageBitmap(await blobOf(folio), { resizeHeight: base, resizeQuality: "high" });
+      const image = await exact(await createImageBitmap(await blobOf(folio), { resizeHeight: base, resizeQuality: "high" }));
       scene.setPageTexture(folio, image);
     }
   })();
@@ -170,15 +200,15 @@ function pageLoader(scene, data) {
       for (const [folio, image] of sharp) {
         if (want.has(folio)) continue;
         scene.showPageImage(folio, null);
-        image.close();
+        image.close?.();
         sharp.delete(folio);
       }
       // The spread in view first.
       const order = [...want].sort((a, b) => Math.abs(a - 2 * opening - 0.5) - Math.abs(b - 2 * opening - 0.5));
       for (const folio of order) {
         if (sharp.has(folio)) continue;
-        const image = await createImageBitmap(await blobOf(folio));
-        if (mine !== run) return image.close(); // turned meanwhile: the next rest decides
+        const image = await exact(await createImageBitmap(await blobOf(folio)));
+        if (mine !== run) return image.close?.(); // turned meanwhile: the next rest decides
         await new Promise((r) => requestAnimationFrame(r));
         sharp.set(folio, image);
         scene.showPageImage(folio, image);

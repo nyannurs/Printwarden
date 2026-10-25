@@ -23,7 +23,9 @@ test("client viewer: the bundle holds the viewer, the 3D code and three.js, with
   ok(keys.some((k) => k.startsWith("three/addons/")), "three's addons");
   // The app's performance check rides along (the viewer's button; it imports nothing).
   ok(keys.includes("ui/probe.js"), "the performance check");
-  ok(!keys.some((k) => (k.startsWith("ui/") && k !== "ui/probe.js") || k.startsWith("pdf/") || k.startsWith("core/")), `only the viewer's own code: ${keys.join(", ")}`);
+  // And the exact smaller copies of a page image (its worker's code: see exact in client/viewer.js; it imports nothing).
+  ok(keys.includes("pdf/mips.js"), "the page images' smaller copies");
+  ok(!keys.some((k) => (k.startsWith("ui/") && k !== "ui/probe.js") || (k.startsWith("pdf/") && k !== "pdf/mips.js") || k.startsWith("core/")), `only the viewer's own code: ${keys.join(", ")}`);
   const importRe = /^(?:import|export)[^;]*?from\s*(['"])([^'"]+)\1|^import\s*(['"])([^'"]+)\3/gm;
   for (const [key, text] of Object.entries(modules)) {
     for (const m of text.matchAll(importRe)) {

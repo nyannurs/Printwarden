@@ -90,3 +90,26 @@ export function mipChain(data, w, h, n) {
   }
   return out;
 }
+
+/**
+ * A worker's code that makes an image's every smaller copy as these do, for the client viewer
+ * (its pages are JPEGs the browser decodes: the GPU would make their copies, a half texel off
+ * on some, see halve). In: {id, bitmap} (an ImageBitmap, handed over). Out: {id, image: {width,
+ * height, data, mips}} (RGBA bytes, as uploads.js takes a page's), or {id, bitmap} back where
+ * the worker can't draw it (no OffscreenCanvas). These very functions, written into it.
+ */
+export const MIPS_WORKER_SOURCE = `${spans}
+${halve}
+${mipChain}
+onmessage = (e) => {
+  const { id, bitmap } = e.data;
+  if (typeof OffscreenCanvas === "undefined") return postMessage({ id, bitmap }, [bitmap]);
+  const w = bitmap.width, h = bitmap.height;
+  const g = new OffscreenCanvas(w, h).getContext("2d");
+  g.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const data = new Uint8Array(g.getImageData(0, 0, w, h).data.buffer);
+  const mips = mipChain(data, w, h, Math.floor(Math.log2(Math.max(w, h))));
+  postMessage({ id, image: { width: w, height: h, data, mips } }, [data.buffer, ...mips.map((m) => m.buffer)]);
+};
+`;
