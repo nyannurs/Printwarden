@@ -8,6 +8,7 @@ import { naiveLut } from "../viewer/inklut.js";
 import { filmstrip, inkView, inspector, scene, state } from "./app.js";
 import { redrawInks } from "./pages.js";
 import { refreshPlates } from "./plates.js";
+import { refreshTiles } from "./tiles.js";
 import { applySpine, renderSpineArt } from "./spine-panel.js";
 
 const PROFILE_PREF = "cmykProfile"; // remembered choice (localStorage)
@@ -116,6 +117,7 @@ export async function applyProfile() {
       Object.assign(art, drawn);
       spotsChanged();
       applySpine();
+      refreshTiles(); // its tiles, in the new profile
     }, (err) => console.error(err));
   }
 }

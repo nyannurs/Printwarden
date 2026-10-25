@@ -117,6 +117,17 @@ export async function renderMany(bytes, jobs, cmykProfile = null) {
 let jobIds = 0;
 
 /**
+ * A small, separate PDF (spine artwork) open in a thread of its own, for as long as it is kept:
+ * rendered as often as wanted (its sharp tiles), with the same colour management as the book.
+ * `destroy` ends it.
+ * @param {Uint8Array} bytes
+ * @param {Uint8Array | null} [cmykProfile]
+ */
+export function openOne(bytes, cmykProfile = null) {
+  return WorkerPool.start(bytes, [spawnWorker()], cmykProfile);
+}
+
+/**
  * Render one area of a small, separate PDF (e.g. spine artwork) in a thread of its own, with
  * the same colour management as the book. The thread ends when done. `mode` "ink": the inks
  * (see mupdf-render.js), and with them the file's spot colours and their looks (`spots`).

@@ -6,7 +6,8 @@ import { coverOf } from "../core/paper.js";
 import { calculatedSpine, coverMmFor, hasSpine, paperForSpine, spineTakesArtwork } from "../core/spine.js";
 import { openPdf } from "../pdf/load.js";
 import { mipChain } from "../pdf/mips.js";
-import { renderOnce } from "../pdf/render.js";
+import { openOne, renderOnce } from "../pdf/render.js";
+import { SPINE_FOLIO } from "../viewer/tiles.js";
 import { pickPdf } from "../platform.js";
 import { scene, state, updateSetup } from "./app.js";
 import { profileBytes, spotsChanged } from "./colour.js";
@@ -83,6 +84,7 @@ export function applySpine(previewColour = null) {
   scene.setSpine({
     color: previewColour ?? spineColour(),
     artwork: art ? spineFace(art.image, state.setup.spine.rotation) : null,
+    turn: state.setup.spine.rotation,
     // Where the covers wrap onto the spine, each shows its own colour there.
     frontEdge: coverEdge("front") ?? paper,
     backEdge: coverEdge("back") ?? paper,
@@ -162,36 +164,57 @@ export async function spineArtPicture() {
 export async function importSpineArt(file = null) {
   file ??= await pickPdf();
   if (!file) return;
+  let art = null;
   try {
     const { pages } = await openPdf(file.bytes);
     if (!pages.length) throw new Error("This PDF has no pages.");
     const box = pages[0].trimBox ?? pages[0].mediaBox;
-    const art = { name: file.name, bytes: file.bytes, box, sizeMm: { width: box.x1 - box.x0, height: box.y1 - box.y0 } };
+    art = { name: file.name, bytes: file.bytes, box, sizeMm: { width: box.x1 - box.x0, height: box.y1 - box.y0 } };
     Object.assign(art, await renderSpineArt(art));
     // Only now, with the new one ready, does it replace any artwork shown so far.
-    state.spineArt = art;
-    spotsChanged();
+    setSpineArt(art);
     // Laid out lying down (wider than tall): start turned upright. Rotate spine turns it.
     state.setup.spine.rotation = art.sizeMm.width > art.sizeMm.height ? 1 : 0;
     applySpine();
   } catch (err) {
     console.error(err);
+    if (art && state.spineArt !== art) art.pool?.destroy();
     toast(`Couldn't use ${file.name} as the spine: ${err.message}`, "error");
   }
   spine?.refresh();
 }
 
 /**
- * Render spine artwork: at most 2400 px along its long side, its inks in the current CMYK
+ * Render spine artwork: at most 2400 px along its long side (its base image: its sharp tiles
+ * come as the view needs them, as the pages' do, see ui/tiles.js), its inks in the current CMYK
  * profile (drawn through the ink table as the pages are: the plates switch it too), and its
- * spot colours with their looks.
+ * spot colours with their looks. Its PDF stays open in a thread of its own for the tiles
+ * (`art.pool`, ended by setSpineArt when the artwork goes).
  * @returns {Promise<{image: any, spots: {name: string, cmyk: number[]}[]}>}
  */
 export async function renderSpineArt(art) {
   const { width, height } = art.sizeMm;
   const px = Math.round(height >= width ? 2400 : (2400 * height) / width);
   const profile = await profileBytes(state.colour, state.colour.choice);
-  return renderOnce(art.bytes, 0, art.box, px, profile, { mode: "ink" });
+  if (!art.pool) art.pool = await openOne(art.bytes, profile);
+  else art.pool.setProfile(profile);
+  art.profile = state.colour.choice; // what its tiles are drawn with from now (their stamp, ui/tiles.js)
+  const image = await art.pool.render(0, art.box, px, 0, { cache: false, mode: "ink" });
+  return { image, spots: await art.pool.spots() };
+}
+
+/**
+ * The spine artwork shown from now (or none): the one before let go, its thread and its
+ * tiles; the spot colours listed again (it may have its own).
+ */
+export function setSpineArt(art) {
+  const old = state.spineArt;
+  if (old && old !== art) {
+    old.pool?.destroy();
+    scene.forgetTiles(SPINE_FOLIO);
+  }
+  state.spineArt = art;
+  spotsChanged();
 }
 
 let spine = null; // the open spine panel, if any
@@ -222,8 +245,7 @@ export function openSpinePanel() {
     setWidth: (mm) => updateSetup({ spine: { ...state.setup.spine, widthMm: mm } }),
     importArtwork: () => importSpineArt(),
     removeArtwork: () => {
-      state.spineArt = null;
-      spotsChanged(); // its own spots go with it
+      setSpineArt(null); // its own spots go with it
       applySpine();
       spine?.refresh();
     },

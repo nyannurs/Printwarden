@@ -28,7 +28,7 @@ import { Inspector } from "./inspector.js";
 import { carryPages, forgetThumbnails, loadAllTextures, thumbnail } from "./pages.js";
 import { initPlates, refreshPlates, resetPlates } from "./plates.js";
 import { initViewReport } from "./report.js";
-import { applySpine, importSpineArt, openSpinePanel, renderSpineArt, updateSpinePanel } from "./spine-panel.js";
+import { applySpine, importSpineArt, openSpinePanel, renderSpineArt, setSpineArt, updateSpinePanel } from "./spine-panel.js";
 import { initView, setBackground, showZoom } from "./view.js";
 import { resetTiles, tileStats, updateTiles } from "./tiles.js";
 
@@ -175,7 +175,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     state.cover = coverPages ? { name: cover.name, bytes: cover.bytes, pages: coverPages } : null;
     // Paper and wire are choices about the print job, not the file: they carry over.
     state.setup = { ...defaultSetup(), paper: state.setup.paper, wire: state.setup.wire, source };
-    state.spineArt = null; // spine artwork belongs to a document
+    setSpineArt(null); // spine artwork belongs to a document
     for (const image of state.finish?.images.values() ?? []) image.close(); // so does a finish
     state.finish = null;
     scene.setFinish({ kind: 0, images: new Map() });
@@ -259,10 +259,9 @@ async function adoptCover() {
   if (!rect) return;
   const art = { name: cover.name, bytes: cover.bytes, box: rect, sizeMm: { width: rect.x1 - rect.x0, height: rect.y1 - rect.y0 } };
   Object.assign(art, await renderSpineArt(art));
-  if (state.cover !== cover) return; // another file since
-  state.spineArt = art;
+  if (state.cover !== cover) return art.pool?.destroy(); // another file since
+  setSpineArt(art);
   state.setup.spine.rotation = 0;
-  spotsChanged();
   applySpine();
 }
 

@@ -6,6 +6,7 @@
 
 import * as THREE from "three";
 import { MAX_DETAIL } from "./shaders.js";
+import { SPINE_FOLIO } from "./tiles.js";
 import { disposeTexture, freeImage, makeInkTexture, makeWarmer } from "./textures.js";
 
 const UPLOADS_PER_FRAME = 2;
@@ -33,6 +34,15 @@ export function clearPages(scene) {
  * the frame, and tiles kept from the view may be coarser.
  */
 export function bindTiles(scene, folio) {
+  if (folio === SPINE_FOLIO) { // the spine's artwork (see BookScene.spineInk)
+    const t = scene.tiles.pageUniforms(folio);
+    const u = scene.spineInk;
+    u.uTileTable.value = t?.table ?? scene.tiles.emptyTable;
+    if (t) u.uTilePage.value.fromArray(t.page);
+    u.uTileOn.value = t ? 1 : 0;
+    scene.dirty = true;
+    return;
+  }
   const leaf = scene.leaves[Math.ceil(folio / 2) - 1];
   if (!leaf) return;
   const u = (folio % 2 ? leaf.front : leaf.back).userData.uniforms;
@@ -61,7 +71,7 @@ export function renumberPages(scene, map) {
   scene.overrides = move(scene.overrides, (tex) => tex.dispose());
   scene.uploads = move(scene.uploads, ({ image }) => image?.close());
   scene.spotNames = move(scene.spotNames, () => {});
-  scene.tiles.renumber(map);
+  scene.tiles.renumber(new Map([...map, [SPINE_FOLIO, SPINE_FOLIO]])); // (the spine's tiles stay)
   showAllPages(scene);
   scene.dirty = true;
 }

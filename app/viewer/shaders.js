@@ -261,7 +261,7 @@ vec3 sheetNormal() {
 // (the page's table says which layer of uTiles holds it, and in the entry beside it which
 // holds its spot channels, if it has any), the base image when none is. A tile just landed
 // fades in over what was drawn before it (the level under it, or the base).
-const TILE_GLSL = /* glsl */ `
+export const TILE_GLSL = /* glsl */ `
 uniform highp sampler2DArray uTiles;
 uniform sampler2D uTileTable;
 uniform vec4 uTilePage;  // the page in level-0 texels (x, y), its levels (z), its table's rows a level (w)

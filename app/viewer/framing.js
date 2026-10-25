@@ -191,3 +191,62 @@ export function visiblePages(scene, { width, height, folios = scene.shownFolios 
   }
   return out;
 }
+
+/**
+ * The spine artwork in view, as visiblePages has the pages: where on the artwork (uv in the
+ * artwork's own place, v = 0 at its head, as its tiles are) and how many screen pixels a
+ * millimetre of it takes there. Found by rays from a grid of screen points onto the parts that
+ * show it (a glued or sewn spine's slab, a case's spine), kept where they meet the artwork's
+ * material; the face shows it turned by `turn` quarter turns and mirrored (see spineFace in
+ * ui/spine-panel.js). `artMm`: its size. Null when none of it is on screen.
+ * @returns {{region: {u0: number, v0: number, u1: number, v1: number}, samples: {u: number, v: number, pxPerMm: number, sx: number, sy: number}[]} | null}
+ */
+export function visibleSpine(scene, artMm, turn) {
+  const ex = scene.extras;
+  const meshes = [ex?.slab, ex?.caseSpine].filter((m) => m?.visible && scene.spineMat.map);
+  if (!meshes.length) return null;
+  for (const m of meshes) m.geometry.computeBoundingSphere(); // (a case's spine is rebuilt every frame)
+  const shows = new Set([scene.spineMat, scene.spineSideFrontMat, scene.spineSideBackMat]);
+  const W = scene.renderer.domElement.width;
+  const H = scene.renderer.domElement.height;
+  const cols = 16;
+  const rows = 12;
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  // The face's uv to the artwork's (each turn its own undoing, as pvTurn in the spine's shader).
+  const q = ((turn % 4) + 4) % 4;
+  const toArt = (x, y) => (q === 0 ? [1 - x, y] : q === 1 ? [y, x] : q === 2 ? [x, 1 - y] : [1 - y, 1 - x]);
+  const grid = [];
+  for (let j = 0; j <= rows; j++) {
+    const row = [];
+    for (let i = 0; i <= cols; i++) {
+      ndc.set((i / cols) * 2 - 1, 1 - (j / rows) * 2);
+      ray.setFromCamera(ndc, scene.camera);
+      const hit = ray.intersectObjects(meshes, false)[0];
+      const material = hit && /** @type {THREE.Mesh} */ (hit.object).material;
+      const mats = Array.isArray(material) ? material : [material];
+      const mat = hit && mats[hit.face?.materialIndex ?? 0];
+      row.push(hit?.uv && shows.has(mat) ? toArt(hit.uv.x, hit.uv.y) : null);
+    }
+    grid.push(row);
+  }
+  let u0 = 1, u1 = 0, v0 = 1, v1 = 0;
+  const samples = [];
+  for (let j = 0; j <= rows; j++) {
+    for (let i = 0; i <= cols; i++) {
+      const p = grid[j][i];
+      if (!p) continue;
+      u0 = Math.min(u0, p[0]); u1 = Math.max(u1, p[0]);
+      v0 = Math.min(v0, p[1]); v1 = Math.max(v1, p[1]);
+      let here = 0;
+      for (const [n, step] of [[grid[j][i + 1], W / cols], [grid[j + 1]?.[i], H / rows], [grid[j][i - 1], W / cols], [grid[j - 1]?.[i], H / rows]]) {
+        if (!n) continue;
+        const mm = Math.hypot((n[0] - p[0]) * artMm.width, (n[1] - p[1]) * artMm.height);
+        if (mm > 1e-6) here = Math.max(here, step / mm);
+      }
+      if (here) samples.push({ u: p[0], v: p[1], pxPerMm: here, sx: i / cols, sy: j / rows });
+    }
+  }
+  if (u1 < u0 || v1 < v0) return null;
+  return { region: { u0, v0, u1, v1 }, samples };
+}

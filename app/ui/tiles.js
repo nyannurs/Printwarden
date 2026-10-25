@@ -10,7 +10,7 @@
 
 import { pageSizeOf } from "../core/analysis.js";
 import { baseHeight } from "../pdf/render.js";
-import { TILE, TILE_MAX_LEVEL, TILE_MIPS, tileAt, tileKey, tileLevel, tilePage, tileRect } from "../viewer/tiles.js";
+import { SPINE_FOLIO, TILE, TILE_MAX_LEVEL, TILE_MIPS, tileAt, tileKey, tileLevel, tilePage, tileRect } from "../viewer/tiles.js";
 import { scene, state } from "./app.js";
 import { folioStamp, pageRegionImage } from "./pages.js";
 
@@ -29,8 +29,17 @@ let pagesFor = -1;
 let lastUpdate = -Infinity;
 let again = 0; // a further request at rest, pending (see request)
 
-/** A page's pyramid: its base image's density (the document's base height) over its trim. */
+/**
+ * A page's pyramid: its base image's density (the document's base height) over its trim. The
+ * spine artwork's (SPINE_FOLIO): its own base image's over its box, drawn by its own thread.
+ */
 function pageOf(folio) {
+  if (folio === SPINE_FOLIO) {
+    const art = state.spineArt;
+    if (!art?.pool || !art.image) return null;
+    art.tiles ??= { page: tilePage(art.image.height, art.sizeMm), trim: art.box, art };
+    return art.tiles;
+  }
   if (pagesFor !== state.generation) {
     pages = new Map();
     pagesFor = state.generation;
@@ -62,7 +71,11 @@ export function resetTiles() {
 /** Queued tile renders dropped (a capture wants the renderer). */
 export function cancelTiles() {
   state.renderer?.cancel((job) => !!job.tag);
+  state.spineArt?.pool?.cancel((job) => !!job.tag);
 }
+
+/** What a page's tiles are drawn with (see inkStamp in pages.js); the spine's: its profile. */
+const stampOf = (folio) => (folio === SPINE_FOLIO ? `spine|${state.spineArt?.profile}` : folioStamp(folio));
 
 /**
  * The inks changed (redrawInks in pages.js): what is in flight is of the old (dropped as it
@@ -98,7 +111,10 @@ export function updateTiles(now, { settled = false } = {}) {
     if (!had) wanted.set(key, { folio, level, ix, iy, priority });
     else if (priority < had.priority) had.priority = priority;
   };
-  for (const view of scene.visiblePages()) {
+  // The spine's artwork among them, by its rays (its own: see framing.js visibleSpine).
+  const spine = pageOf(SPINE_FOLIO);
+  const spineView = spine && scene.visibleSpine(state.spineArt.sizeMm, state.setup.spine.rotation);
+  for (const view of [...scene.visiblePages(), ...(spineView ? [{ folio: SPINE_FOLIO, ...spineView }] : [])]) {
     const p = pageOf(view.folio);
     if (!p) continue;
     const { folio, region, samples } = view;
@@ -116,7 +132,7 @@ export function updateTiles(now, { settled = false } = {}) {
       }
       if (level >= 2) want(folio, p.page, level - 1, s.u, s.v, priority + 0.5);
       if (settled && level < TILE_MAX_LEVEL) want(folio, p.page, level + 1, s.u, s.v, priority + 0.8);
-      if (settled) ahead.push({ folio, level, u: s.u, v: s.v, priority });
+      if (settled && folio !== SPINE_FOLIO) ahead.push({ folio, level, u: s.u, v: s.v, priority });
     }
   }
   // At rest, the spreads either side too, at the levels this view needs: they come to the same
@@ -143,12 +159,13 @@ export function updateTiles(now, { settled = false } = {}) {
   let requested = 0;
   for (const [key, t] of [...wanted].sort((a, b) => a[1].priority - b[1].priority)) {
     if (cache.has(key)) cache.touch(key); // (outdated, it is drawn till its new one lands)
-    if (cache.has(key, folioStamp(t.folio))) continue;
+    if (cache.has(key, stampOf(t.folio))) continue;
     if (inFlight.has(key) || requested >= REQUESTS_PER_UPDATE || inFlight.size >= IN_FLIGHT_MAX) continue;
     requested++;
     request(key, t);
   }
   state.renderer.cancel((job) => !!job.tag && !wanted.has(job.tag));
+  state.spineArt?.pool?.cancel((job) => !!job.tag && !wanted.has(job.tag));
   tileStats.updateMs = performance.now() - t0;
 }
 
@@ -157,21 +174,24 @@ function request(key, t) {
   const p = pageOf(folio);
   if (!p) return;
   const gen = state.generation;
-  const stamp = folioStamp(folio);
+  const stamp = stampOf(folio);
+  const art = folio === SPINE_FOLIO ? state.spineArt : null;
   const asked = performance.now();
   const flight = { ...t, asked };
   inFlight.set(key, flight);
   // (Only this request's entry: after refreshTiles another may be in flight for the key.)
   const landed = () => inFlight.get(key) === flight && inFlight.delete(key);
   tileStats.asked++;
-  pageRegionImage(folio, tileRect(p.page, level, ix, iy, p.trim), TILE, priority, { mode: "ink", cache: false, flex: true, tag: key, mips: TILE_MIPS })
+  const options = { mode: "ink", cache: false, flex: true, tag: key, mips: TILE_MIPS };
+  const rect = tileRect(p.page, level, ix, iy, p.trim);
+  (art ? art.pool.render(0, rect, TILE, priority, /** @type {any} */ (options)) : pageRegionImage(folio, rect, TILE, priority, options))
     .then((tile) => {
       landed();
       if (!tile) return;
       tileStats.landed++;
       tileStats.lastMs = performance.now() - asked;
       if (tileStats.latencies.push(tileStats.lastMs) > 64) tileStats.latencies.shift();
-      if (gen !== state.generation || stamp !== folioStamp(folio)) return tile.close?.();
+      if (gen !== state.generation || stamp !== stampOf(folio) || (art && state.spineArt !== art)) return tile.close?.();
       scene.queueTile(folio, level, ix, iy, p.page, tile, stamp);
       // At rest, the view asked once for at most REQUESTS_PER_UPDATE: ask again as they land,
       // until everything it wants (the spreads either side included) is in.

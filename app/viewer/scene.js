@@ -20,12 +20,12 @@ import { CAMERA_PRESETS, CameraRig, presetHome } from "./camera.js";
 import * as capture from "./capture.js";
 import { drawOrder, shadows } from "./draw.js";
 import { layoutGround, makeExtras } from "./extras.js";
-import { frameCamera, placeCamera, visiblePages } from "./framing.js";
+import { frameCamera, placeCamera, visiblePages, visibleSpine } from "./framing.js";
 import { bindInput, glideZoom, panBy } from "./input.js";
 import { layoutLeaves } from "./layout.js";
 import { freeFlap, isCover, makeFlap, makeLeaf, makeSheets, fillerMaterial } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
-import { INK_GLSL, inkUniforms, MAX_DETAIL, patchShader, sheetShader } from "./shaders.js";
+import { INK_GLSL, inkUniforms, MAX_DETAIL, patchShader, sheetShader, TILE_GLSL } from "./shaders.js";
 import { naiveLut } from "./inklut.js";
 import { disposeTexture, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeInkTexture, makeWhite } from "./textures.js";
 import { TileCache } from "./tiles.js";
@@ -251,16 +251,53 @@ export class BookScene {
     // Spine artwork is drawn as the pages are: its inks through the ink table with the plates
     // that print, its spot channels mixed in by its spot matrix (set with the pages', see
     // uploads.js refreshSpots). (An sRGB image until 1.1.0: switching a plate left the spine
-    // as it was, the author.) The client viewer's artwork is an sRGB image (uInkPages 0).
-    this.spineInk = { uSpots: { value: this.noSpots }, uSpotInk: { value: uploads.noSpotInk() } };
+    // as it was, the author.) The client viewer's artwork is an sRGB image (uInkPages 0). Its
+    // sharp tiles as a page's (TILE_GLSL, the cache's SPINE_FOLIO, bound by uploads.js
+    // bindTiles), looked up in the artwork's own place: the face shows it turned and mirrored
+    // (uSpineTurn, quarter turns: see spineFace in ui/spine-panel.js), each way its own undoing.
+    // (Its base image alone until 1.1.0: zoomed in, the spine went soft, the author.)
+    this.spineInk = {
+      uSpots: { value: this.noSpots }, uSpotInk: { value: uploads.noSpotInk() }, uSpineTurn: { value: 0 },
+      uTileTable: { value: this.tiles.emptyTable }, uTilePage: { value: new THREE.Vector4(1, 1, 0, 1) }, uTileOn: { value: 0 },
+    };
+    const spineInkGlsl = `${INK_GLSL}
+uniform sampler2D uSpots;
+uniform mat4 uSpotInk;
+uniform int uSpineTurn;
+vec2 pvTurn( vec2 f ) {
+  return uSpineTurn == 0 ? vec2( 1.0 - f.x, f.y ) : uSpineTurn == 1 ? f.yx : uSpineTurn == 2 ? vec2( f.x, 1.0 - f.y ) : vec2( 1.0 - f.y, 1.0 - f.x );
+}
+vec2 pvTurnDir( vec2 d ) {
+  return uSpineTurn == 0 ? vec2( -d.x, d.y ) : uSpineTurn == 1 ? d.yx : uSpineTurn == 2 ? vec2( d.x, -d.y ) : vec2( -d.y, -d.x );
+}
+#ifdef USE_MAP
+// The base image, at a place in the artwork (as TILE_GLSL asks a page's).
+vec4 pageSample( sampler2D t, vec2 uv, vec2 dx, vec2 dy ) {
+  return textureGrad( t, pvTurn( uv ), pvTurnDir( dx ) * 0.7, pvTurnDir( dy ) * 0.7 );
+}
+${TILE_GLSL}
+#endif
+`;
     for (const m of [this.spineMat, this.spineSideFrontMat, this.spineSideBackMat]) {
       m.onBeforeCompile = (shader) => {
         inkUniforms(shader, this.shared);
         Object.assign(shader.uniforms, this.spineInk);
+        shader.uniforms.uTiles = this.shared.uTiles;
         shader.fragmentShader = patchShader(shader.fragmentShader, [
-          ["void main() {", INK_GLSL + "uniform sampler2D uSpots;\nuniform mat4 uSpotInk;\nvoid main() {"],
+          ["void main() {", spineInkGlsl + "void main() {"],
           ["#include <map_fragment>", `#ifdef USE_MAP
-  diffuseColor *= sRGBTransferEOTF( pvPageColor( texture2D( map, vMapUv ), texture2D( uSpots, vMapUv ), uSpotInk ) );
+  {
+    vec2 at = pvTurn( vMapUv );
+    vec2 dx = pvTurnDir( dFdx( vMapUv ) );
+    vec2 dy = pvTurnDir( dFdy( vMapUv ) );
+    vec4 ink;
+    vec4 spots;
+    if ( !pvTile( at, dx, dy, ink, spots ) ) {
+      ink = pageSample( map, at, dx, dy );
+      spots = pageSample( uSpots, at, dx, dy );
+    }
+    diffuseColor *= sRGBTransferEOTF( pvPageColor( ink, spots, uSpotInk ) );
+  }
 #endif`],
         ]);
       };
@@ -642,7 +679,7 @@ export class BookScene {
    * spine face, see spineFace()). Glued and sewn spines show either; a stitched fold
    * takes the colour.
    */
-  setSpine({ color, artwork = null, frontEdge = color, backEdge = color }) {
+  setSpine({ color, artwork = null, turn = 0, frontEdge = color, backEdge = color }) {
     this.frontWrapMat.color.set(frontEdge);
     this.backWrapMat.color.set(backEdge);
     this.#syncSheetEdges();
@@ -666,6 +703,7 @@ export class BookScene {
       this.spineMat.map = null;
     }
     this.spineInk.uSpots.value = this.spineMat.map?.userData.spots ?? this.noSpots;
+    this.spineInk.uSpineTurn.value = ((turn % 4) + 4) % 4; // (how the artwork shows on the face, for its tiles)
     uploads.spotInk(this, this.spineMat.map?.userData.spotNames ?? [], this.spineInk.uSpotInk.value);
     this.spineColor = color;
     // The spine's corners, where the cover folds round onto it: the artwork's own edge there,
@@ -1014,6 +1052,11 @@ export class BookScene {
   /** See framing.js visiblePages. */
   visiblePages(size) {
     return visiblePages(this, size);
+  }
+
+  /** See framing.js visibleSpine. */
+  visibleSpine(artMm, turn) {
+    return visibleSpine(this, artMm, turn);
   }
 
   /** See uploads.js setPageDetails. */

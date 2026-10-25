@@ -24,6 +24,8 @@ export const TILE_BORDER = 4; // texels of the neighbours at each edge: filterin
 export const TILE_PAYLOAD = TILE - 2 * TILE_BORDER; // what a tile covers of its page
 export const TILE_MIPS = 2; // mip levels below a tile (minification up to 4:1 within one level's tiles)
 export const TILE_SUPERSAMPLE = 1.25; // texels per screen pixel a level is chosen for (as the strips were, see SUPERSAMPLE in ui/pages.js)
+/** The spine artwork's place among the pages in the cache (no page has it: folios start at 1). */
+export const SPINE_FOLIO = 0;
 export const TILE_MAX_LEVEL = 5; // 32 × the base image: 800 % on a Retina screen with the smallest base
 const TILE_BYTES = TILE * TILE * 4 * (1 + 1 / 4 + 1 / 16); // a tile on the GPU, with its mips
 const TILE_FADE_MS = 160; // a tile fades in over the level under it (a pop was a flicker)
