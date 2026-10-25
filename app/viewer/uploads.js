@@ -184,6 +184,7 @@ export function refreshSpots(scene) {
     const m = /** @type {any} */ (flap.material);
     spotInk(scene, m.map?.userData.spotNames ?? [], m.userData.uniforms.uSpotInk.value);
   }
+  if (scene.spineInk) spotInk(scene, scene.spineMat.map?.userData.spotNames ?? [], scene.spineInk.uSpotInk.value); // the spine's artwork
   scene.dirty = true;
 }
 

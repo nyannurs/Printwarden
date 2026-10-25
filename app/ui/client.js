@@ -17,6 +17,7 @@ import { scene, state } from "./app.js";
 import { clientViewerDialog } from "./dialogs.js";
 import { showBusy, toast } from "./dom.js";
 import { pageImage } from "./pages.js";
+import { spineArtPicture } from "./spine-panel.js";
 
 const JPEG_QUALITY = 0.86;
 
@@ -96,7 +97,7 @@ async function clientBook(analysis, heightPx, progress) {
   const { book, setup } = analysis;
   const n = book.pages.length;
   const hex = (c) => `#${c.getHexString()}`;
-  const spineImage = scene.spineMat.map?.image;
+  const spineImage = await spineArtPicture(); // (the 3D view's is its inks: the viewer takes a picture)
   const glued = sideGlueMm(setup.binding, setup.glueMm, n);
   const pages = [];
   for (let folio = 1; folio <= n; folio++) {

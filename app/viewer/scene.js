@@ -25,9 +25,9 @@ import { bindInput, glideZoom, panBy } from "./input.js";
 import { layoutLeaves } from "./layout.js";
 import { freeFlap, isCover, makeFlap, makeLeaf, makeSheets, fillerMaterial } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
-import { MAX_DETAIL, sheetShader } from "./shaders.js";
+import { INK_GLSL, inkUniforms, MAX_DETAIL, patchShader, sheetShader } from "./shaders.js";
 import { naiveLut } from "./inklut.js";
-import { disposeTexture, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeWhite } from "./textures.js";
+import { disposeTexture, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeInkTexture, makeWhite } from "./textures.js";
 import { TileCache } from "./tiles.js";
 import * as uploads from "./uploads.js";
 
@@ -248,6 +248,24 @@ export class BookScene {
     // colour until 0.17.84: a white cover on a black spine drew a white line along the corner.)
     this.spineSideFrontMat = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
     this.spineSideBackMat = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
+    // Spine artwork is drawn as the pages are: its inks through the ink table with the plates
+    // that print, its spot channels mixed in by its spot matrix (set with the pages', see
+    // uploads.js refreshSpots). (An sRGB image until 1.1.0: switching a plate left the spine
+    // as it was, the author.) The client viewer's artwork is an sRGB image (uInkPages 0).
+    this.spineInk = { uSpots: { value: this.noSpots }, uSpotInk: { value: uploads.noSpotInk() } };
+    for (const m of [this.spineMat, this.spineSideFrontMat, this.spineSideBackMat]) {
+      m.onBeforeCompile = (shader) => {
+        inkUniforms(shader, this.shared);
+        Object.assign(shader.uniforms, this.spineInk);
+        shader.fragmentShader = patchShader(shader.fragmentShader, [
+          ["void main() {", INK_GLSL + "uniform sampler2D uSpots;\nuniform mat4 uSpotInk;\nvoid main() {"],
+          ["#include <map_fragment>", `#ifdef USE_MAP
+  diffuseColor *= sRGBTransferEOTF( pvPageColor( texture2D( map, vMapUv ), texture2D( uSpots, vMapUv ), uSpotInk ) );
+#endif`],
+        ]);
+      };
+      m.customProgramCacheKey = () => "bookview-spine-ink";
+    }
     // The same for the sheets' own edges, built on the GPU (the others are used elsewhere
     // too), kept alike by #syncSheetEdges; and the sheets' shape for their shadows.
     this.sheetEdges = new Map([this.edgeMat, this.coverEdgeMat, this.frontWrapMat, this.backWrapMat].map((base) => {
@@ -630,17 +648,25 @@ export class BookScene {
     this.#syncSheetEdges();
     const old = this.spineMat.map;
     if (artwork) {
-      // The same artwork as shown (spineFace draws it once per artwork and turn): kept on the GPU.
-      if (old?.image !== artwork) {
-        const tex = new THREE.CanvasTexture(artwork);
-        tex.flipY = false; // row 0 at the head, like the page images
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+      // The same artwork as shown (spineFace makes it once per artwork and turn): kept on the GPU.
+      if (old?.userData.source !== artwork) {
+        const anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+        let tex;
+        if (artwork.data) tex = makeInkTexture(artwork, anisotropy); // its inks
+        else {
+          tex = new THREE.CanvasTexture(artwork); // the client viewer's: sRGB, read raw as its pages are
+          tex.flipY = false; // row 0 at the head, like the page images
+          tex.colorSpace = THREE.NoColorSpace;
+          tex.anisotropy = anisotropy;
+        }
+        tex.userData.source = artwork;
         this.spineMat.map = tex;
       }
     } else {
       this.spineMat.map = null;
     }
+    this.spineInk.uSpots.value = this.spineMat.map?.userData.spots ?? this.noSpots;
+    uploads.spotInk(this, this.spineMat.map?.userData.spotNames ?? [], this.spineInk.uSpotInk.value);
     this.spineColor = color;
     // The spine's corners, where the cover folds round onto it: the artwork's own edge there,
     // row by row (the slab's side faces take its edge columns, see makeExtras), or the colour.

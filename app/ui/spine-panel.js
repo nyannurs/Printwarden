@@ -5,10 +5,11 @@ import { inkToRgb, mixInks, naiveLut } from "../viewer/inklut.js";
 import { coverOf } from "../core/paper.js";
 import { calculatedSpine, coverMmFor, hasSpine, paperForSpine, spineTakesArtwork } from "../core/spine.js";
 import { openPdf } from "../pdf/load.js";
+import { mipChain } from "../pdf/mips.js";
 import { renderOnce } from "../pdf/render.js";
 import { pickPdf } from "../platform.js";
 import { scene, state, updateSetup } from "./app.js";
-import { profileBytes } from "./colour.js";
+import { profileBytes, spotsChanged } from "./colour.js";
 import { spinePanel } from "./dialogs.js";
 import { toast } from "./dom.js";
 
@@ -93,12 +94,57 @@ export function applySpine(previewColour = null) {
  * look at the spine), and mirrored left to right, because the face's texture runs from the
  * front cover's side to the back's, the opposite of the artwork. (Checked with four
  * coloured corners: the artwork's top at the head, its right edge against the front cover,
- * as on a book standing on a shelf.)
+ * as on a book standing on a shelf.) The artwork is its inks (as the pages are, so the plates
+ * and the profile change it with them), turned texel by texel, with its smaller copies.
  */
-let face = null; // {image, quarters, canvas}: the last face drawn (the same one shows until either changes)
+let face = null; // {image, quarters, out}: the last face made (the same one shows until either changes)
 
 function spineFace(image, quarters) {
-  if (face?.image === image && face.quarters === quarters) return face.canvas;
+  if (face?.image === image && face.quarters === quarters) return face.out;
+  const { width: w, height: h } = image;
+  const turned = quarters % 2 === 1;
+  const W = turned ? h : w;
+  const H = turned ? w : h;
+  // Where texel (x, y) goes: as a canvas mirrored and then turned would draw it.
+  const to = [
+    (x, y) => [w - 1 - x, y],
+    (x, y) => [y, x],
+    (x, y) => [x, h - 1 - y],
+    (x, y) => [h - 1 - y, w - 1 - x],
+  ][((quarters % 4) + 4) % 4];
+  const turn = (src) => {
+    if (!src) return null;
+    const out = new Uint8Array(W * H * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const [X, Y] = to(x, y);
+        const a = (y * w + x) * 4, b = (Y * W + X) * 4;
+        out[b] = src[a]; out[b + 1] = src[a + 1]; out[b + 2] = src[a + 2]; out[b + 3] = src[a + 3];
+      }
+    }
+    return out;
+  };
+  const data = turn(image.data);
+  const spots = turn(image.spots);
+  const levels = Math.floor(Math.log2(Math.max(W, H)));
+  const out = { width: W, height: H, data, spots, spotNames: image.spotNames ?? [],
+    mips: mipChain(data, W, H, levels), spotMips: spots ? mipChain(spots, W, H, levels) : undefined };
+  face = { image, quarters, out };
+  return out;
+}
+
+/**
+ * The spine's artwork as a picture, turned as it shows (the client viewer's: sRGB, as printed),
+ * or null without any.
+ * @returns {Promise<HTMLCanvasElement | null>}
+ */
+export async function spineArtPicture() {
+  const art = spineTakesArtwork(state.setup.binding) ? state.spineArt : null;
+  if (!art) return null;
+  const { width, height } = art.sizeMm;
+  const px = Math.round(height >= width ? 2400 : (2400 * height) / width);
+  const image = await renderOnce(art.bytes, 0, art.box, px, await profileBytes(state.colour, state.colour.choice));
+  const quarters = state.setup.spine.rotation;
   const turned = quarters % 2 === 1;
   const canvas = document.createElement("canvas");
   canvas.width = turned ? image.height : image.width;
@@ -108,7 +154,7 @@ function spineFace(image, quarters) {
   g.scale(-1, 1);
   g.rotate((quarters * Math.PI) / 2); // mirrored: turns clockwise as seen on the spine
   g.drawImage(image, -image.width / 2, -image.height / 2);
-  face = { image, quarters, canvas };
+  image.close();
   return canvas;
 }
 
@@ -121,10 +167,10 @@ export async function importSpineArt(file = null) {
     if (!pages.length) throw new Error("This PDF has no pages.");
     const box = pages[0].trimBox ?? pages[0].mediaBox;
     const art = { name: file.name, bytes: file.bytes, box, sizeMm: { width: box.x1 - box.x0, height: box.y1 - box.y0 } };
-    art.image = await renderSpineArt(art);
+    Object.assign(art, await renderSpineArt(art));
     // Only now, with the new one ready, does it replace any artwork shown so far.
-    state.spineArt?.image?.close();
     state.spineArt = art;
+    spotsChanged();
     // Laid out lying down (wider than tall): start turned upright. Rotate spine turns it.
     state.setup.spine.rotation = art.sizeMm.width > art.sizeMm.height ? 1 : 0;
     applySpine();
@@ -135,12 +181,17 @@ export async function importSpineArt(file = null) {
   spine?.refresh();
 }
 
-/** Render spine artwork: at most 2400 px along its long side, with the current CMYK profile. */
+/**
+ * Render spine artwork: at most 2400 px along its long side, its inks in the current CMYK
+ * profile (drawn through the ink table as the pages are: the plates switch it too), and its
+ * spot colours with their looks.
+ * @returns {Promise<{image: any, spots: {name: string, cmyk: number[]}[]}>}
+ */
 export async function renderSpineArt(art) {
   const { width, height } = art.sizeMm;
   const px = Math.round(height >= width ? 2400 : (2400 * height) / width);
   const profile = await profileBytes(state.colour, state.colour.choice);
-  return renderOnce(art.bytes, 0, art.box, px, profile);
+  return renderOnce(art.bytes, 0, art.box, px, profile, { mode: "ink" });
 }
 
 let spine = null; // the open spine panel, if any
@@ -171,8 +222,8 @@ export function openSpinePanel() {
     setWidth: (mm) => updateSetup({ spine: { ...state.setup.spine, widthMm: mm } }),
     importArtwork: () => importSpineArt(),
     removeArtwork: () => {
-      state.spineArt?.image?.close();
       state.spineArt = null;
+      spotsChanged(); // its own spots go with it
       applySpine();
       spine?.refresh();
     },

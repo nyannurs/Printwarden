@@ -103,18 +103,18 @@ export async function applyProfile() {
   // The spots' looks are in the profile (what MuPDF composites them as): asked for again.
   const spots = await renderer.spots();
   if (run !== profileRun || state.renderer !== renderer) return;
-  state.spots = spots;
-  refreshPlates(); // the rows' circles, and the looks to the views
+  spotsChanged(spots); // the rows' circles, and the looks to the views
   filmstrip.refreshInk();
   inspector.render(state.analysis, state.name, state.colour);
   applySpine(); // the covers' edge colours come through the table
-  // Spine artwork is an sRGB image, drawn through the profile.
+  // Spine artwork is its inks in the profile (RGB content converted into it), as the pages are:
+  // drawn again, its spots' looks with it.
   const art = state.spineArt;
   if (art) {
-    renderSpineArt(art).then((image) => {
-      if (state.spineArt !== art) return image.close();
-      art.image.close();
-      art.image = image;
+    renderSpineArt(art).then((drawn) => {
+      if (state.spineArt !== art) return;
+      Object.assign(art, drawn);
+      spotsChanged();
       applySpine();
     }, (err) => console.error(err));
   }
@@ -144,6 +144,18 @@ export function setPlates(process, spotsOff = []) {
     state.renderer.setSpotsOff(spotsOff);
     if (state.spots.some((s) => s.composited.length)) redrawInks(); // only pages whose stamp changed are drawn
   }
+}
+
+/**
+ * The spot colours (state.spots): the document's (`fromDocument`, as its renderer lists them),
+ * and those of the spine's artwork it doesn't have (an imported spine PDF may print a spot of its
+ * own): each a row in the Separations window, and its look to the views (refreshPlates).
+ */
+export function spotsChanged(fromDocument = state.documentSpots) {
+  state.documentSpots = fromDocument;
+  const own = (state.spineArt?.spots ?? []).filter((s) => !fromDocument.some((d) => d.name === s.name));
+  state.spots = [...fromDocument, ...own.map((s) => ({ name: s.name, cmyk: s.cmyk, pages: [], composited: [] }))];
+  refreshPlates();
 }
 
 /**

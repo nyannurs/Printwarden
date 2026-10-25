@@ -118,13 +118,19 @@ let jobIds = 0;
 
 /**
  * Render one area of a small, separate PDF (e.g. spine artwork) in a thread of its own, with
- * the same colour management as the book. The thread ends when done.
- * @returns {Promise<ImageBitmap>}
+ * the same colour management as the book. The thread ends when done. `mode` "ink": the inks
+ * (see mupdf-render.js), and with them the file's spot colours and their looks (`spots`).
+ * @param {Uint8Array | null} [cmykProfile]
+ * @param {{mode?: "rgb" | "ink"}} [options]
+ * @returns {Promise<any>} an ImageBitmap; inks: {image, spots}
  */
-export async function renderOnce(bytes, pageIndex, rectMm, height, cmykProfile = null) {
+export async function renderOnce(bytes, pageIndex, rectMm, height, cmykProfile = null, options = {}) {
+  const mode = options.mode ?? "rgb";
   const pool = await WorkerPool.start(bytes, [spawnWorker()], cmykProfile);
   try {
-    return await pool.render(pageIndex, rectMm, height, 0, { cache: false });
+    if (mode !== "ink") return await pool.render(pageIndex, rectMm, height, 0, { cache: false });
+    const image = await pool.render(pageIndex, rectMm, height, 0, { cache: false, mode: "ink" });
+    return { image, spots: await pool.spots() };
   } finally {
     pool.destroy();
   }

@@ -114,7 +114,7 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 ## The spine (`spine-panel.js`)
 
 - **The color presets** are sampled from each cover's spine edge: the average color along the front cover's left edge and the back cover's right edge, as printed on the paper's color. White and black are added.
-- **Spine artwork** is a PDF's first page within its trim box. It is rendered with the current profile, at most 2400 px along its long side.
+- **Spine artwork** is a PDF's first page within its trim box (or a case wrap's spine). It is rendered as its inks with the current profile, at most 2400 px along its long side, and drawn as the pages are: the plates, the spot colors and the profile change it with them. Spot colors only the spine artwork has get their own pills in the Separations menu. The client viewer gets it as a picture, as printed.
 - **`spineFace`** turns it in quarter turns and mirrors it, because the spine face's texture runs from the front cover's side to the back's. That was checked with four colored corners: the artwork's top at the head, its right edge against the front cover, as on a book standing on a shelf.
 
 ## Spot finishes (`finish.js`)

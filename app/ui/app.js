@@ -17,7 +17,7 @@ import { tileBudget } from "../viewer/tiles.js";
 import { BookScene } from "../viewer/scene.js";
 import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js";
 import { buildClientHtml, exportClientViewer } from "./client.js";
-import { applyProfile, colourOptions, profileBytes, setColourProfile, setPlates } from "./colour.js";
+import { applyProfile, colourOptions, profileBytes, setColourProfile, setPlates, spotsChanged } from "./colour.js";
 import { InkView } from "./inkview.js";
 import { makeCompass } from "./compass.js";
 import { aboutDialog, exportChoiceDialog, exportDialog, importDialog } from "./dialogs.js";
@@ -59,7 +59,8 @@ export const state = {
   // colour.options) and the spot plates left out (names). A page's images carry it (inkStamp in
   // pages.js); a change draws again what it changes (redrawInks).
   drawn: { profile: "builtin", spotsOff: /** @type {string[]} */ ([]) },
-  spots: /** @type {{name: string, cmyk: number[], pages: number[], composited: number[]}[]} */ ([]), // the document's spot colours, once the renderer listed them
+  spots: /** @type {{name: string, cmyk: number[], pages: number[], composited: number[]}[]} */ ([]), // the spot colours: the document's, once the renderer listed them, and the spine artwork's (colour.js spotsChanged)
+  documentSpots: /** @type {{name: string, cmyk: number[], pages: number[], composited: number[]}[]} */ ([]), // the document's alone
   spotInks: /** @type {Map<string, number[]>} */ (new Map()), // the spots that print, by name: their looks in CMYK (colour.js)
   flapKey: "", // which flap images the 3D covers show (see applyCoverExtras)
   background: "#56575b", // 3D backdrop colour, remembered between launches
@@ -153,6 +154,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     state.colour = colourOptionsOfFile;
     state.drawn = { profile: colourOptionsOfFile.choice, spotsOff: [] }; // as the new threads start (startRenderers)
     state.spots = [];
+    state.documentSpots = [];
     state.spotInks = new Map();
     state.renderer?.destroy();
     state.renderer = null;
@@ -164,8 +166,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
       applyProfile().catch((err) => console.error(err)); // the ink table for the 3D view and the timeline
       r.spots().then((spots) => {
         if (state.renderer !== r) return;
-        state.spots = spots;
-        refreshPlates(); // a row for each, and the spots to the views as their plates are
+        spotsChanged(spots); // a row for each, and the spots to the views as their plates are
       }, (err) => console.error(err));
     });
     state.bytes = file.bytes;
@@ -174,8 +175,7 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
     state.cover = coverPages ? { name: cover.name, bytes: cover.bytes, pages: coverPages } : null;
     // Paper and wire are choices about the print job, not the file: they carry over.
     state.setup = { ...defaultSetup(), paper: state.setup.paper, wire: state.setup.wire, source };
-    state.spineArt?.image?.close(); // spine artwork belongs to a document
-    state.spineArt = null;
+    state.spineArt = null; // spine artwork belongs to a document
     for (const image of state.finish?.images.values() ?? []) image.close(); // so does a finish
     state.finish = null;
     scene.setFinish({ kind: 0, images: new Map() });
@@ -258,14 +258,11 @@ async function adoptCover() {
   const rect = state.analysis.coverFile?.spineRect;
   if (!rect) return;
   const art = { name: cover.name, bytes: cover.bytes, box: rect, sizeMm: { width: rect.x1 - rect.x0, height: rect.y1 - rect.y0 } };
-  art.image = await renderSpineArt(art);
-  if (state.cover !== cover) { // another file since
-    art.image.close();
-    return;
-  }
-  state.spineArt?.image?.close();
+  Object.assign(art, await renderSpineArt(art));
+  if (state.cover !== cover) return; // another file since
   state.spineArt = art;
   state.setup.spine.rotation = 0;
+  spotsChanged();
   applySpine();
 }
 
