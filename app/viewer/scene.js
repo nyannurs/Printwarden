@@ -292,7 +292,14 @@ ${TILE_GLSL}
     vec2 dy = pvTurnDir( dFdy( vMapUv ) );
     vec4 ink;
     vec4 spots;
-    if ( !pvTile( at, dx, dy, ink, spots ) ) {
+    // Within two of its base texels of the artwork's edge, its base image: a tile reaches past
+    // the edge (TILE_BORDER), and past a spine PDF's edge is white paper, which the edge's texels
+    // took half of. (The corners where the cover folds onto the spine show the edge column
+    // itself: drawn from the tiles they turned whitish, a light seam the spine's length, the
+    // author, 1.1.0.)
+    vec2 margin = 2.0 / max( uTilePage.xy, vec2( 1.0 ) );
+    bool atEdge = any( lessThan( at, margin ) ) || any( greaterThan( at, 1.0 - margin ) );
+    if ( atEdge || !pvTile( at, dx, dy, ink, spots ) ) {
       ink = pageSample( map, at, dx, dy );
       spots = pageSample( uSpots, at, dx, dy );
     }
