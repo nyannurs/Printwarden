@@ -21,7 +21,7 @@
 // readback itself (drawn.test.js).
 
 import * as THREE from "three";
-import { HOLE_OFFSET_MM } from "../app/viewer/model.js";
+import { CASE_COVER_MM, HOLE_OFFSET_MM } from "../app/viewer/model.js";
 import { LEAF_FILL, LEAF_ROWS, MID_ROW, sheetShader } from "../app/viewer/shaders.js";
 
 const READ_WIDTH = 1024; // the readback target's width, in vertices
@@ -832,8 +832,38 @@ export function restoreView(scene, report) {
     Object.assign(leaf, { ...l, start: l.start == null ? null : scene.clock + l.start });
   });
   scene.lastFrameTime = scene.clock;
-  Object.assign(scene.rig, s.rig);
+  // The camera as it was, held there: a rig left springing home, or still gliding home from the
+  // preset set above, took a close-up's zoom and pan back to the preset's framing.
+  Object.assign(scene.rig, s.rig, { pan: { ...s.rig.pan }, springing: false, dragging: false, resetting: null });
   scene.zoomBias = s.zoomBias;
   scene.geometryDirty = true;
   scene.debugStep();
+}
+
+// --- the headband ------------------------------------------------------------------------------
+
+/**
+ * How far each end of each headband's bead goes past the inside of the case's side wall beside
+ * it (mm, along the block's spine from the outer sheet's root: the sheet's half, the board less
+ * the covering): > 0, its open end is in the covering, unseen; < 0, it stops short, in the open.
+ * @returns {number[]} per headband, its two ends
+ */
+export function headbandEnds(scene) {
+  const m = scene.model;
+  const n = scene.leaves.length;
+  const lo = scene.leaves[1].profile, hi = scene.leaves[n - 2].profile;
+  let ax = hi.x[0] - lo.x[0], ay = hi.y[0] - lo.y[0];
+  const al = Math.hypot(ax, ay) || 1;
+  ax /= al;
+  ay /= al;
+  const wall = (t) => t / 2 + m.thickness[0] - CASE_COVER_MM;
+  const out = [];
+  for (const band of scene.extras.headbands) {
+    const path = band.geometry.parameters?.path;
+    if (!path) continue;
+    const a = path.getPoint(0), b = path.getPoint(1);
+    out.push(-((a.x - lo.x[0]) * ax + (a.y - lo.y[0]) * ay) - wall(m.thickness[1]));
+    out.push((b.x - hi.x[0]) * ax + (b.y - hi.y[0]) * ay - wall(m.thickness[n - 2]));
+  }
+  return out;
 }

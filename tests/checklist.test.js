@@ -10,6 +10,7 @@ import { calculatedSpine, CASE_JOINT_MM, CASE_SQUARE_MM } from "../app/core/spin
 import { rect } from "../app/core/units.js";
 import { HOLE_OFFSET_MM, leafShape, makeBook, signatureSheets } from "../app/viewer/model.js";
 import { BookScene } from "../app/viewer/scene.js";
+import { headbandEnds } from "./drawn.js";
 import { eq, near, ok, test } from "./harness.js";
 
 const A5 = rect(0, 0, 148, 210);
@@ -84,9 +85,10 @@ test("hardcover: the boards' thickness sets the spine and the 3D block; the head
               for (const [rx, ry] of roots) d = Math.min(d, Math.hypot(px - rx, py - ry));
               far = Math.max(far, d);
             }
-            // Within the hollow (its depth, 1.7 mm) and its reach into the case's corners (up to
-            // 1 mm past the block's outer sheets): farther is floating.
-            ok(far < m.foldDepth + 3.2, `${label}: a point of the headband ${far.toFixed(1)} mm from the nearest root (floating)`);
+            // Within the hollow (its depth, 1.7 mm) and its reach into the case's walls (the
+            // board less the covering past the block's outer sheets, and half the bead on):
+            // farther is floating.
+            ok(far < m.foldDepth + 2 * 0.83 + m.thickness[0] - 1.2 + 1, `${label}: a point of the headband ${far.toFixed(1)} mm from the nearest root (floating)`);
             // The bead touches the folds: its nearest point to the roots is a fold's depth away, not more.
             let nearest = Infinity;
             for (let k = 0; k < pos.count; k += 3) {
@@ -95,7 +97,14 @@ test("hardcover: the boards' thickness sets the spine and the 3D block; the head
               for (const [rx, ry] of roots) nearest = Math.min(nearest, Math.hypot(px - rx, py - ry));
             }
             ok(nearest < m.foldDepth + 0.35, `${label}: the bead's nearest point is ${nearest.toFixed(2)} mm from the roots, the folds reach ${m.foldDepth.toFixed(2)}`);
-            ok(band.userData.caps.every((c) => c.visible && c.geometry.attributes.position.count > 20), "closed at both ends");
+            // Shut, its ends in the case's walls (it meets the case at the shoulders); open, at
+            // the block's sides (it stays with the block); cut flat either way, never hollow,
+            // never a pill's round caps (the author, 1.1.0).
+            const ends = headbandEnds(scene);
+            const wall = m.thickness[0] - 1.2; // the board less the covering: the block's side to the wall
+            const want = scene.closed >= 1 ? (e) => e > 0 : (e) => Math.abs(e + wall) < 0.01;
+            ok(ends.every(want), `${label}: its ends ${ends.map((e) => e.toFixed(2)).join(", ")} mm past the case's walls (${scene.closed >= 1 ? "shut: into them" : `open: at the block's sides, ${(-wall).toFixed(2)}`})`);
+            ok(band.userData.ends.every((e) => e.visible), `${label}: its ends cut flat`);
             ok(n > 4, "leaves");
           }
         }

@@ -124,13 +124,14 @@ export function makeExtras(scene) {
     extras.headbands = [-1, 1].map((sgn) => {
       const bead = new THREE.Mesh(new THREE.BufferGeometry(), scene.headbandMat);
       const tail = new THREE.Mesh(new THREE.BufferGeometry(), scene.headbandMat);
-      // The bead's ends, closed (a tube is open at both ends: seen from the spine's end the
-      // headband looked hollow, 0.17.83).
-      const cap = new THREE.SphereGeometry(HEADBAND.beadRadius, 12, 8);
-      const caps = [new THREE.Mesh(cap, scene.headbandMat), new THREE.Mesh(cap, scene.headbandMat)];
+      // The bead's ends, cut flat: a disc across the cord at each end (a tube is open at both
+      // ends: seen from the spine's end the headband looked hollow, 0.17.83; round caps made it
+      // a pill, 1.1.0).
+      const cut = new THREE.CircleGeometry(HEADBAND.beadRadius, 12);
+      const ends = [new THREE.Mesh(cut, scene.headbandMat), new THREE.Mesh(cut, scene.headbandMat)];
       bead.castShadow = tail.castShadow = true;
-      bead.userData = { sgn, z: sgn * (h / 2 - HEADBAND.beadRadius * HEADBAND.beadDrop), tail, caps };
-      group.add(bead, tail, ...caps);
+      bead.userData = { sgn, z: sgn * (h / 2 - HEADBAND.beadRadius * HEADBAND.beadDrop), tail, ends };
+      group.add(bead, tail, ...ends);
       return bead;
     });
   } else if (style.spine === "coil") {
@@ -384,15 +385,22 @@ export function layoutExtras(scene) {
       const a = beadPath[beadPath.length - 1].clone().sub(beadPath[0]).normalize();
       // Into the corner, no further than a millimetre: with thick boards the case's corners
       // stand well beyond the block, and a headband wider than the block would read as one.
-      const reach = (t) => Math.min(1, Math.max(0, t / 2 + m.thickness[0] - CASE_COVER_MM - HEADBAND.beadRadius));
+      // Shut, into the case's side wall (its inside: the outer sheet's half, the board less the
+      // covering, past the sheet's root) and half its radius on, its ends hidden in the
+      // covering: it meets the case at the shoulders. Open, the block leaves the case (the
+      // headband is glued to the block, not the case) and it ends at the block's sides, cut
+      // flat. (Until 1.1.0 it stopped in the corners, a millimetre at most, closed there with
+      // round caps: "a pill", the author.)
+      const shut = scene.closed * scene.closed * (3 - 2 * scene.closed);
+      const reach = (t) => t / 2 + shut * (m.thickness[0] - CASE_COVER_MM + HEADBAND.beadRadius / 2);
       beadPath.unshift(beadPath[0].clone().addScaledVector(a, -reach(m.thickness[1] ?? 0)));
       beadPath.push(beadPath[beadPath.length - 1].clone().addScaledVector(a, reach(m.thickness[m.leafCount - 2] ?? 0)));
     }
     // Rebuilt only when the spine moved (a page turning over the block leaves it as it is).
     const along = beadPath.flatMap((q) => [q.x, q.y]);
     for (const band of ex.headbands) {
-      const { tail, sgn, z, caps } = band.userData;
-      band.visible = tail.visible = caps[0].visible = caps[1].visible = beadPath.length >= 2;
+      const { tail, sgn, z, ends } = band.userData;
+      band.visible = tail.visible = ends[0].visible = ends[1].visible = beadPath.length >= 2;
       if (!band.visible) continue;
       const was = band.userData.along;
       if (was && was.length === along.length && was.every((v, k) => v === along[k])) continue;
@@ -400,8 +408,10 @@ export function layoutExtras(scene) {
       const curve = new THREE.CatmullRomCurve3(beadPath.map((q) => new THREE.Vector3(q.x, q.y, z)));
       band.geometry.dispose();
       band.geometry = new THREE.TubeGeometry(curve, Math.max(4, beadPath.length * 2), HEADBAND.beadRadius, 10, false);
-      caps[0].position.copy(curve.getPoint(0));
-      caps[1].position.copy(curve.getPoint(1));
+      for (const [end, t, out] of [[ends[0], 0, -1], [ends[1], 1, 1]]) {
+        end.position.copy(curve.getPoint(t));
+        end.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), curve.getTangent(t).multiplyScalar(out)); // (a circle faces +z)
+      }
       tail.geometry.dispose();
       tail.geometry = tailGeometry(tailPath, z, z - sgn * HEADBAND.tailLength);
     }
@@ -988,13 +998,14 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
   const back = book.foldDepth + CASE_HOLLOW + tc / 2;
   const C1 = { x: Pl.x - ax * wide(tl) + ox * back, y: Pl.y - ay * wide(tl) + oy * back };
   const C2 = { x: Ph.x + ax * wide(th) + ox * back, y: Ph.y + ay * wide(th) + oy * back };
-  // Each end: just under the board's outer face at its spine edge, a little inside the
-  // board (no seam opens).
+  // Each end: at the board's spine edge, its outside 0.02 mm below the board's face (some ten
+  // times what the depth buffer tells apart up close). (Until 1.1.0 it began 0.6 mm in on the
+  // board with its outside in the board's face itself: two surfaces in one plane along every
+  // board's spine edge, the cover's artwork serrated where they fought, the author's view
+  // report; and with the rolled ends below, that overlap stood out of the board's own roll.)
   const end = (p, outSign) => {
-    const dx = Math.sin(p.phi[0]);
-    const dy = Math.cos(p.phi[0]);
-    const at = (tb - tc) / 2;
-    return { x: p.x[0] + dx * 0.6 - Math.cos(p.phi[0]) * outSign * at, y: p.y[0] + dy * 0.6 + Math.sin(p.phi[0]) * outSign * at };
+    const at = (tb - tc) / 2 - 0.02;
+    return { x: p.x[0] - Math.cos(p.phi[0]) * outSign * at, y: p.y[0] + Math.sin(p.phi[0]) * outSign * at };
   };
   const A = end(pa, 1); // the front board's outside is its front
   const B = end(pb, -1); // the back board's, its back
@@ -1117,20 +1128,49 @@ function writeCaseSpine(geo, pa, pb, pl, ph, book, height, closedFraction = 0) {
     nIn.push([-nx, -ny, 0]);
   }
   const at = (row, z) => row.map(([x, y]) => [x, y, z]);
+  // The covering rolls over at head and foot (the headcap): the flat run stops half its
+  // thickness short of each end, and a half round, outside to inside, closes it, as the
+  // boards' edges are rolled (cut square until 1.1.0, its end stood out beside the boards'
+  // rolled edges: "the edge meets the spine body incorrectly", the author's view report).
+  const roll = tc / 2;
+  const hs = h2 - roll;
   // v: 0 at the head of the page (the squares beyond repeat the artwork's edge rows); a case
   // wrap's artwork is the boards' height, squares included.
-  const vHead = book.caseWrap ? 0 : (h2 - book.height / 2) / -book.height;
-  const vFoot = book.caseWrap ? 1 : 1 + (h2 - book.height / 2) / book.height;
+  const vAtZ = (z) => (book.caseWrap ? (z + h2) / height : (z + book.height / 2) / book.height);
+  const vHead = vAtZ(-hs);
+  const vFoot = vAtZ(hs);
   // u: across the flat spine, measured on its outside (the corners' outsides included); a case
   // wrap's across the whole outside, from the front board's edge to the back's.
   const u0 = book.caseWrap ? 0 : len[panelFrom] - (R + tc / 2) * 0.5;
   const u1 = book.caseWrap ? len[SEGS] : len[panelTo] + (R + tc / 2) * 0.5;
   const uAt = (j) => Math.min(1, Math.max(0, (len[j] - u0) / ((u1 - u0) || 1)));
   const uvOut = len.map((_, j) => [[uAt(j), vHead], [uAt(j), vFoot]]);
-  strip(outsideGroup, at(outer, -h2), at(outer, h2), nOut, uvOut);
-  strip(insideGroup, at(inner, h2), at(inner, -h2), nIn);
-  strip(2, at(inner, -h2), at(outer, -h2), outer.map(() => [0, 0, -1]));
-  strip(2, at(outer, h2), at(inner, h2), outer.map(() => [0, 0, 1]));
+  strip(outsideGroup, at(outer, -hs), at(outer, hs), nOut, uvOut);
+  strip(insideGroup, at(inner, hs), at(inner, -hs), nIn);
+  // Each end's roll: rows from the outside over the end to the inside, round the middle of the
+  // covering's thickness (half of it, the groove's press shared on the way round).
+  const ROLL_STEPS = 6;
+  for (const zs of [-1, 1]) {
+    const rows = [];
+    const norms = [];
+    for (let k = 0; k <= ROLL_STEPS; k++) {
+      const a = (Math.PI * k) / ROLL_STEPS; // 0: the outside, pi: the inside
+      const c = Math.cos(a);
+      const sn = Math.sin(a);
+      rows.push(outer.map(([ox2, oy2], j) => {
+        const [ix, iy] = inner[j];
+        const mx = (ox2 + ix) / 2;
+        const my = (oy2 + iy) / 2;
+        return [mx + ((ox2 - ix) / 2) * c, my + ((oy2 - iy) / 2) * c, zs * (hs + roll * sn)];
+      }));
+      norms.push(nOut.map(([nx, ny]) => [nx * c, ny * c, zs * sn]));
+    }
+    for (let k = 0; k < ROLL_STEPS; k++) {
+      const [a, b] = zs < 0 ? [rows[k + 1], rows[k]] : [rows[k], rows[k + 1]];
+      const uvs = len.map((_, j) => [[uAt(j), zs < 0 ? vHead : vFoot], [uAt(j), zs < 0 ? vHead : vFoot]]);
+      strip(k < ROLL_STEPS / 2 ? outsideGroup : insideGroup, a, b, (k < ROLL_STEPS / 2 ? norms[k] : norms[k + 1]), uvs);
+    }
+  }
   commitGeometry(geo, { position: [pos, 3], normal: [nor, 3], uv: [uv, 2] }, groups);
 }
 
