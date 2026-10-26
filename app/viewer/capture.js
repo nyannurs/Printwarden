@@ -334,7 +334,7 @@ export async function recordVideo(scene, own, { width, height, fps, durationMs, 
       while (pending.length && pending[0].at <= ms) pending.shift().run();
       await prepare(ms, plan?.need[i] ?? new Map());
       own.update(scene.clock);
-      while (scene.uploads.size) flushUploads(scene); // every page image for this frame
+      while (scene.uploads.size) flushUploads(scene, Infinity); // every page image for this frame
       frameCamera(scene);
       plan?.fix(); // the video's fixed camera: every page in the picture, no moving or pulsing
       placeCamera(scene);

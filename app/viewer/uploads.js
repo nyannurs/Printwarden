@@ -11,6 +11,10 @@ import { disposeTexture, freeImage, makeInkTexture, makeWarmer } from "./texture
 
 const UPLOADS_PER_FRAME = 2;
 const TILES_PER_FRAME = 3; // tiles to the GPU a frame (5.5 MB each with its mips: a frame at 130 Hz takes about three)
+// No more of either once a frame has spent this long on them (the first always goes): a tile
+// takes well under a millisecond on the author's Windows PC, so three still go; on the Mac,
+// through ANGLE to Metal, the tiles landing for a page just turned to took 60 ms in one frame.
+const UPLOAD_BUDGET_MS = 4;
 // Page images are filtered as stored (sRGB values) and only then turned into light: type
 // keeps its weight, the way browsers and Acrobat antialias it. Filtered as light, the grey
 // edge pixels of dark type on white come out too light, and text looks thin and grey.
@@ -285,13 +289,15 @@ export function prepareDetails(scene, only = null) {
 // --- textures ------------------------------------------------------------------------
 
 /**
- * The page images waiting (setPageTexture) to the GPU, UPLOADS_PER_FRAME of them: each made a
+ * The page images waiting (setPageTexture) to the GPU, UPLOADS_PER_FRAME of them at most (and
+ * none more once `budget` ms are spent; a capture passes Infinity): each made a
  * texture, drawn from once (warm), its pixels let go; shown on its page.
  */
-export function flushUploads(scene) {
+export function flushUploads(scene, budget = UPLOAD_BUDGET_MS) {
+  const t0 = performance.now();
   let n = 0;
   for (const [folio, { image }] of scene.uploads) {
-    if (n >= UPLOADS_PER_FRAME) break;
+    if (n >= UPLOADS_PER_FRAME || (n && performance.now() - t0 > budget)) break;
     scene.uploads.delete(folio);
     scene.pageTextures.get(folio)?.dispose();
     scene.pageTextures.delete(folio);
@@ -328,7 +334,7 @@ export function showAllPages(scene) {
 export function flushTiles(scene, time) {
   let changed = false;
   if (scene.tiles.pending) {
-    for (const folio of scene.tiles.flush(TILES_PER_FRAME, time)) bindTiles(scene, folio);
+    for (const folio of scene.tiles.flush(TILES_PER_FRAME, time, UPLOAD_BUDGET_MS)) bindTiles(scene, folio);
     changed = true;
   }
   return scene.tiles.tick(time) || changed;

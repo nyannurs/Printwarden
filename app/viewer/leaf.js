@@ -171,7 +171,9 @@ export function makeLeaf(scene, i) {
   // The faces between a flying stack's sheets (see layoutLeaves): each its page's image,
   // unlit (see inkFiller).
   const fillers = [inkFiller(scene, front), inkFiller(scene, back)];
-  const leaf = { i, mesh, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
+  // Every field a leaf ever has, from the start: one shape for all of them (fields added as
+  // first needed made the browser compile the layout over again, the first jump's hiccup).
+  const leaf = { i, mesh, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, settle: false, group: null, rows: null, rowsActive: false, written: null, pick: null, stale: true, fill: LEAF_FILL };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);

@@ -75,7 +75,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
  * @typedef {Omit<BookSpec, "thickness"> & {leafCount: number, style: any, thickness: number[],
  *            cum: number[], total: number, ground: number, signatureLeaves: number, foldDepth: number,
  *            firstBlockLeaf: number, rootShift: Float64Array, round: number,
- *            baseSamples?: Float64Array, piled?: any, scratch?: any,
+ *            baseSamples?: Float64Array, piled?: any, openPiled?: Map<string, any>, scratch?: any,
  *            signatureSheets?: [number, number][], signatureTrim?: number} & Partial<ReturnType<typeof coilGeometry>>} Book
  */
 
@@ -481,8 +481,17 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
   // While the book opens or closes they change every frame: last frame's shapes are then
   // written over (`spare`), not dropped (fresh arrays for every sheet each frame, megabytes
   // of them in a thick book, had the garbage collector stop frames).
+  // The open book's (on either side) are kept besides: opened or closed and back, a jump along
+  // the timeline finds every leaf's shape in the other pile still there (each worked out again
+  // in the jump's first frame, a stack of 95 sheets took 7 ms more of it, 2026-10-26), and
+  // none of them is written over as spare.
   const pilesKey = `${closed}|${side}`;
-  if (book.piled?.key !== pilesKey) book.piled = { key: pilesKey, piles: null, shapes: new Map(), spare: book.piled?.shapes ?? null };
+  if (book.piled?.key !== pilesKey) {
+    const was = book.piled;
+    book.openPiled ??= new Map();
+    book.piled = book.openPiled.get(pilesKey) ?? { key: pilesKey, piles: null, shapes: new Map(), spare: was && !book.openPiled.has(was.key) ? was.shapes : null };
+    if (closed === 0) book.openPiled.set(pilesKey, book.piled);
+  }
   const piled = book.piled;
   book.scratch ??= { ox: new Float64Array(M + 1), oy: new Float64Array(M + 1), len: new Float64Array(M + 1) };
   if (!piled.piles) {
@@ -637,7 +646,9 @@ export function layoutBook(book, leaves, { closed, side }, { cache = null, only 
     const offsets = new Float64Array(info.length);
     // The hair between each leaf and the next (see ORDER_GAP).
     const air = (q) => Math.min(1, Math.max(0, Math.min(q.e, 1 - q.e)) / AIR);
-    const gapAfter = info.map((q, r) => {
+    // (Numbers in a typed array: a plain one of whole zeros, a stack turning together, and
+    // one of fractions are stored apart, and the compiled layout was thrown out between them.)
+    const gapAfter = Float64Array.from(info, (q, r) => {
       const next = info[r + 1];
       if (!next || q.still || next.still) return 0;
       const g = leaves[q.i].group;

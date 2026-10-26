@@ -381,15 +381,17 @@ export class TileCache {
   }
 
   /**
-   * Up to `max` queued tiles to the GPU, at `now`.
+   * Up to `max` queued tiles to the GPU, at `now`; none more once `budget` ms are spent (the
+   * first always goes).
    * @returns {Set<number>} the folios whose tables are new (the scene binds them to the pages)
    */
-  flush(max, now) {
+  flush(max, now, budget = Infinity) {
+    const t0 = performance.now();
     const newTables = new Set();
     if (!this.queue.length || !this.#ensure()) { this.queue.length = 0; return newTables; }
     const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
     let n = 0;
-    while (this.queue.length && n < max) {
+    while (this.queue.length && n < max && !(n && performance.now() - t0 > budget)) {
       const { folio, level, ix, iy, page, tile, stamp } = this.queue.shift();
       const placed = this.index.place(folio, level, ix, iy, page, now, stamp, !!tile.spots);
       if (placed === null) { tile.close?.(); continue; } // every layer in use by this view: next time

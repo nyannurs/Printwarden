@@ -153,7 +153,7 @@ A page's look comes from three sources:
 
 How much of each page is on screen, and at what density, is measured by casting rays from a grid of screen points onto the pages (`visiblePages`). The rays meet the cross-section curve itself, not the triangles, so the result is exact at any zoom and angle.
 
-Image uploads are spread over frames, two a frame (`UPLOADS_PER_FRAME`), tiles three (`TILES_PER_FRAME`), and an image is freed from memory once it is on the graphics card. The view counts as at rest 120 ms after it stops, 350 ms after a page turn.
+Image uploads are spread over frames, at most two a frame (`UPLOADS_PER_FRAME`), tiles three (`TILES_PER_FRAME`), and none more once a frame has spent 4 ms on them (`UPLOAD_BUDGET_MS`; the first always goes): where uploads are slow, as through ANGLE to Metal on a Mac, a burst of tiles is spread over more frames instead of stalling one. An image is freed from memory once it is on the graphics card. The view counts as at rest 120 ms after it stops, 350 ms after a page turn.
 
 ## The scene and its frame loop
 
@@ -166,7 +166,7 @@ Image uploads are spread over frames, two a frame (`UPLOADS_PER_FRAME`), tiles t
 - **Reading back**: `visiblePages`, `sampleUnder`, `frameStats`.
 
 Each frame (`#frame`):
-1. **Update**: animations to the clock, the camera, the layout; the tiles up (three a frame) and fading in.
+1. **Update**: animations to the clock, the camera, the layout; the tiles up (three a frame, 4 ms at most) and fading in.
 2. **Draw**, only if something changed: an animation, input, a page image or a tile arriving. At rest nothing is drawn.
 3. **Uploads**: the next page images.
 
@@ -204,3 +204,7 @@ Zoom runs from 50 to 800 % of the preset's framing.
 - **The finish masks** of those pages where the capture needs them sharper than the screen's 1600 px (`finishAt` in ui/finish.js).
 - **The cover's flaps** likewise, when their page is in the picture (`refreshFlaps` in ui/app.js).
 - **The spine's artwork** as tall as the picture shows it (`spineAt` in ui/spine-panel.js; 2400 px on screen), its tiles off meanwhile.
+
+## The first jump along the timeline
+
+A stack of pages swung over at once is laid out from each sheet's shape in both piles. Those shapes depend only on how closed the book is and which side it lies on, and are kept (`layoutBook` in model.js); the open book's are kept even while it is closed, so opening and closing it again doesn't throw them away. After a book is built, while nothing moves, the scene lays out a few pretend jumps (`#warmLayout` in scene.js) and then the book as it lies, in the same moment, so nothing pretend is ever drawn: every sheet's shape in the other pile is ready, and the browser has compiled the layout's code for a stack in the air. Every leaf has all its fields from the start (`makeLeaf`) and the layout's numbers are in typed arrays, so the compiled code isn't thrown out when a leaf first turns. Before, the first jump's second and third frames took 21 and 12 ms of layout on the author's Windows PC (16 and 8 on the Mac); now 5 and 3.

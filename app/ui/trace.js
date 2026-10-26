@@ -12,6 +12,7 @@ import { FRAME_PARTS } from "../viewer/scene.js";
 
 const GAP_MS = 50; // a gap between frames this long counts as a stall
 const SLOWEST = 12; // frames listed in the report
+const SLOT_MS = 100; // the timeline's other events summed up this long at a time
 
 /**
  * Start recording. Returns stop(), which ends the recording, puts everything back as it was
@@ -178,22 +179,33 @@ function report({ scene, state, events, ticks, longs, renders, tiles, duration }
     lines.push(`  at ${k.t.toFixed(0)}: waited ${ms(k.gap)} ms; frame main thread ${ms(k.cpu)}${k.parts ? ` (${partsText(k.parts)})` : ""}${k.gpu != null ? `, gpu ${ms(k.gpu)}` : ""}`);
     for (const w of what) lines.push(`      ${w}`);
   }
+  // What happened: turns, opening and closing each on a line; the rest (page images, renders)
+  // summed up SLOT_MS at a time, so a stream of renders never pushes a turn off the list.
   lines.push("", "What happened (ms after the start):");
-  const shown = events.filter((e) => !/^page image|^sharp image/.test(e.what) || events.length < 80);
-  let lastLine = "";
-  let repeats = 0;
-  for (const e of shown.slice(0, 120)) {
-    const key = e.what.replace(/\d+( px)?/g, "#");
-    if (key === lastLine) {
-      repeats++;
-      continue;
-    }
-    if (repeats) lines.push(`        … ${repeats} more alike`);
-    repeats = 0;
-    lastLine = key;
-    lines.push(`  ${e.t.toFixed(0).padStart(6)}  ${e.what}`);
+  const major = (what) => /^turn|^open|^close/.test(what);
+  const slots = new Map();
+  for (const e of events) {
+    if (major(e.what)) continue;
+    const slot = Math.floor(e.t / SLOT_MS);
+    const kinds = slots.get(slot) ?? new Map();
+    const key = e.what.replace(/ \d.*$/, "");
+    const k = kinds.get(key) ?? { n: 0, vals: [] };
+    k.n++;
+    const v = e.what.match(/after (\d+) ms/);
+    if (v) k.vals.push(Number(v[1]));
+    kinds.set(key, k);
+    slots.set(slot, kinds);
   }
-  if (repeats) lines.push(`        … ${repeats} more alike`);
-  if (shown.length > 120) lines.push(`  (and ${shown.length - 120} more)`);
+  const rows = [
+    ...events.filter((e) => major(e.what)).map((e) => ({ t: e.t, text: e.what, slot: false })),
+    ...[...slots].map(([slot, kinds]) => ({
+      t: slot * SLOT_MS,
+      text: [...kinds].map(([key, k]) => `${key} ×${k.n}${k.vals.length ? ` (${Math.min(...k.vals)}–${Math.max(...k.vals)} ms)` : ""}`).join("; "),
+      slot: true,
+    })),
+  ].sort((a, b) => a.t - b.t);
+  if (!rows.length) lines.push("  nothing");
+  for (const r of rows.slice(0, 150)) lines.push(`  ${r.t.toFixed(0).padStart(6)}${r.slot ? `–${(r.t + SLOT_MS).toFixed(0)}` : ""}  ${r.text}`);
+  if (rows.length > 150) lines.push(`  (and ${rows.length - 150} more)`);
   return lines.join("\n");
 }

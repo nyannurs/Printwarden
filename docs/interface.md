@@ -134,7 +134,7 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 - **The frame counter**, updated four times a second from `scene.frameStats`.
 - **Black or white type** for the counter and the zoom value. Four times a second, the brightness of the picture under them is read back from the graphics card after a drawn frame (`scene.sampleUnder`). That is a few kilobytes, with no stall, and the better-contrasting color is chosen.
 - **Ctrl/Cmd+Shift+P** starts the performance check.
-- **Ctrl/Cmd+Shift+L** starts a recording (`trace.js`); the same again stops it and shows its report, to copy: every refresh's wait and the main thread's time by part, long tasks, the slowest moments with what happened around them (pages turned, the book opened or closed, page images, renders asked and landed, the heap collected).
+- **Ctrl/Cmd+Shift+L** starts a recording (`trace.js`); the same again stops it and shows its report, to copy: every refresh's wait and the main thread's time by part, long tasks, the slowest moments with what happened around them (pages turned, the book opened or closed, page images, renders asked and landed, the heap collected), and a timeline: every turn, opening and closing on a line of its own, the rest summed up a tenth of a second at a time.
 
 ## The performance check (`probe.js`)
 
@@ -143,7 +143,7 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 - The refresh rate, from frames with nothing drawn.
 - **Panning where the view is**: as is, at half the pixels, without re-pivoting onto the paper.
 - **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, and every sheet but the two open pages.
-- **Turning pages quickly**: as is and without shadows, each with the main thread's time by part (`FRAME_PARTS` in scene.js: the animations, laying out the sheets, uploads, finding the tiles the view needs, whether the shadow map is drawn again, sorting, the draw calls: the shadow map itself is drawn with them).
+- **Turning pages quickly**: as is and without shadows, each with the main thread's time by part (`FRAME_PARTS` in scene.js: the animations, laying out the sheets, page images and tiles to the graphics card (images, uploads), finding the tiles the view needs, whether the shadow map is drawn again, sorting, the draw calls: the shadow map itself is drawn with them).
 - **Dragging round three more views**: the closed book, the open book as framed, its piles from low at the fore-edge.
 - **Panning by hand**: the mouse's moves per second, frames drawn per second, the card's time.
 

@@ -56,13 +56,14 @@ const VIEW_FOV = 30; // the live view's lens (vertical, degrees): about 45 mm fu
 
 /**
  * The parts of a frame's main-thread time (frameLog.parts): the animations and the camera
- * brought on (update), the sheets laid out (layout: their shapes, to the GPU), page images and
- * tiles to the GPU (uploads), the tiles the view needs found (tiles: rays from the screen),
+ * brought on (update), the sheets laid out (layout: their shapes, to the GPU), page images to
+ * the GPU (images), tiles to the GPU (uploads), the tiles the view needs found (tiles: rays
+ * from the screen),
  * whether the shadow map is drawn again (shadows: three draws it with the frame, so its cost is
  * in draw; the performance check's run without shadows shows it), the sheets sorted (order),
  * the frame's draw calls (draw).
  */
-export const FRAME_PARTS = ["update", "layout", "uploads", "tiles", "shadows", "order", "draw"];
+export const FRAME_PARTS = ["update", "layout", "images", "uploads", "tiles", "shadows", "order", "draw"];
 const PART = Object.fromEntries(FRAME_PARTS.map((name, i) => [name, i]));
 
 const easeTurn = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t); // gentle, like a hand
@@ -561,6 +562,60 @@ ${TILE_GLSL}
     this.pageFrame = Math.abs(this.coverShift);
     this.coverFrame = this.#coverSide() ? 1 : 0;
     frameCamera(this);
+    this.#warmLayout(this.model);
+  }
+
+  /**
+   * A stack of pages in the air laid out a few times while nothing moves, then the book as it
+   * lies laid out again: the first jump along the timeline took 14-22 ms of layout in each of
+   * its first frames (30 on the author's Mac, a hiccup), a third jump 2 to 4. Every leaf's
+   * shape in the other pile is worked out and kept (see layoutBook), and the browser compiles
+   * the layout's code for what it does the first few times it runs. Nothing is drawn between:
+   * the book is laid out back as it was in the same moment. One pose a quiet moment
+   * (requestIdleCallback), until a new book.
+   */
+  #warmLayout(model, pose = 0) {
+    // Which pile goes over (1: the right one to the left), how far over it is; the last: a
+    // page alone (its rows, corner-led). Every page of a pile, so each one's shape in the
+    // other pile is kept too (see layoutBook).
+    const POSES = [[1, 0.02], [1, 0.2], [1, 0.5], [1, 0.8], [-1, 0.05], [-1, 0.5], [0, 0.5]];
+    if (this.model !== model || pose >= 2 * POSES.length) return; // each twice: the code compiled for them
+    const later = () => requestIdleCallback(() => this.#warmLayout(model, pose), { timeout: 2000 });
+    if (!this.settled || this.capturing || this.geometryDirty || this.leaves.some((l) => l.start != null)) {
+      setTimeout(later, 500);
+      return;
+    }
+    const n = this.leaves.length;
+    const j = this.opening;
+    const [dir, p] = POSES[pose % POSES.length];
+    // The covers stay (they open or close the book).
+    const to = dir > 0 ? n - 1 : dir < 0 ? 1 : Math.min(n - 1, j + 1);
+    const sent = this.leaves.filter((l) => l.i >= Math.min(j, to) && l.i < Math.max(j, to) && l.i > 0 && l.i < n - 1);
+    const fields = ["theta", "from", "to", "start", "duration", "curl", "curlFrom", "settle", "group"];
+    const kept = sent.map((l) => fields.map((f) => l[f]));
+    for (const l of sent) {
+      l.from = l.theta;
+      l.to = restingAngle(this.model, l.i, to);
+      l.start = 0;
+      l.duration = 1;
+      l.curlFrom = 0;
+      l.settle = false;
+      l.theta = lerp(l.from, l.to, p);
+      l.curl = turnCurl(l.from, l.to, p);
+      l.group = "warm";
+    }
+    if (sent.length) {
+      // Laid out open, as the timeline's jumps are (the open book's shapes are kept, see
+      // layoutBook), even while the book lies closed.
+      const closed = this.closed;
+      this.closed = 0;
+      layoutLeaves(this);
+      this.closed = closed;
+      sent.forEach((l, s) => fields.forEach((f, q) => { l[f] = kept[s][q]; }));
+      layoutLeaves(this);
+    }
+    pose++;
+    later();
   }
 
   /**
@@ -1277,7 +1332,7 @@ ${TILE_GLSL}
     // A set clock (a video, or a test stepping through frames) is the only time: the screen's
     // own frames mustn't advance animations under it.
     const { animating, moving } = this.#update(this.clock ?? time);
-    parts[PART.update] = performance.now() - started - parts[PART.layout] - parts[PART.uploads];
+    parts[PART.update] = performance.now() - started - parts[PART.layout] - parts[PART.images] - parts[PART.uploads];
     const inMotion = animating || moving;
     const draw = inMotion || this.dirty;
     this.#readGpuTime();
@@ -1479,8 +1534,10 @@ ${TILE_GLSL}
     const t1 = performance.now();
     if (this.uploads.size) uploads.flushUploads(this);
     else if (this.detailQueue.size && this.settled) uploads.prepareDetails(this);
+    const t2 = performance.now();
+    this.partTimes[PART.images] = t2 - t1;
     if (uploads.flushTiles(this, time)) this.dirty = true;
-    this.partTimes[PART.uploads] = performance.now() - t1;
+    this.partTimes[PART.uploads] = performance.now() - t2;
     // Wheel zoom and pan change the camera outside the rig's own animations: count them
     // as motion too (the tiles the view needs are asked for as it moves, see ui/tiles.js).
     glideZoom(this, time);
