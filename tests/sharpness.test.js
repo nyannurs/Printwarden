@@ -192,17 +192,15 @@ test("REGRESSION: a page showing a video's image draws that, not tiles kept from
     const mips = Array.from({ length: TILE_MIPS }, (_, i) => new Uint8Array((TILE >> (i + 1)) ** 2 * 4));
     scene.tiles.queueTile(5, 1, 0, 0, page, { data: new Uint8Array(TILE * TILE * 4), mips });
     scene.debugSample(0.5, 0.5); // a frame: the tile goes up, the table is bound
-    const tileOn = () => scene.pageTable.get(5, 2, 0); // page 5's row of the page table (pagedata.js)
-    eq(tileOn(), 1, "the page draws from its tiles");
+    const u = scene.leaves[2].front.userData.uniforms; // page 5
+    eq(u.uTileOn.value, 1, "the page draws from its tiles");
     const canvas = new OffscreenCanvas(64, 64);
     canvas.getContext("2d").fillRect(0, 0, 64, 64);
     const image = await createImageBitmap(canvas);
     scene.showPageImage(5, image);
-    eq(tileOn(), 0, "showing a video's image: no tiles");
-    eq(scene.leaves[2].front.userData.uniforms.uOwn.value, 1, "drawn from that image");
+    eq(u.uTileOn.value, 0, "showing a video's image: no tiles");
     scene.showPageImage(5, null);
-    eq(tileOn(), 1, "its own again: its tiles again");
-    eq(scene.leaves[2].front.userData.uniforms.uOwn.value, 0);
+    eq(u.uTileOn.value, 1, "its own again: its tiles again");
   } finally {
     box.remove();
   }

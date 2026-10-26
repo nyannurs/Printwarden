@@ -117,126 +117,25 @@ export function inkUniforms(shader, shared) {
   shader.uniforms.uInkPages = shared.uInkPages;
 }
 
-// The pages' data by folio (viewer/pagedata.js): the page table, a row a folio, and the page
-// array, a layer an image (its spot channels another). A page's image is read at its scale in
-// its layer (1 for a page the layer's size); a page without one is paper (no ink, or white for
-// sRGB pages), without spot channels no spots. The folio comes from the vertex (vFolio, see
-// SHEET_VERTEX), or is any folio asked for (the other side of the leaf, a fold's pages).
-// A layer number says which array: 0 and up the page array's, -1 none, -2 and down the sharp
-// array's (layer -2 - n: a video's or a screenshot's sharper image of the page, see pvBest).
-const PAGE_LAYERS_GLSL = /* glsl */ `
-vec4 pvLayerGrad( float layer, vec2 uv, vec2 dx, vec2 dy, vec4 none ) {
-  if ( layer < -1.5 ) return textureGrad( uSharp, vec3( uv, -layer - 2.0 ), dx, dy );
-  if ( layer < 0.0 ) return none;
-  return textureGrad( uPages, vec3( uv, layer ), dx, dy );
-}
-vec4 pvLayerAt( float layer, vec2 uv, float bias, vec4 none ) {
-  if ( layer < -1.5 ) return texture( uSharp, vec3( uv, -layer - 2.0 ), bias );
-  if ( layer < 0.0 ) return none;
-  return texture( uPages, vec3( uv, layer ), bias );
-}
-// A page's image, as every reader takes it: its sharper one where it has one, else its own
-// (the page table's texel 0: the layer, the spot channels' layer, the scale in the layer).
-vec4 pvBest( int folio ) {
-  vec4 own = texelFetch( uPageTable, ivec2( 0, folio ), 0 );
-  vec4 sharp = texelFetch( uPageTable, ivec2( 10, folio ), 0 );
-  return sharp.x >= 0.0 ? vec4( -sharp.x - 2.0, sharp.y >= 0.0 ? -sharp.y - 2.0 : -1.0, sharp.zw ) : own;
-}
-`;
-export const PAGE_DATA_GLSL = /* glsl */ `
-uniform highp sampler2D uPageTable;
-uniform highp sampler2DArray uPages;
-uniform highp sampler2DArray uSharp;
-${PAGE_LAYERS_GLSL}
-vec4 pvPageTexel( int folio, int t ) {
-  return texelFetch( uPageTable, ivec2( t, folio ), 0 );
-}
-vec4 pvPaper() {
-  return uInkPages > 0.5 ? vec4( 0.0 ) : vec4( 1.0 );
-}
-// A page image sampled by the GPU's own trilinear, anisotropic filter, with the gradients
-// shortened a little (0.7: half a mipmap level finer than the footprint asks), so an image at
-// about one pixel per screen pixel is read from its full level, not blended with the next
-// smaller one. (Four taps a pixel until 0.17.75: soft at the image's own size, moiré smaller.)
-vec4 pvImage( float layer, vec2 scale, vec2 uv, vec2 dx, vec2 dy ) {
-  return pvLayerGrad( layer, uv * scale, dx * scale * 0.7, dy * scale * 0.7, pvPaper() );
-}
-vec4 pvImageAt( float layer, vec2 scale, vec2 uv ) {
-  return pvLayerAt( layer, uv * scale, 0.0, pvPaper() );
-}
-vec4 pvImageLod( float layer, vec2 scale, vec2 uv, float bias ) {
-  return pvLayerAt( layer, uv * scale, bias, pvPaper() );
-}
-vec4 pvSpotsGrad( float layer, vec2 scale, vec2 uv, vec2 dx, vec2 dy ) {
-  return pvLayerGrad( layer, uv * scale, dx * scale * 0.7, dy * scale * 0.7, vec4( 0.0 ) );
-}
-vec4 pvSpotsAt( float layer, vec2 scale, vec2 uv ) {
-  return pvLayerAt( layer, uv * scale, 0.0, vec4( 0.0 ) );
-}
-vec4 pvSpotsLod( float layer, vec2 scale, vec2 uv, float bias ) {
-  return pvLayerAt( layer, uv * scale, bias, vec4( 0.0 ) );
-}
-mat4 pvSpotInk( int folio ) {
-  return mat4( pvPageTexel( folio, 5 ), pvPageTexel( folio, 6 ), pvPageTexel( folio, 7 ), pvPageTexel( folio, 8 ) );
-}
-`;
-
-// The page's own from the page table, read in the vertex shader and handed to the page
-// shader (see PAGE_FRAGMENT_HEADER's vPage*): after the vertex's folio is known (sheetShader).
-export const PAGE_VERTEX_HEADER = /* glsl */ `
-uniform highp sampler2D uPageTable;
-flat varying vec4 vPageA, vPageB, vPageC, vPageD, vPageE, vPageF;
-vec4 pvBest( int folio ) {
-  vec4 own = texelFetch( uPageTable, ivec2( 0, folio ), 0 );
-  vec4 sharp = texelFetch( uPageTable, ivec2( 10, folio ), 0 );
-  return sharp.x >= 0.0 ? vec4( -sharp.x - 2.0, sharp.y >= 0.0 ? -sharp.y - 2.0 : -1.0, sharp.zw ) : own;
-}
-`;
-export const PAGE_VERTEX = /* glsl */ `
-  {
-    int other = ( vFolio & 1 ) == 1 ? vFolio + 1 : vFolio - 1;
-    vec4 back = pvBest( other );
-    vec4 flags = texelFetch( uPageTable, ivec2( 9, vFolio ), 0 );
-    vPageA = pvBest( vFolio );
-    vPageB = texelFetch( uPageTable, ivec2( 1, vFolio ), 0 ) + vec4( 0.0, 2.0 * flags.y, 0.0, 0.0 ); // (a filler face: 2 more, see pvLoadPage)
-    vPageC = texelFetch( uPageTable, ivec2( 2, vFolio ), 0 );
-    vPageD = vec4( texelFetch( uPageTable, ivec2( 3, vFolio ), 0 ).xy, back.xy );
-    vPageE = texelFetch( uPageTable, ivec2( 4, vFolio ), 0 );
-    vPageF = vec4( back.zw, flags.x, texelFetch( uPageTable, ivec2( 9, other ), 0 ).x );
-  }
-`;
-
-/** The page data's uniforms (the scene's shared ones) on a shader that reads pages by folio. */
-export function pageDataUniforms(shader, shared) {
-  shader.uniforms.uPageTable = shared.uPageTable;
-  shader.uniforms.uPages = shared.uPages;
-  shader.uniforms.uSharp = shared.uSharp;
-  shader.uniforms.uPageSize = shared.uPageSize;
-}
-
-// A sheet's cut edges (one material for every sheet of a stock: the sheet comes from the
-// vertex, vSheet): its two pages' ink read a hair inside their edges.
 export const EDGE_FRAGMENT_HEADER = /* glsl */ `
 ${INK_GLSL}
-${PAGE_DATA_GLSL}
-uniform vec2 uPageSize;
-flat varying int vSheet;
+uniform sampler2D uEdgeFront;
+uniform sampler2D uEdgeBack;
+uniform sampler2D uEdgeFrontSpots;
+uniform sampler2D uEdgeBackSpots;
+uniform mat4 uEdgeFrontSpotInk;
+uniform mat4 uEdgeBackSpotInk;
+uniform vec2 uEdgeInset;
+uniform float uEdgeInk;
 varying vec2 vEdgeUv;
-const float PV_EDGE_INSET_MM = ${EDGE_INSET_MM.toFixed(2)};
-const float PV_EDGE_INK = ${EDGE_INK_SHARE.toFixed(2)};
 `;
 export const EDGE_INK = /* glsl */ `
   {
-    vec2 inset = vec2( PV_EDGE_INSET_MM ) / uPageSize;
-    vec2 at = clamp( vEdgeUv, inset, 1.0 - inset );
+    vec2 at = clamp( vEdgeUv, uEdgeInset, 1.0 - uEdgeInset );
     vec2 atBack = vec2( 1.0 - at.x, at.y );
-    int front = 2 * vSheet + 1;
-    int back = front + 1;
-    vec4 f = pvBest( front );
-    vec4 b = pvBest( back );
-    vec3 inkFront = sRGBTransferEOTF( pvPageColor( pvImageLod( f.x, f.zw, at, 1.0 ), pvSpotsLod( f.y, f.zw, at, 1.0 ), pvSpotInk( front ) ) ).rgb;
-    vec3 inkBack = sRGBTransferEOTF( pvPageColor( pvImageLod( b.x, b.zw, atBack, 1.0 ), pvSpotsLod( b.y, b.zw, atBack, 1.0 ), pvSpotInk( back ) ) ).rgb;
-    diffuseColor.rgb *= mix( vec3( 1.0 ), 0.5 * ( inkFront + inkBack ), PV_EDGE_INK );
+    vec3 inkFront = sRGBTransferEOTF( pvPageColor( texture( uEdgeFront, at, 1.0 ), texture( uEdgeFrontSpots, at, 1.0 ), uEdgeFrontSpotInk ) ).rgb;
+    vec3 inkBack = sRGBTransferEOTF( pvPageColor( texture( uEdgeBack, atBack, 1.0 ), texture( uEdgeBackSpots, atBack, 1.0 ), uEdgeBackSpotInk ) ).rgb;
+    diffuseColor.rgb *= mix( vec3( 1.0 ), 0.5 * ( inkFront + inkBack ), uEdgeInk );
   }
 `;
 
@@ -294,7 +193,6 @@ const SHEET_VERTEX = /* glsl */ `
 uniform highp sampler2D uSheets;
 uniform ivec3 uSheetLayout; // a sheet's block width, sheets per column, first row of the other rows
 uniform float uSheetLift; // drawn this far off the sheet's surface, along its normal (a flap on a cover): 0 for the sheets themselves
-uniform float uSheetSide; // the surfaces' offset from the cross-section, scaled: 1 for the sheets; 0 draws the surface at the cross-section itself, inside the paper (the occluder, see draw.js)
 ivec2 sheetBlock;
 int sheetJ;
 int sheetN;
@@ -332,26 +230,13 @@ vec3 sheetPoint( int k, int r, float side ) {
   float c = cos( t.z );
   float zz = 2.0 * float( r ) / float( SHEET_ROWS - 1 ) - 1.0;
   float d = sheetBow( r ) * t.w * t.w * ( 0.4 + 0.6 * zz * zz );
-  vec2 p = t.xy + vec2( - c, s ) * ( uSheetSide * side * ( sheetHalf + uSheetLift ) + d );
+  vec2 p = t.xy + vec2( - c, s ) * ( side * ( sheetHalf + uSheetLift ) + d );
   return vec3( p, sheetZ0 + sheetHeight * float( r ) / float( SHEET_ROWS - 1 ) );
 }
 vec3 sheetPosition() {
   int code = int( position.z + 0.5 );
   sheetLoad( code >> 4 );
-  int k = int( position.x + 0.5 );
-  int r = int( position.y + 0.5 );
-  float side = ( code & 1 ) == 0 ? 1.0 : - 1.0;
-  if ( uSheetSide == 0.0 ) {
-    // The occluder (see draw.js makeOccluder): its rim an eighth of a cell in from the
-    // sheet's, so it lies inside the paper with room to spare (on the rim itself it would tie
-    // with the edges, whose triangles bow a hair off the curve it follows).
-    int k2 = k == 0 ? 1 : k == sheetN - 1 ? sheetN - 2 : k;
-    int r2 = r == 0 ? 1 : r == SHEET_ROWS - 1 ? SHEET_ROWS - 2 : r;
-    vec3 a = mix( sheetPoint( k, r, side ), sheetPoint( k2, r, side ), 0.125 );
-    vec3 b = mix( sheetPoint( k, r2, side ), sheetPoint( k2, r2, side ), 0.125 );
-    return mix( a, b, 0.125 );
-  }
-  return sheetPoint( k, r, side );
+  return sheetPoint( int( position.x + 0.5 ), int( position.y + 0.5 ), ( code & 1 ) == 0 ? 1.0 : - 1.0 );
 }
 vec3 sheetNormal() {
   int code = int( position.z + 0.5 );
@@ -375,12 +260,12 @@ vec3 sheetNormal() {
 // texels a screen pixel covers; from it down, the first level whose tile is in the cache
 // (the page's table says which layer of uTiles holds it, and in the entry beside it which
 // holds its spot channels, if it has any), the base image when none is. A tile just landed
-// fades in over what was drawn before it (the level under it, or the base). What includes it
-// declares `uTilePage` (the page in level-0 texels (x, y), its levels (z), its table's rows a
-// level (w)) and `uTileOn` (1 once the page has a table), and defines pvTableFetch (an entry
-// of the page's table), pvBase and pvSpots (its base image and spot channels at a point).
+// fades in over what was drawn before it (the level under it, or the base).
 export const TILE_GLSL = /* glsl */ `
 uniform highp sampler2DArray uTiles;
+uniform sampler2D uTileTable;
+uniform vec4 uTilePage;  // the page in level-0 texels (x, y), its levels (z), its table's rows a level (w)
+uniform float uTileOn;   // 1 once the page has a table
 const float PV_TILE = ${TILE.toFixed(1)};
 const float PV_TILE_PAY = ${TILE_PAYLOAD.toFixed(1)};
 const float PV_TILE_BORDER = ${TILE_BORDER.toFixed(1)};
@@ -420,9 +305,9 @@ bool pvTile( vec2 uv, vec2 dx, vec2 dy, out vec4 color, out vec4 spots ) {
     vec2 t = cuv * sizeK;
     vec2 cell = floor( t / PV_TILE_PAY );
     ivec2 entry = ivec2( 2 * int( cell.x ), k * rows + int( cell.y ) );
-    vec4 e = pvTableFetch( entry );
+    vec4 e = texelFetch( uTileTable, entry, 0 );
     if ( e.b < 0.5 ) continue;
-    vec4 es = pvTableFetch( entry + ivec2( 1, 0 ) );
+    vec4 es = texelFetch( uTileTable, entry + ivec2( 1, 0 ), 0 );
     vec3 here = vec3( ( t - cell * PV_TILE_PAY + PV_TILE_BORDER ) / PV_TILE, pvTileLayer( e ) );
     float hereSpots = es.b > 0.5 ? pvTileLayer( es ) : -1.0;
     if ( have == 0 ) {
@@ -448,9 +333,9 @@ bool pvTile( vec2 uv, vec2 dx, vec2 dy, out vec4 color, out vec4 spots ) {
   if ( fade < 1.0 ) {
     vec2 ux = dx * underScale / PV_TILE * 0.7;
     vec2 uy = dy * underScale / PV_TILE * 0.7;
-    vec4 below = have == 2 ? textureGrad( uTiles, under, ux, uy ) : pvBase( uv, dx, dy );
+    vec4 below = have == 2 ? textureGrad( uTiles, under, ux, uy ) : pageSample( map, uv, dx, dy );
     vec4 belowSpots = have == 2 ? ( underSpots >= 0.0 ? textureGrad( uTiles, vec3( under.xy, underSpots ), ux, uy ) : vec4( 0.0 ) )
-      : pvSpots( uv, dx, dy );
+      : pageSample( uSpots, uv, dx, dy );
     found = mix( below, found, fade );
     foundSpots = mix( belowSpots, foundSpots, fade );
   }
@@ -460,88 +345,49 @@ bool pvTile( vec2 uv, vec2 dx, vec2 dy, out vec4 color, out vec4 spots ) {
 }
 `;
 
-// The page shader's head. The page is the vertex's (vFolio); everything of its own comes from
-// the page table (pvLoadPage, at the start of main: see pagedata.js for the fields), so one
-// material draws any page and many sheets go in one draw. With PV_OWN (a sheet's own material,
-// leaf.js pageMaterial) the shader also takes what only some pages have, each on a texture of
-// its own: an image shown instead of its layer (uOwn: a video's sharper page, or an image that
-// didn't fit the array), a capture's sharp strips, a spot finish; such a sheet is drawn on its
-// own (draw.js makeBatches). (With all of them the page shader uses the 16 texture units a GPU
-// gives a fragment shader at the least.)
 export const PAGE_FRAGMENT_HEADER = /* glsl */ `
 ${INK_GLSL}
-${PAGE_DATA_GLSL}
-uniform highp sampler2DArray uTileTables; // the pages' tile tables, a layer each (tiles.js)
-flat varying int vFolio;
-flat varying float vSpineAtU0;
-#define uSpineAtU0 vSpineAtU0
+// Side glue (perfect, sewn): the first and last page are glued to the cover this far from
+// the spine (mm): nothing printed there can be seen, and the paper creases at its edge.
+uniform float uGlue;
+// The cover's hinge score outside, this far from the spine (mm): a shallow groove's shade.
+// (A flap over a page is a sheet of its own, see makeFlap in leaf.js: the page shader is at
+// the texture units a GPU gives a shader, so a flap can't be one more image in it.)
+uniform float uScore;
+// A hardcover board's inside: the endpaper pasted down is the page's size; round it, on the
+// squares at head, foot and fore-edge, the cover's turn-in shows (rgb, its colour; a 1 on).
+uniform vec4 uTurnIn;
+uniform sampler2D uBack;
+// The page's spot channels and its spot matrix (see INK_GLSL); the other side's, for showing
+// through. (With them the page shader uses the 16 texture units a GPU gives a fragment shader
+// at the least: there is no room for another.)
+uniform sampler2D uSpots;
+uniform mat4 uSpotInk;
+uniform sampler2D uBackSpots;
+uniform mat4 uBackSpotInk;
+uniform float uShow;
+uniform float uSpineAtU0;
 uniform vec4 uHoles;      // shape (0 none, 1 round, 2 square), pitch, radius or half-width, offset from spine (mm)
 uniform vec2 uPageSize;   // mm
-uniform vec2 uGutter;      // shade width (mm), depth at the fold
-uniform float uOpenness;
-#ifdef PV_OWN
-uniform float uOwn;        // 1: the page's image is \`map\` (one the arrays couldn't take: no spot channels), not its layer
 uniform float uDetailCount; // sharp strips over the page, see MAX_DETAIL
 ${DETAIL_UNIFORMS}
+uniform vec2 uGutter;      // shade width (mm), depth at the fold
+uniform float uOpenness;
+uniform float uOuterCover;
 uniform sampler2D uFinish;  // spot finish mask, see FINISH_FRAGMENT
 uniform float uFinishKind;  // 0 none, 1 gloss varnish, 2 gold, 3 silver, 4 copper foil
-#endif
-// The page's own, from the page table (pvLoadPage): its image's layer, its spot channels' and
-// its scale in them; show-through; 1 on the outside of a cover; side glue (perfect, sewn: the
-// first and last page are glued to the cover this far from the spine, mm: nothing printed
-// there can be seen, and the paper creases at its edge); the cover's hinge score outside, this
-// far from the spine (mm: a shallow groove's shade); its tiles (see TILE_GLSL); a hardcover
-// board's inside (the endpaper pasted down is the page's size; round it, on the squares at
-// head, foot and fore-edge, the cover's turn-in shows: rgb its colour, a 1 on); its spot
-// matrix (see INK_GLSL); and the other side's image, channels and matrix, for showing through.
-// Read once a vertex (PAGE_VERTEX), handed down unchanged (flat): the page is the same over a
-// face. (Read for every point shaded, until 2026-10-26: on a GPU that shades every hidden layer
-// of the paper block, Apple's under ANGLE, nine reads a point times dozens of layers doubled
-// the frame's time.) The spot matrices, sixteen numbers each, only for a page that has spots.
-flat varying vec4 vPageA, vPageB, vPageC, vPageD, vPageE, vPageF;
-float pvLayer, pvSpotsLayer, pvTilesLayer;
-vec2 pvScale;
-float uShow, uOuterCover, uGlue, uScore, uTileOn;
-vec4 uTilePage, uTurnIn;
-mat4 uSpotInk;
-float pvBackLayer, pvBackSpotsLayer;
-vec2 pvBackScale;
-mat4 uBackSpotInk;
-// A face between a flying stack's sheets (layoutLeaves): its page's image, unlit, in the shade
-// of the sheets' edges (uFillerColor), as inkFillerMaterial draws it, so the sheet stays in the
-// batch. Flagged by 2 added to "outside of a cover" (never both: a cover's outside is never
-// against another sheet).
-bool pvFiller;
-uniform vec3 uFillerColor;
-void pvLoadPage( int folio ) {
-  pvLayer = vPageA.x; pvSpotsLayer = vPageA.y; pvScale = vPageA.zw;
-  pvFiller = vPageB.y > 1.5;
-  uShow = vPageB.x; uOuterCover = vPageB.y - ( pvFiller ? 2.0 : 0.0 ); uGlue = vPageB.z; uScore = vPageB.w;
-  uTileOn = vPageC.x; pvTilesLayer = vPageC.y; uTilePage = vec4( vPageD.xy, vPageC.zw );
-  uTurnIn = vPageE;
-  int other = ( folio & 1 ) == 1 ? folio + 1 : folio - 1;
-  pvBackLayer = vPageD.z; pvBackSpotsLayer = vPageD.w; pvBackScale = vPageF.xy;
-  uSpotInk = vPageF.z > 0.5 ? pvSpotInk( folio ) : mat4( 0.0 );
-  uBackSpotInk = vPageF.w > 0.5 ? pvSpotInk( other ) : mat4( 0.0 );
-}
-// A texture of the page's own (a strip, an image shown instead), sampled as its layer would be.
+// A page image sampled once, by the GPU's own trilinear, anisotropic filter, with the
+// gradients shortened a little (0.7: half a mipmap level finer than the footprint asks), so
+// an image at about one pixel per screen pixel is read from its full level, not blended with
+// the next smaller one. Until 0.17.75 this was four taps spread over the pixel, each from a
+// level twice as fine: meant as supersampling, it blurred an image drawn at its own size
+// (the taps straddle texels) and aliased one drawn smaller (the levels too fine for the
+// footprint): pixel art and dithered photos came out soft or moiré. Measured on a page of
+// 1 mm blocks at 3.4 px/mm against pdf.js's own rendering (edge energy): four taps 0.77,
+// one tap 0.83, one tap with 0.7 gradients at 1.25 image pixels a screen pixel 0.87; a
+// frame rendered at twice the size and boxed down 0.89, the ceiling.
 vec4 pageSample( sampler2D t, vec2 uv, vec2 dx, vec2 dy ) {
   return textureGrad( t, uv, dx * 0.7, dy * 0.7 );
-}
-vec4 pvBase( vec2 uv, vec2 dx, vec2 dy ) {
-#ifdef PV_OWN
-  if ( uOwn > 0.5 ) return pageSample( map, uv, dx, dy );
-#endif
-  return pvImage( pvLayer, pvScale, uv, dx, dy );
-}
-vec4 pvSpots( vec2 uv, vec2 dx, vec2 dy ) {
-#ifdef PV_OWN
-  if ( uOwn > 0.5 ) return vec4( 0.0 );
-#endif
-  return pvSpotsGrad( pvSpotsLayer, pvScale, uv, dx, dy );
-}
-vec4 pvTableFetch( ivec2 e ) {
-  return texelFetch( uTileTables, ivec3( e, int( pvTilesLayer ) ), 0 );
 }
 ${TILE_GLSL}
 `;
@@ -558,16 +404,14 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
   vec4 sampledDiffuseColor = vec4( 1.0 );
   vec4 sampledSpots = vec4( 0.0 );
   bool covered = false;
-#ifdef PV_OWN
   ${DETAIL_LOOKUPS}
-#endif
   // A capture's strips are their inks as they print, the plates applied where they were made
   // (ui/capture.js mixImage: the page shader has no texture unit left for their spot channels).
   bool asPrinted = covered;
   if ( !covered ) covered = pvTile( vMapUv, detailDx, detailDy, sampledDiffuseColor, sampledSpots );
   if ( !covered ) {
-    sampledDiffuseColor = pvBase( vMapUv, detailDx, detailDy );
-    sampledSpots = pvSpots( vMapUv, detailDx, detailDy );
+    sampledDiffuseColor = pageSample( map, vMapUv, detailDx, detailDy );
+    sampledSpots = pageSample( uSpots, vMapUv, detailDx, detailDy );
   }
   // The strip glued to the cover: paper, whatever was printed there (it faces the cover).
   float glueFrom = ( uSpineAtU0 > 0.5 ? vMapUv.x : 1.0 - vMapUv.x ) * uPageSize.x;
@@ -607,7 +451,6 @@ export const PAGE_MAP_FRAGMENT = /* glsl */ `
 export const FINISH_FRAGMENT = /* glsl */ `
   float pvGloss = 0.0;
   float pvFoil = 0.0;
-#ifdef PV_OWN
   if ( uFinishKind > 0.5 ) {
     vec3 ink = texture2D( uFinish, vMapUv ).rgb;
     float m = 1.0 - min( min( ink.r, ink.g ), ink.b );
@@ -625,7 +468,6 @@ export const FINISH_FRAGMENT = /* glsl */ `
       material.roughness = mix( material.roughness, 0.32, m );
     }
   }
-#endif
 `;
 
 export const FINISH_REFLECTION = /* glsl */ `
@@ -638,9 +480,6 @@ export const FINISH_HIGHLIGHT = /* glsl */ `
   if ( pvFoil > 0.0 ) {
     float peak = max( max( outgoingLight.r, outgoingLight.g ), max( outgoingLight.b, 1e-4 ) );
     outgoingLight = mix( outgoingLight, outgoingLight * min( 1.0, 0.92 / peak ), pvFoil );
-  }
-  if ( pvFiller ) {
-    outgoingLight = uFillerColor * sRGBTransferEOTF( pvPageColor( pvImageAt( pvLayer, pvScale, vMapUv ), pvSpotsAt( pvSpotsLayer, pvScale, vMapUv ), uSpotInk ) ).rgb;
   }
 `;
 
@@ -682,7 +521,7 @@ export const HOLE_DISCARD = /* glsl */ `
 export const SHOW_THROUGH = /* glsl */ `
   {
     vec2 mirrored = vec2( 1.0 - vMapUv.x, vMapUv.y );
-    vec3 behind = sRGBTransferEOTF( pvPageColor( pvImageLod( pvBackLayer, pvBackScale, mirrored, 2.5 ), pvSpotsLod( pvBackSpotsLayer, pvBackScale, mirrored, 2.5 ), uBackSpotInk ) ).rgb;
+    vec3 behind = sRGBTransferEOTF( pvPageColor( texture( uBack, mirrored, 2.5 ), texture( uBackSpots, mirrored, 2.5 ), uBackSpotInk ) ).rgb;
     diffuseColor.rgb *= mix(vec3(1.0), behind, uShow);
   }
 `;
@@ -692,25 +531,12 @@ export function sheetShader(shader, uniforms) {
   shader.uniforms.uSheets = uniforms.uSheets;
   shader.uniforms.uSheetLayout = uniforms.uSheetLayout;
   shader.uniforms.uSheetLift ??= { value: 0 };
-  shader.uniforms.uSheetSide ??= { value: 1 };
   shader.uniforms.uCasterMap = uniforms.uCasterMap;
   shader.uniforms.uCasterMapOn = uniforms.uCasterMapOn;
-  // The same point from every program that draws a sheet, to the last bit: no program may
-  // disagree with another about where a sheet is (the occluder, draw.js makeOccluder, keeps
-  // clear of the sheets' surfaces, but only by a margin that this keeps exact).
-  // Which sheet this is, which page this side of it shows, and whether its spine is at u = 0
-  // (its front): for the fragment shader, from the vertex's code (see makeLeaf).
+  // The same point from every program that draws a sheet, to the last bit: its faces' depth,
+  // drawn first, must match their shading (see makeLeaf).
   shader.vertexShader = "invariant gl_Position;\n" + patchShader(shader.vertexShader, [
-    ["void main() {", SHEET_VERTEX + `flat varying int vSheet;
-flat varying int vFolio;
-flat varying float vSpineAtU0;
-void main() {
-  {
-    int code = int( position.z + 0.5 );
-    vSheet = code >> 4;
-    vFolio = 2 * vSheet + 1 + ( code & 1 );
-    vSpineAtU0 = ( code & 1 ) == 0 ? 1.0 : 0.0;
-  }`],
+    ["void main() {", SHEET_VERTEX + "void main() {"],
     ["#include <beginnormal_vertex>", "vec3 objectNormal = sheetNormal();"],
     ["#include <begin_vertex>", "vec3 transformed = sheetPosition();"],
   ]);

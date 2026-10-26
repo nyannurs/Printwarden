@@ -33,143 +33,6 @@ test("scene: three.js shaders take our changes, and every kind of sheet draws", 
   }
 });
 
-test("the occluder changes no pixel, of any sheet it is made of, in any binding; pushed out of the paper it would", async () => {
-  // See draw.js makeOccluder: a surface inside the paper, drawn first for its depth alone.
-  const box = document.createElement("div");
-  box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 320px; height: 200px;";
-  document.body.append(box);
-  const scene = new BookScene(box);
-  const gl = scene.renderer.getContext();
-  const W = gl.drawingBufferWidth;
-  const H = gl.drawingBufferHeight;
-  const shot = () => {
-    scene.lastRequest = -1e9;
-    scene.debugSample(0.5, 0.5);
-    const px = new Uint8Array(W * H * 4);
-    gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    return px;
-  };
-  const differ = (a, b) => {
-    let worst = 0;
-    let count = 0;
-    for (let i = 0; i < a.length; i++) {
-      const d = Math.abs(a[i] - b[i]);
-      if (d > worst) worst = d;
-      if (d > 2) count++;
-    }
-    return { worst, count };
-  };
-  const view = (az, el, zoom) => {
-    const g = scene.rig;
-    g.free = true;
-    g.pan = { x: 0, y: 0, z: 0 };
-    g.azimuth = g.home.azimuth + az;
-    g.elevation = el;
-    g.zoom = zoom;
-    g.springing = false;
-    g.dragging = false;
-    scene.zoomBias = 1;
-  };
-  const bad = [];
-  try {
-    for (const binding of ["perfect", "saddle", "sewn", "hardcover", "spiral", "wire-o"]) {
-      scene.setBook({ pageCount: 44, pageSize: { width: 148, height: 210 }, binding, paper });
-      const n = scene.model.leafCount;
-      const views = {
-        spread: () => { scene.goTo(Math.floor(n / 2), { animate: false }); scene.setClosed(false, { animate: false }); scene.rig.free = false; scene.settleCamera(); },
-        closed: () => { scene.goTo(0, { animate: false }); scene.setClosed(true, { animate: false }); scene.rig.free = false; scene.settleCamera(); },
-        foreEdge: () => { scene.goTo(Math.floor(n / 2), { animate: false }); scene.setClosed(false, { animate: false }); view(Math.PI / 2, 0.12, 0.6); },
-        below: () => { scene.goTo(Math.floor(n / 2), { animate: false }); scene.setClosed(false, { animate: false }); view(0.7, -0.6, 1); },
-        midTurn: () => { scene.clock = 1000; scene.goTo(Math.floor(n / 2), { animate: false }); scene.setClosed(false, { animate: false }); scene.rig.free = false; scene.settleCamera(); scene.goTo(Math.floor(n / 2) + 1); scene.clock = 1250; scene.debugStep(); },
-      };
-      for (const [name, go] of Object.entries(views)) {
-        const where = `${binding}, ${name}`;
-        go();
-        scene.occluderEvery = 0;
-        const without = shot();
-        for (const every of [8, 1]) {
-          scene.occluderEvery = every;
-          const d = differ(without, shot());
-          if (d.worst > 2) bad.push(`${where}, every ${every}: ${d.count} pixels changed, by up to ${d.worst}`);
-        }
-        // The same test must catch the surface pushed out of the paper, past the faces.
-        scene.occluderEvery = 1;
-        scene.occluder.side.value = 1.5;
-        const d = differ(without, shot());
-        scene.occluder.side.value = 0;
-        if (d.count < 50) bad.push(`${where}: pushed out of the paper, only ${d.count} pixels changed (the check can't see the occluder)`);
-        scene.clock = null;
-      }
-    }
-    eq(bad, []);
-  } finally {
-    scene.clock = null;
-    scene.occluderEvery = 8;
-    box.remove();
-  }
-});
-
-test("the sheets draw in batches: a few draws for a book, a sheet with a texture of its own drawn alone and back in again", async () => {
-  // See draw.js makeBatches, batchable.
-  const box = document.createElement("div");
-  box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 320px; height: 200px;";
-  document.body.append(box);
-  const scene = new BookScene(box);
-  const r = scene.renderer;
-  const leafOf = () => new Map(scene.leaves.map((l) => [l.mesh, l]));
-  // One frame's draws: the sheets' own, and the batches'.
-  const draws = () => {
-    scene.lastRequest = -1e9;
-    scene.debugSample(0.5, 0.5);
-    const leaves = leafOf();
-    const batches = new Set(Object.values(scene.batches ?? {}).map((b) => b.mesh));
-    let own = 0;
-    let batched = 0;
-    const orig = r.renderBufferDirect.bind(r);
-    r.renderBufferDirect = (camera, sc, geometry, material, object, group) => {
-      if (camera === scene.camera) {
-        if (leaves.has(object)) own++;
-        else if (batches.has(object)) batched++;
-      }
-      return orig(camera, sc, geometry, material, object, group);
-    };
-    scene.composer.render();
-    r.renderBufferDirect = orig;
-    return { own, batched };
-  };
-  try {
-    for (const [binding, batchesExpected] of [["saddle", 2], ["perfect", 2], ["spiral", 3], ["hardcover", 2]]) {
-      scene.setBook({ pageCount: 44, pageSize: { width: 148, height: 210 }, binding, paper });
-      scene.goTo(11, { animate: false });
-      const d = draws();
-      eq(d.batched, batchesExpected, `${binding}: the batches (faces, edges, a coil's strips)`);
-      // The covers (their own stock; a hardcover's boards) are drawn on their own: 3 draws a sheet, 5 for a coil's.
-      eq(d.own, 2 * (binding === "spiral" ? 5 : 3), `${binding}: the sheets drawn on their own`);
-      ok(scene.leaves[5].mesh.visible === false, `${binding}: a page's own mesh isn't drawn while it is in the batches`);
-    }
-    scene.setBook({ pageCount: 44, pageSize: { width: 148, height: 210 }, binding: "saddle", paper });
-    scene.goTo(11, { animate: false });
-    const before = draws();
-    // An image shown instead (a video's) puts the sheet on its own; its own again, back in the batches.
-    const canvas = new OffscreenCanvas(64, 64);
-    canvas.getContext("2d").fillRect(0, 0, 64, 64);
-    scene.showPageImage(11, await createImageBitmap(canvas));
-    const shown = draws();
-    eq(shown.own, before.own + 3, "the sheet with an image of its own: drawn on its own");
-    ok(scene.leaves[5].mesh.visible, "its mesh shown");
-    scene.showPageImage(11, null);
-    eq(draws().own, before.own, "its own image gone: in the batches again");
-    // Every sheet on its own, for comparison: the batches draw nothing.
-    scene.debugNoBatch = true;
-    const none = draws();
-    ok(none.batched <= 2, `the batches draw nothing (three still calls for them, with no ranges: ${none.batched})`);
-    eq(none.own, 22 * 3);
-    scene.debugNoBatch = false;
-  } finally {
-    box.remove();
-  }
-});
-
 /** A leaf's cross-section as drawn: an outline as thick as the sheet (see geometry.test.js). */
 function outlineOf(scene, leaf) {
   const p = leaf.profile;
@@ -272,6 +135,27 @@ test("coil books closing from anywhere, pages still in the air: no sheet passes 
     eq(bad, []);
   } finally {
     scene.clock = null;
+    box.remove();
+  }
+});
+
+test("captures: the pages printed with a page (its other side; a fold's other half) for drawing them as sharp", async () => {
+  const box = document.createElement("div");
+  box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 320px; height: 200px;";
+  document.body.append(box);
+  const scene = new BookScene(box);
+  const sorted = (a) => [...a].sort((x, y) => x - y);
+  try {
+    // A stapled booklet of 16 pages: 4 sheets, each folded round the ones inside it, leaf k
+    // joined to leaf 7 - k. Page 3 (leaf 1's front): its back, page 4, and leaf 6's pages 13, 14.
+    scene.setBook({ pageCount: 16, pageSize: { width: 148, height: 210 }, binding: "saddle", paper });
+    eq(sorted(scene.pagesWith(3)), [4, 13, 14]);
+    eq(sorted(scene.pagesWith(16)), [1, 2, 15], "the cover's back: the cover's front half round the fold");
+    // Glued: no folds, the other side only.
+    scene.setBook({ pageCount: 16, pageSize: { width: 148, height: 210 }, binding: "perfect", paper });
+    eq(scene.pagesWith(3), [4]);
+    eq(scene.pagesWith(4), [3]);
+  } finally {
     box.remove();
   }
 });

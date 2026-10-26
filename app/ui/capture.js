@@ -45,19 +45,21 @@ function captureHeight(pxPerMm, mm, aspect = 1) {
 }
 
 /**
- * A whole page's sharp image at most this long on its long side (px): they share one texture
- * array of their largest's size, a layer each (up to a dozen with the pages printed with them
- * and their spot channels): at 6144 px about 140 MB a layer. The faces in the picture are drawn
- * from the capture's strips at any resolution; what reads the whole image besides (cut edges,
- * read half a level softer; show-through, two and a half; a fold's print) at up to 29 px a mm
- * on an A4 page. (Uncapped, a 4K close-up asked for gigabytes and lost the GPU.)
+ * A whole page's sharp image at most this long on its long side (px): at 6144 px about 140 MB
+ * on the GPU with its smaller copies, and a close-up can want a dozen (the pages printed with
+ * them, their spot channels). The faces in the picture are drawn from the capture's strips at
+ * any resolution; what reads the whole image besides (cut edges, read half a level softer;
+ * show-through, two and a half; a fold's print) at up to 29 px a mm on an A4 page. (Uncapped, a
+ * 4K close-up asked for gigabytes and lost the GPU.)
  */
 const WHOLE_PAGE_MAX = 6144;
 
 /**
- * A page whole at `height` px for the capture (and the pages printed with it, as tall): into
- * the scene's sharp images (showPageImage), which every reader of the page prefers. Drawn
- * again only when it was drawn more than a tenth smaller.
+ * A page whole at `height` px for the capture (and the pages printed with it, as tall), shown
+ * for now instead of its own (showPageImage): its face's material takes it, and every other
+ * reader of the page reads that material's image (its sheet's cut edges, a fold's print, the
+ * faces between a flying stack's sheets, the other side's show-through). Drawn again only when
+ * it was drawn more than a tenth smaller.
  */
 async function sharpPages(folios, height) {
   const g = state.analysis.geometry[folios[0] - 1];
@@ -122,7 +124,6 @@ export function restoreCapture() {
     image.close?.();
   }
   capture.pages.clear();
-  scene.releaseSharp();
   if (capture.finish.size) applyFinish();
   for (const image of capture.finishImages) image.close?.();
   capture.finish.clear();
@@ -350,7 +351,7 @@ async function sharpenForVideo(sharp, need) {
     const have = sharp.get(folio);
     const height = videoImageHeight(px, g.trim.y1 - g.trim.y0, have?.height ?? null, maxHeight);
     if (height == null) return;
-    // With its smaller copies: into the scene's sharp images, which every reader of the page takes.
+    // With its smaller copies, made where it was drawn (pdf/mips.js), as the page images are.
     const image = await pageImage(folio, height, CAPTURE_PRIORITY, { mode: "ink", cache: false, mips: -1 });
     if (!image) return;
     scene.showPageImage(folio, image);

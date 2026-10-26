@@ -3,12 +3,6 @@
 
 import * as THREE from "three";
 
-import { occluderMaterial, pageMaterial } from "./leaf.js";
-import { sheetShader } from "./shaders.js";
-
-/** The occluder (see makeOccluder) takes every this-many-th sheet, besides the piles' top sheets. */
-export const OCCLUDER_EVERY = 8;
-
 /**
  * Render the view into `target` (whose size it takes). `view`: the part of a larger
  * image this is (a screenshot tile), or null for all of it.
@@ -32,17 +26,15 @@ export function renderView(scene, target, view) {
  */
 export function shadows(scene) {
   const cam = scene.key.shadow.camera;
-  const was = scene.shadowState;
   const now = [scene.layoutVersion, ...scene.key.position.toArray(), ...scene.key.target.position.toArray(),
     ...scene.root.position.toArray(), scene.root.rotation.x, scene.root.rotation.y, scene.root.rotation.z,
     ...scene.block.position.toArray(), scene.block.rotation.x, scene.block.rotation.y, scene.block.rotation.z,
     cam.left, cam.right, cam.top, cam.bottom, cam.near, cam.far];
-  const changed = !was || was.length !== now.length || now.some((v, i) => v !== was[i]);
-  if (changed) {
+  const was = scene.shadowState;
+  if (!was || was.length !== now.length || now.some((v, i) => v !== was[i])) {
     scene.shadowState = now;
     scene.renderer.shadowMap.needsUpdate = true;
   }
-  shadowSize(scene, changed && !scene.capturing && !scene.debugShadowFull);
   // The nearest casters, once the shadow map has stood still for a frame (drawn, and not
   // about to be drawn again): while it changes every frame (a page turning) the soft shadows
   // search in full; while only the camera moves, they skip where nothing is near.
@@ -54,28 +46,6 @@ export function shadows(scene) {
     scene.casters.current = true;
   }
   scene.shared.uCasterMapOn.value = scene.casters.current ? 1 : 0;
-}
-
-/**
- * The shadow map at half its size while what casts shadows moves (`moving`: it is drawn again
- * this frame for a change, not for a capture), at its full size again the frame things stand
- * still (drawn once more then): two maps kept, swapped, never made anew. On the author's M4 Pro
- * turning pages quickly at half size kept 95 % of frames within 9.2 ms, as without shadows
- * (9.3), against 26-42 ms at full size (2026-10-26); on the RTX 4060 the size made no
- * difference. Still views, screenshots and videos are drawn with the full map, as before.
- */
-function shadowSize(scene, moving) {
-  const shadow = scene.key.shadow;
-  const s = (scene.shadowMaps ??= { full: shadow.mapSize.x, maps: new Map(), low: false });
-  if (moving === s.low) return;
-  if (!moving) scene.renderer.shadowMap.needsUpdate = true; // still now: the full map, drawn
-  s.low = moving;
-  const size = moving ? s.full / 2 : s.full;
-  // Kept by size: three makes a map only where there is none (WebGLShadowMap.render).
-  if (shadow.map) s.maps.set(shadow.mapSize.x, shadow.map);
-  shadow.mapSize.set(size, size);
-  shadow.map = s.maps.get(size) ?? null;
-  scene.casters.current = false;
 }
 
 /**
@@ -164,7 +134,6 @@ const _point = new THREE.Vector3();
  * back to front, every sheet shaded in full: 60 ms a frame at 44 pages, 300 at 240.)
  */
 export function drawOrder(scene) {
-  scene.pageTable.flush(); // the pages' data as the frame draws it (pagedata.js)
   const cam = scene.camera;
   scene.block.updateWorldMatrix(true, false);
   cam.updateWorldMatrix(true, false);
@@ -175,280 +144,10 @@ export function drawOrder(scene) {
     return _point.set(p.x[k], p.y[k], 0).applyMatrix4(scene.block.matrixWorld).distanceToSquared(_look);
   });
   const order = scene.leaves.map((_, i) => i).sort((a, b) => depth[a] - depth[b]);
-  const rank = new Int32Array(scene.leaves.length);
-  order.forEach((i, k) => {
-    scene.leaves[i].mesh.renderOrder = -1000 + k;
-    rank[i] = k;
+  order.forEach((i, rank) => {
+    scene.leaves[i].mesh.renderOrder = -1000 + rank;
   });
-  chooseBatched(scene, rank);
-  chooseOccluders(scene);
   showFlaps(scene);
-}
-
-/**
- * The sheets drawn in batches: three meshes (three's BatchedMesh, one draw each with
- * WEBGL_multi_draw, else one program for all their draws) hold every sheet's faces, a coil's
- * strips of holes, and its cut edges; each sheet is an instance, shown or not frame by frame
- * (chooseBatched), drawn in the sheets' order (drawOrder: nearest first). The page shader
- * finds the page from the vertex (vFolio) and everything of it in the page table (pagedata.js),
- * so one material draws them all. A sheet that needs a material of its own stays out and its
- * own mesh is drawn (see batchable): 120 sheets were 360 draw calls of the page material, with
- * its forty uniforms and sixteen textures each, 4 ms of the main thread a frame.
- */
-export function makeBatches(scene) {
-  const leaves = scene.leaves;
-  freeBatches(scene);
-  if (!leaves.length) return;
-  const faces = pageMaterial(scene, null, { own: false });
-  const kinds = {
-    faces: { parts: [0, 1], material: faces, order: -1003 },
-    strips: { parts: [3, 4], material: pageMaterial(scene, faces, { own: false }), order: -1002 },
-    edges: { parts: [2], material: scene.inkEdges.get(scene.edgeMat), order: -1001 },
-  };
-  scene.batches = {};
-  for (const [name, { parts, material, order }] of Object.entries(kinds)) {
-    const subs = leaves.map((leaf) => leaf.geo.groups.filter((g) => parts.includes(g.materialIndex)));
-    const counts = subs.map((groups) => groups.reduce((a, g) => a + g.count, 0));
-    const indices = counts.reduce((a, b) => a + b, 0);
-    if (!indices) {
-      if (name !== "edges") material.dispose();
-      continue;
-    }
-    const vertices = leaves.reduce((a, leaf, i) => a + (counts[i] ? leaf.geo.attributes.position.count : 0), 0);
-    const mesh = new THREE.BatchedMesh(leaves.length, vertices, indices, material);
-    mesh.name = name;
-    mesh.frustumCulled = false;
-    mesh.perObjectFrustumCulled = false;
-    mesh.sortObjects = true;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.customDepthMaterial = scene.sheetDepth;
-    mesh.renderOrder = order; // before every sheet drawn on its own: faces, then a coil's strips, then the edges, as a sheet's own parts go
-    mesh.raycast = () => {}; // picking is the sheets' own (see makeLeaf)
-    const rank = new Int32Array(leaves.length);
-    mesh.setCustomSort((list) => /** @type {{index: number}[]} */ (/** @type {unknown} */ (list)).sort((a, b) => rank[a.index] - rank[b.index]));
-    const ids = leaves.map((leaf, i) => {
-      if (!counts[i]) return -1;
-      const sub = new THREE.BufferGeometry();
-      for (const a of ["position", "uv", "edgeUv"]) sub.setAttribute(a, leaf.geo.getAttribute(a));
-      const index = new Uint32Array(counts[i]);
-      let at = 0;
-      for (const g of subs[i]) {
-        index.set(/** @type {any} */ (leaf.geo.index.array).subarray(g.start, g.start + g.count), at);
-        at += g.count;
-      }
-      sub.setIndex(new THREE.BufferAttribute(index, 1));
-      return mesh.addInstance(mesh.addGeometry(sub));
-    });
-    scene.block.add(mesh);
-    scene.batches[name] = { mesh, ids, rank, material, own: name !== "edges" };
-  }
-}
-
-export function freeBatches(scene) {
-  for (const b of Object.values(scene.batches ?? {})) {
-    scene.block.remove(b.mesh);
-    b.mesh.dispose();
-    if (b.own) b.material.dispose();
-  }
-  scene.batches = null;
-}
-
-/**
- * Whether a sheet can be drawn in the batches this frame: a sheet of the pages' stock (the
- * covers and endpapers have their own), not a board, no face of it on a texture of its own (an
- * image shown instead, a capture's strips, a spot finish: see pageMaterial), and nothing being
- * debugged. A flying stack's filler faces are drawn in the batch too (pvFiller in the page
- * shader); as plain paper (debugFillerInk false) on their own. (Out of the batch, a stack of a
- * hundred sheets swung over at once was 300 more draw calls in every frame of its flight.)
- */
-function batchable(scene, leaf) {
-  if (leaf.board || leaf.stock !== "page" || scene.debugNoBatch) return false;
-  if (leaf.filler && scene.debugFillerInk === false) return false;
-  for (const m of [leaf.front, leaf.back]) {
-    const u = m.userData.uniforms;
-    if (u.uOwn.value || u.uDetailCount.value || u.uFinishKind.value) return false;
-  }
-  return true;
-}
-
-/** Each sheet into the batches or out of them (its own mesh drawn instead), and the batches' order (see makeBatches). */
-function chooseBatched(scene, rank) {
-  const B = scene.batches;
-  for (const leaf of scene.leaves) {
-    const batched = !!B && !leaf.hidden && batchable(scene, leaf);
-    leaf.mesh.visible = !leaf.hidden && !batched;
-    if (!B) continue;
-    for (const b of Object.values(B)) {
-      const id = b.ids[leaf.i];
-      if (id < 0) continue;
-      b.mesh.setVisibleAt(id, batched);
-      b.rank[id] = rank[leaf.i];
-    }
-  }
-}
-
-/**
- * The occluder: a surface drawn before the sheets for its depth alone, which nothing can
- * see (it lies inside the paper) and which hides what lies behind it before the graphics
- * card shades it. A sheet's faces lie half the paper either side of its cross-section, its
- * edges close the slab between them; the surface at the cross-section itself (uSheetSide 0,
- * on the front face's own vertex grid) lies inside that slab, so a ray reaching it has come
- * in through a face or an edge that is drawn: it can only hide what the sheet hides already.
- * Its rim is an eighth of a cell in from the sheet's (sheetPosition), and a coil sheet's part
- * starts well past its holes (leaf.occluderRange): nowhere a ray could reach it without
- * having come in through something drawn. Of every OCCLUDER_EVERY-th sheet and of the sheets on top of
- * the piles: a ray into a pile then crosses at most that many sheets before it stops. One
- * mesh, one draw: the sheets' places as their meshes hold them (see makeLeaf), its index
- * rebuilt when the choice of sheets changes (chooseOccluders). Nothing else: no shadow, no
- * picking.
- *
- * (Apple's GPUs remove hidden points before shading them, whatever the drawing order; but
- * under Chromium and Safari every shader is translated for Metal with an output saying which
- * samples it covers, written whenever the target is multisampled (ANGLE, TranslatorMSL), and
- * a shader that can change its own coverage can't be removed before it runs. Seen low at the
- * fore-edge, an open book's piles were shaded sheet by sheet, dozens deep: 19.5 ms a frame on
- * the author's M4 Pro, 2026-10-24. Depth that is in the buffer before a sheet is drawn does
- * reject it: every sheet's faces drawn first for their depth, 0.15.7 to 1.1.0, halved that
- * frame once, but by 2026-10-24 cost more than it saved dragging round, building every sheet
- * twice. This builds a few, once.)
- */
-export function makeOccluder(scene) {
-  const bases = [];
-  let count = 0;
-  let total = 0;
-  for (const leaf of scene.leaves) {
-    bases.push(count);
-    count += leaf.geo.attributes.position.count;
-    total += leaf.occluderRange.count;
-  }
-  const place = new Float32Array(count * 3);
-  for (const [i, leaf] of scene.leaves.entries()) place.set(leaf.geo.attributes.position.array, bases[i] * 3);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(place, 3));
-  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(total), 1));
-  geo.setDrawRange(0, 0);
-  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
-  scene.occluder = { mesh: null, geo, bases, side: { value: 0 }, key: "" };
-  const mesh = new THREE.Mesh(geo, occluderMaterial(scene));
-  mesh.frustumCulled = false;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  mesh.raycast = () => {};
-  mesh.renderOrder = -1e6; // before the sheets (see drawOrder)
-  scene.block.add(mesh);
-  scene.occluder.mesh = mesh;
-  makeDepthFirst(scene, geo.attributes.position, bases);
-}
-
-export function freeOccluder(scene) {
-  const o = scene.occluder;
-  if (!o) return;
-  scene.block.remove(o.mesh);
-  o.geo.dispose();
-  o.mesh.material.dispose();
-  scene.occluder = null;
-  const d = scene.depthPass;
-  if (d) {
-    scene.block.remove(d.mesh);
-    d.geo.dispose();
-    for (const m of d.mesh.material) m.dispose();
-    scene.depthPass = null;
-  }
-}
-
-/**
- * The sheets' depth first (`scene.depthFirst`, off: for the performance check's comparison):
- * every sheet's faces and cut edges, exactly where the sheets are drawn (the same vertices, the
- * same program text: invariant), drawn for their depth alone before anything is shaded, in one
- * mesh (two draws: faces one-sided as the pages are, edges both sides); the sheets are then
- * shaded without writing depth (setDepthFirst), so each point is shaded once, for the surface in
- * front. A coil's strips of holes are left out (they keep writing their own depth). The test of
- * why the occluder did nothing on Apple's GPUs (2026-10-26): there a shader that writes its own
- * coverage (ANGLE adds that to every one) and writes depth is depth-tested only after it runs,
- * so depth already in the buffer saves nothing; without the depth write it can be tested first.
- * (The 0.15.7 depth pass did this, a draw per sheet; batched, it is two.)
- */
-function makeDepthFirst(scene, position, bases) {
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", position); // the occluder's: the same buffer on the GPU
-  const faces = [];
-  const edges = [];
-  for (const [i, leaf] of scene.leaves.entries()) {
-    const src = leaf.geo.index.array;
-    for (const g of leaf.geo.groups) {
-      const out = g.materialIndex === 2 ? edges : g.materialIndex <= 1 ? faces : null;
-      if (!out) continue;
-      for (let k = g.start; k < g.start + g.count; k++) out.push(src[k] + bases[i]);
-    }
-  }
-  geo.setIndex(new THREE.BufferAttribute(new Uint32Array([...faces, ...edges]), 1));
-  geo.addGroup(0, faces.length, 0);
-  geo.addGroup(faces.length, edges.length, 1);
-  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
-  const material = (side) => {
-    const m = new THREE.MeshDepthMaterial({ colorWrite: false, side });
-    m.onBeforeCompile = (shader) => sheetShader(shader, scene.shared);
-    m.customProgramCacheKey = () => "bookview-depth-first";
-    return m;
-  };
-  const mesh = new THREE.Mesh(geo, [material(THREE.FrontSide), material(THREE.DoubleSide)]);
-  mesh.frustumCulled = false;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  mesh.raycast = () => {};
-  mesh.renderOrder = -2e6; // before the occluder and every sheet
-  mesh.visible = false;
-  scene.block.add(mesh);
-  scene.depthPass = { mesh, geo };
-}
-
-/** The sheets' depth first or not (see makeDepthFirst): the pass shown, the pages' and edges' depth writes off, or back on. */
-export function setDepthFirst(scene, on) {
-  scene.depthFirst = on;
-  if (scene.depthPass) scene.depthPass.mesh.visible = on;
-  const faces = Object.values(scene.batches ?? {}).filter((b) => b.mesh.name !== "strips").map((b) => b.material);
-  for (const m of [...faces, ...scene.inkEdges.values(), ...scene.leaves.flatMap((l) => [l.front, l.back])]) m.depthWrite = !on;
-  scene.dirty = true;
-}
-
-/**
- * Which sheets the occluder is made of this frame (see makeOccluder): every
- * `scene.occluderEvery`-th (0: none, for the performance check's comparison), the covers, and
- * the two sheets at the opening (the piles' tops); only sheets that are drawn (leaf.hidden: the
- * performance check's "only the two open pages").
- */
-function chooseOccluders(scene) {
-  const o = scene.occluder;
-  if (!o) return;
-  const every = scene.occluderEvery;
-  const n = scene.leaves.length;
-  const chosen = [];
-  if (every > 0) {
-    for (const leaf of scene.leaves) {
-      const i = leaf.i;
-      const top = i === 0 || i === n - 1 || i === scene.opening - 1 || i === scene.opening;
-      if (!leaf.hidden && (top || i % every === 0)) chosen.push(i);
-    }
-  }
-  const key = chosen.join(",");
-  o.mesh.visible = chosen.length > 0;
-  if (key === o.key) return;
-  o.key = key;
-  const index = /** @type {THREE.BufferAttribute} */ (o.geo.index);
-  const out = /** @type {Uint32Array} */ (index.array);
-  let at = 0;
-  for (const i of chosen) {
-    const leaf = scene.leaves[i];
-    const g = leaf.occluderRange;
-    const src = leaf.geo.index.array;
-    const base = o.bases[i];
-    for (let k = g.start; k < g.start + g.count; k++) out[at++] = src[k] + base;
-  }
-  index.clearUpdateRanges();
-  index.addUpdateRange(0, at);
-  index.needsUpdate = true;
-  o.geo.setDrawRange(0, at);
 }
 
 /**

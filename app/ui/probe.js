@@ -6,13 +6,9 @@
 // Last, it asks for a few seconds of panning by hand and measures the mouse's own rate and
 // what was drawn: a frame can only be drawn when the mouse reports a move. Then dragging round
 // three more views: the closed book, the open book as framed, its piles from low at the
-// fore-edge; the last two also without the occluder, without multisampling, and with the
-// sheets' depth drawn first (what the paper block costs where hidden points are shaded, and
-// what saves it: see draw.js makeOccluder, makeDepthFirst). Turning pages,
-// the main thread's time is broken down by part (FRAME_PARTS in scene.js). About 55 seconds
-// and the hand panning; everything is put back as it was.
+// fore-edge. Turning pages, the main thread's time is broken down by part (FRAME_PARTS in
+// scene.js). About 45 seconds and the hand panning; everything is put back as it was.
 
-import { setDepthFirst } from "../viewer/draw.js";
 import { FRAME_PARTS } from "../viewer/scene.js";
 
 const SECONDS = 2.2; // each run; the first 0.4 s isn't counted (shaders compiling)
@@ -45,12 +41,11 @@ export async function runProbe(scene, onProgress) {
   lines.push(`Refresh: ${(1000 / refresh).toFixed(0)} Hz (${refresh.toFixed(1)} ms)`, "");
 
   const median = (a) => a.slice().sort((x, y) => x - y)[a.length >> 1];
-  const stats = (ivals, cpu, gpu, calls) => {
+  const stats = (ivals, cpu, gpu) => {
     const s = ivals.slice().sort((a, b) => a - b);
     const q = (p) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
     const g = gpu.length ? `   gpu ${median(gpu).toFixed(1)} ms` : "";
-    const c = calls.length ? `   draws ${median(calls)}` : "";
-    return `${(1000 / q(0.5)).toFixed(0).padStart(4)} fps   p95 ${q(0.95).toFixed(1).padStart(5)} ms   worst ${s[s.length - 1].toFixed(1).padStart(5)} ms   main thread ${median(cpu).toFixed(1)} ms${g}${c}`;
+    return `${(1000 / q(0.5)).toFixed(0).padStart(4)} fps   p95 ${q(0.95).toFixed(1).padStart(5)} ms   worst ${s[s.length - 1].toFixed(1).padStart(5)} ms   main thread ${median(cpu).toFixed(1)} ms${g}`;
   };
   // The graphics card's time for the frames of a run, where it can be timed (see #adaptResolution).
   const gpuNow = (since) => (scene.gpuTime.timer && scene.gpuTime.at > since ? scene.gpuTime.ms : null);
@@ -79,12 +74,8 @@ export async function runProbe(scene, onProgress) {
         n0 = log.n;
       }
     }
-    const calls = [];
-    for (let k = n0; k < log.n; k++) {
-      cpu.push(log.cpu[k % log.time.length]);
-      calls.push(log.calls[k % log.time.length]);
-    }
-    lines.push(`${label.padEnd(28)} ${ivals.length ? stats(ivals, cpu.length ? cpu : [0], gpu, calls) : "no frames"}`);
+    for (let k = n0; k < log.n; k++) cpu.push(log.cpu[k % log.time.length]);
+    lines.push(`${label.padEnd(28)} ${ivals.length ? stats(ivals, cpu.length ? cpu : [0], gpu) : "no frames"}`);
     if (parts && log.n > n0) {
       const mean = (a) => {
         let sum = 0;
@@ -170,12 +161,11 @@ export async function runProbe(scene, onProgress) {
       for (const m of pages()) m.needsUpdate = true;
     });
     await dragging("  no multisampling", () => setSamples(0), () => setSamples(samples));
-    await dragging("  sheets' depth first", () => setDepthFirst(scene, true), () => setDepthFirst(scene, false));
     const top = new Set([scene.opening - 1, scene.opening]);
     await dragging("  only the two open pages", () => {
-      for (const l of scene.leaves) l.hidden = !top.has(l.i);
+      for (const l of scene.leaves) l.mesh.visible = top.has(l.i);
     }, () => {
-      for (const l of scene.leaves) l.hidden = false;
+      for (const l of scene.leaves) l.mesh.visible = true;
     });
     lines.push("");
     // Pages turned quickly: one every 150 ms, forward then back.
@@ -204,8 +194,6 @@ export async function runProbe(scene, onProgress) {
       r.shadowMap.needsUpdate = true;
       for (const m of pages()) m.needsUpdate = true;
     });
-    // The shadow map kept at full size while pages move, as before 2026-10-26 (see draw.js shadowSize).
-    await turning("  full shadow map moving", () => { scene.debugShadowFull = true; }, () => { scene.debugShadowFull = false; });
     // Dragging round more views, each from its own place.
     const views = [
       { label: "Closed book", open: () => {
@@ -214,13 +202,13 @@ export async function runProbe(scene, onProgress) {
       }, at: { zoom: 1, azimuth: rig.home.azimuth, elevation: rig.home.elevation } },
       { label: "Open book, framed", open: () => {
         scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
-      }, at: { zoom: 1, azimuth: rig.home.azimuth, elevation: rig.home.elevation }, block: true },
+      }, at: { zoom: 1, azimuth: rig.home.azimuth, elevation: rig.home.elevation } },
       { label: "Low at the fore-edge", open: () => {
         scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
-      }, at: { zoom: 0.6, azimuth: rig.home.azimuth + Math.PI / 2, elevation: 0.12 }, block: true },
+      }, at: { zoom: 0.6, azimuth: rig.home.azimuth + Math.PI / 2, elevation: 0.12 } },
     ];
     lines.push("");
-    for (const { label, open, at, block } of views) {
+    for (const { label, open, at } of views) {
       open();
       const place = () => {
         rig.free = true;
@@ -230,16 +218,6 @@ export async function runProbe(scene, onProgress) {
       };
       place();
       await dragging(label);
-      if (!block) continue;
-      // Where the paper block fills the view: without the occluder (see draw.js makeOccluder),
-      // and without multisampling (which is what keeps Apple's GPUs from skipping hidden points).
-      const every = scene.occluderEvery;
-      place();
-      await dragging("  no occluder", () => { scene.occluderEvery = 0; }, () => { scene.occluderEvery = every; });
-      place();
-      await dragging("  no multisampling", () => setSamples(0), () => setSamples(samples));
-      place();
-      await dragging("  sheets' depth first", () => setDepthFirst(scene, true), () => setDepthFirst(scene, false));
     }
   } finally {
     scene.debugNoPivot = false;

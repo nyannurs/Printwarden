@@ -136,13 +136,13 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 
 ## The performance check (`probe.js`)
 
-`runProbe(scene, onProgress)` measures the computer it runs on and returns a text report (each run: frames a second, the 95th percentile and the worst frame, the main thread's time, the graphics card's where it can be timed, and the draw calls a frame):
+`runProbe(scene, onProgress)` measures the computer it runs on and returns a text report:
 - The GPU, the screen (pixel ratio, canvas size, multisampling), processor threads, the book.
 - The refresh rate, from frames with nothing drawn.
 - **Panning where the view is**: as is, at half the pixels, without re-pivoting onto the paper.
-- **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, with the sheets' depth drawn first, and with every sheet but the two open pages.
-- **Turning pages quickly**: as is, without shadows, and with the shadow map kept at full size while pages move, each with the main thread's time by part (`FRAME_PARTS` in scene.js: the animations, laying out the sheets, uploads, finding the tiles the view needs, whether the shadow map is drawn again, sorting, the draw calls: the shadow map itself is drawn with them).
-- **Dragging round three more views**: the closed book, the open book as framed, its piles from low at the fore-edge; the last two also without the occluder, without multisampling, and with the sheets' depth drawn first (see [3D view](3d-view.md), order and depth).
+- **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, and every sheet but the two open pages.
+- **Turning pages quickly**: as is and without shadows, each with the main thread's time by part (`FRAME_PARTS` in scene.js: the animations, laying out the sheets, uploads, finding the tiles the view needs, whether the shadow map is drawn again, sorting, the draw calls: the shadow map itself is drawn with them).
+- **Dragging round three more views**: the closed book, the open book as framed, its piles from low at the fore-edge.
 - **Panning by hand**: the mouse's moves per second, frames drawn per second, the card's time.
 
 Each run reports frames per second, the 95th-percentile and worst frame time, the main thread's time, and the graphics card's time where it can be timed. The check puts everything back afterwards. The client viewer bundles the same file.

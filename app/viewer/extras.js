@@ -5,7 +5,8 @@
 
 import * as THREE from "three";
 import { CASE_COVER_MM, CASE_HOLLOW, COIL_SEAM, coilCentre, leafShape, signatureSheets } from "./model.js";
-import { EDGE_INK_SHARE, EDGE_INSET_MM, INK_GLSL, inkUniforms, LEAF_FILL, PAGE_DATA_GLSL, pageDataUniforms, patchShader } from "./shaders.js";
+import { EDGE_INK_SHARE, EDGE_INSET_MM, INK_GLSL, inkUniforms, LEAF_FILL, patchShader } from "./shaders.js";
+import { noSpotInk } from "./uploads.js";
 
 // Booklet stitching wire (mm): crown width, clinched leg length, flattened cross-section.
 const STAPLE = { crown: 12.7, leg: 5.2, width: 0.62, thickness: 0.42 };
@@ -552,42 +553,48 @@ function stapleGeometry(points, BEND = 0.45) {
   return geo;
 }
 
-/**
- * Folded sheets, one mesh: `pairs` the sheets' halves, [first leaf, last]. Two materials (and
- * two draws, however many sheets): the cover's fold, when the first pair is the cover's, and
- * the pages' (see foldSheetMaterial; the geometry's groups, see writeFoldGeometry).
- */
+/** Folded sheets, one material (and one draw) each: `pairs` the sheets' halves, [first leaf, last]. */
 function foldMesh(scene, pairs) {
   const geo = new THREE.BufferGeometry();
-  geo.userData.pairs = pairs;
-  return new THREE.Mesh(geo, [foldSheetMaterial(scene, true), foldSheetMaterial(scene, false)]);
+  geo.userData.pairs = pairs; // which leaves each fold joins (scene.pagesWith)
+  return new THREE.Mesh(geo, pairs.map(([a, b]) => foldSheetMaterial(scene, a, b)));
 }
 
 /**
  * A folded sheet's fold (stitched and sewn books), printed: its two halves' page images where
  * the fold takes them (the strip of each page from its root to the fold's apex, the uStart
- * leafShape gives them), read from the page array by folio (its halves' leaves come with the
- * vertex, `foldPair`). Per vertex (`fold`): x where across the page, negative on the first
+ * leafShape gives them). Per vertex (`fold`): x where across the page, negative on the first
  * half (leaf `a`, root to apex), positive on the second (leaf `b`, apex to root); y down it (0
  * at the head); z the surface: 0 the outside (a's front, b's back: a booklet's cover round its
  * spine), 1 the inside (a's back, b's front: the centre spread running into the fold), 2 the
  * cut at head and foot (the ink at the page's edge, both sides, as a leaf's cut shows it, see
  * EDGE_INK). Page images are stored as sRGB (see PAGE_COLOR_SPACE in scene.js): decoded here
- * as the pages do. `cover`: the cover's fold (its stock and edge colour, syncFoldStock), else
- * the pages'. (Until 1.1 only a booklet's cover was printed round its fold; every other fold
- * was blank paper, at the centre spreads and at the cut: "print not all the way to the
+ * as the pages do. (Until 1.1 only a booklet's cover was printed round its fold; every other
+ * fold was blank paper, at the centre spreads and at the cut: "print not all the way to the
  * spine", the designer, 2026-10-22.)
  */
-function foldSheetMaterial(scene, cover) {
+function foldSheetMaterial(scene, a, b) {
   const m = new THREE.MeshPhysicalMaterial({ roughness: 0.8, side: THREE.DoubleSide });
-  m.userData.uniforms = { uFoldEdge: { value: new THREE.Color() } };
-  m.userData.foldCover = cover;
+  const W = scene.model.width;
+  const H = scene.model.height;
+  m.userData.uniforms = {
+    uFoldFrontA: { value: scene.blank }, uFoldBackA: { value: scene.blank },
+    uFoldFrontB: { value: scene.blank }, uFoldBackB: { value: scene.blank },
+    // Each page's spot channels and spot matrix, as its page material has them (syncFoldSheet).
+    ...Object.fromEntries(["FrontA", "BackA", "FrontB", "BackB"].flatMap((p) => [
+      [`uFold${p}Spots`, { value: scene.noSpots }],
+      [`uFold${p}SpotInk`, { value: noSpotInk() }],
+    ])),
+    uFoldEdge: { value: new THREE.Color() },
+    uFoldInset: { value: new THREE.Vector2(EDGE_INSET_MM / W, EDGE_INSET_MM / H) },
+    uFoldInk: { value: EDGE_INK_SHARE },
+  };
+  m.userData.fold = { a, b };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, m.userData.uniforms);
     inkUniforms(shader, scene.shared);
-    pageDataUniforms(shader, scene.shared);
     shader.vertexShader = patchShader(shader.vertexShader, [
-      ["void main() {", "attribute vec3 fold;\nattribute vec2 foldPair;\nvarying vec3 vFold;\nflat varying vec2 vFoldPair;\nvoid main() {\n  vFold = fold;\n  vFoldPair = foldPair;"],
+      ["void main() {", "attribute vec3 fold;\nvarying vec3 vFold;\nvoid main() {\n  vFold = fold;"],
     ]);
     shader.fragmentShader = patchShader(shader.fragmentShader, [
       ["void main() {", FOLD_FRAGMENT_HEADER + "void main() {"],
@@ -596,80 +603,70 @@ function foldSheetMaterial(scene, cover) {
     ]);
   };
   m.customProgramCacheKey = () => "bookview-fold-sheet";
+  // Before each draw, not only when the fold is laid out again: the pages' images arrive later.
+  m.onBeforeRender = () => syncFoldSheet(m, scene);
   m.userData.disposable = true; // the scene's own (see BookScene's dispose)
   return m;
 }
 
 const FOLD_FRAGMENT_HEADER = /* glsl */ `
 ${INK_GLSL}
-${PAGE_DATA_GLSL}
-uniform vec2 uPageSize;
+uniform sampler2D uFoldFrontA;
+uniform sampler2D uFoldBackA;
+uniform sampler2D uFoldFrontB;
+uniform sampler2D uFoldBackB;
+uniform sampler2D uFoldFrontASpots;
+uniform mat4 uFoldFrontASpotInk;
+uniform sampler2D uFoldBackASpots;
+uniform mat4 uFoldBackASpotInk;
+uniform sampler2D uFoldFrontBSpots;
+uniform mat4 uFoldFrontBSpotInk;
+uniform sampler2D uFoldBackBSpots;
+uniform mat4 uFoldBackBSpotInk;
 uniform vec3 uFoldEdge;
+uniform vec2 uFoldInset;
+uniform float uFoldInk;
 varying vec3 vFold;
-flat varying vec2 vFoldPair;
-const float PV_FOLD_INSET_MM = ${EDGE_INSET_MM.toFixed(2)};
-const float PV_FOLD_INK = ${EDGE_INK_SHARE.toFixed(2)};
 `;
 // All four read every time: a texture read in a branch has no derivatives to pick its level by.
 const FOLD_INK = /* glsl */ `
   {
     bool first = vFold.x < 0.0;
-    vec2 inset = vec2( PV_FOLD_INSET_MM ) / uPageSize;
-    vec2 at = clamp( vec2( abs( vFold.x ), vFold.y ), inset, 1.0 - inset );
+    vec2 at = clamp( vec2( abs( vFold.x ), vFold.y ), uFoldInset, 1.0 - uFoldInset );
     vec2 mirrored = vec2( 1.0 - at.x, at.y );
-    int frontA = 2 * int( vFoldPair.x + 0.5 ) + 1;
-    int frontB = 2 * int( vFoldPair.y + 0.5 ) + 1;
-    vec4 pFA = pvBest( frontA );
-    vec4 pBA = pvBest( frontA + 1 );
-    vec4 pFB = pvBest( frontB );
-    vec4 pBB = pvBest( frontB + 1 );
-    vec4 inkFrontA = sRGBTransferEOTF( pvPageColor( pvImageAt( pFA.x, pFA.zw, at ), pvSpotsAt( pFA.y, pFA.zw, at ), pvSpotInk( frontA ) ) );
-    vec4 inkBackA = sRGBTransferEOTF( pvPageColor( pvImageAt( pBA.x, pBA.zw, mirrored ), pvSpotsAt( pBA.y, pBA.zw, mirrored ), pvSpotInk( frontA + 1 ) ) );
-    vec4 inkFrontB = sRGBTransferEOTF( pvPageColor( pvImageAt( pFB.x, pFB.zw, at ), pvSpotsAt( pFB.y, pFB.zw, at ), pvSpotInk( frontB ) ) );
-    vec4 inkBackB = sRGBTransferEOTF( pvPageColor( pvImageAt( pBB.x, pBB.zw, mirrored ), pvSpotsAt( pBB.y, pBB.zw, mirrored ), pvSpotInk( frontB + 1 ) ) );
+    vec4 frontA = sRGBTransferEOTF( pvPageColor( texture2D( uFoldFrontA, at ), texture2D( uFoldFrontASpots, at ), uFoldFrontASpotInk ) );
+    vec4 backA = sRGBTransferEOTF( pvPageColor( texture2D( uFoldBackA, mirrored ), texture2D( uFoldBackASpots, mirrored ), uFoldBackASpotInk ) );
+    vec4 frontB = sRGBTransferEOTF( pvPageColor( texture2D( uFoldFrontB, at ), texture2D( uFoldFrontBSpots, at ), uFoldFrontBSpotInk ) );
+    vec4 backB = sRGBTransferEOTF( pvPageColor( texture2D( uFoldBackB, mirrored ), texture2D( uFoldBackBSpots, mirrored ), uFoldBackBSpotInk ) );
     if ( vFold.z > 1.5 ) {
-      vec3 ink = 0.5 * ( first ? inkFrontA.rgb + inkBackA.rgb : inkFrontB.rgb + inkBackB.rgb );
-      diffuseColor.rgb = uFoldEdge * mix( vec3( 1.0 ), ink, PV_FOLD_INK );
+      vec3 ink = 0.5 * ( first ? frontA.rgb + backA.rgb : frontB.rgb + backB.rgb );
+      diffuseColor.rgb = uFoldEdge * mix( vec3( 1.0 ), ink, uFoldInk );
     } else {
       bool inside = vFold.z > 0.5;
-      diffuseColor *= first ? ( inside ? inkBackA : inkFrontA ) : ( inside ? inkFrontB : inkBackB );
+      diffuseColor *= first ? ( inside ? backA : frontA ) : ( inside ? frontB : backB );
     }
   }
 `;
 
-/** The folds take their stock as the pages (and the cover) have it now, and the cut edges' colour (see setPaper). */
-export function syncFoldStock(scene) {
-  for (const mesh of [scene.extras?.fold, scene.extras?.signatureFolds]) {
-    if (!mesh) continue;
-    for (const m of /** @type {THREE.MeshPhysicalMaterial[]} */ (mesh.material)) {
-      const cover = m.userData.foldCover;
-      const stock = cover ? scene.paper.cover : scene.paper;
-      m.color.set(stock.color);
-      m.roughness = stock.roughness;
-      m.specularIntensity = stock.specular ?? 0.2;
-      m.clearcoat = Math.max(0.001, stock.clearcoat); // as the pages' (see setPaper)
-      m.clearcoatRoughness = 0.3;
-      m.userData.uniforms.uFoldEdge.value.copy((cover ? scene.coverEdgeMat : scene.edgeMat).color);
-    }
+/** A fold takes its pages' images and stock as drawn now, and the cut edges' colour. */
+function syncFoldSheet(m, scene) {
+  const { a, b } = m.userData.fold;
+  const A = scene.leaves[a];
+  const B = scene.leaves[b];
+  if (!A || !B) return;
+  const u = m.userData.uniforms;
+  for (const [name, page] of [["FrontA", A.front], ["BackA", A.back], ["FrontB", B.front], ["BackB", B.back]]) {
+    u[`uFold${name}`].value = page.map ?? scene.blank;
+    u[`uFold${name}Spots`].value = page.userData.uniforms.uSpots.value;
+    u[`uFold${name}SpotInk`].value.copy(page.userData.uniforms.uSpotInk.value);
   }
-}
-
-/**
- * A fold mesh's groups and its sheets' halves per vertex: the first pair's fold in the cover's
- * material (group 0) when that pair is the cover's, every other in the pages' (group 1), one
- * draw each; `foldPair`: each vertex's pair, [first leaf, last] (see foldSheetMaterial).
- */
-function foldGroups(geo, pairs, SHEET, SEGS) {
-  geo.clearGroups();
-  const coverFirst = pairs.length > 0 && pairs[0][0] === 0;
-  if (coverFirst) geo.addGroup(0, 24 * SEGS, 0);
-  const from = coverFirst ? 1 : 0;
-  if (pairs.length > from) geo.addGroup(from * 24 * SEGS, (pairs.length - from) * 24 * SEGS, 1);
-  const pair = new Float32Array(pairs.length * SHEET * 2);
-  pairs.forEach(([a, b], k) => {
-    for (let v = 0; v < SHEET; v++) pair.set([a, b], (k * SHEET + v) * 2);
-  });
-  geo.setAttribute("foldPair", new THREE.BufferAttribute(pair, 2));
+  u.uFoldEdge.value.copy((a === 0 ? scene.coverEdgeMat : scene.edgeMat).color);
+  const stock = A.front;
+  m.color.copy(stock.color);
+  m.roughness = stock.roughness;
+  m.specularIntensity = stock.specularIntensity;
+  m.clearcoat = stock.clearcoat;
+  m.clearcoatRoughness = stock.clearcoatRoughness;
 }
 
 /** Across the page at a fold's point j of `segs` (see foldSheetMaterial): `us` the page's share it takes. */
@@ -697,6 +694,7 @@ function writeFoldGeometry(geo, leaves, book) {
   if (fold?.sheets !== sheets) {
     geo.dispose();
     const index = [];
+    geo.clearGroups();
     for (let k = 0; k < sheets; k++) {
       for (let st = 0; st < 4; st++) {
         const base = k * SHEET + st * 2 * ROW;
@@ -705,8 +703,8 @@ function writeFoldGeometry(geo, leaves, book) {
           index.push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
         }
       }
+      geo.addGroup(k * 24 * SEGS, 24 * SEGS, k);
     }
-    foldGroups(geo, geo.userData.pairs, SHEET, SEGS);
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 3), 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 3), 3));
     geo.setAttribute("fold", new THREE.BufferAttribute(new Float32Array(sheets * SHEET * 3), 3)); // see foldSheetMaterial
@@ -870,6 +868,7 @@ function writeSignatureFolds(geo, leaves, book, out) {
   if (folds?.count !== pairs.length) {
     geo.dispose();
     const index = [];
+    geo.clearGroups();
     for (let s = 0; s < pairs.length; s++) {
       for (let st = 0; st < 4; st++) {
         const base = s * SHEET + st * 2 * ROW;
@@ -878,8 +877,8 @@ function writeSignatureFolds(geo, leaves, book, out) {
           index.push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
         }
       }
+      geo.addGroup(s * 24 * SEGS, 24 * SEGS, s); // a material a sheet (see makeSignatureFolds)
     }
-    foldGroups(geo, pairs, SHEET, SEGS);
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pairs.length * SHEET * 3), 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(pairs.length * SHEET * 3), 3));
     geo.setAttribute("fold", new THREE.BufferAttribute(new Float32Array(pairs.length * SHEET * 3), 3)); // see foldSheetMaterial

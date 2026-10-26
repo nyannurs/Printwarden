@@ -18,13 +18,12 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { CAMERA_PRESETS, CameraRig, presetHome } from "./camera.js";
 import * as capture from "./capture.js";
-import { drawOrder, freeBatches, freeOccluder, makeBatches, makeOccluder, OCCLUDER_EVERY, setDepthFirst, shadows } from "./draw.js";
-import { layoutGround, makeExtras, syncFoldStock } from "./extras.js";
+import { drawOrder, shadows } from "./draw.js";
+import { layoutGround, makeExtras } from "./extras.js";
 import { frameCamera, placeCamera, visiblePages, visibleSpine } from "./framing.js";
 import { bindInput, glideZoom, panBy } from "./input.js";
 import { layoutLeaves } from "./layout.js";
-import { freeFlap, inkEdgeMaterial, inkFillerMaterial, isCover, makeFlap, makeLeaf, makeSheets, fillerMaterial } from "./leaf.js";
-import { LayerArray, PageTable } from "./pagedata.js";
+import { freeFlap, isCover, makeFlap, makeLeaf, makeSheets, fillerMaterial } from "./leaf.js";
 import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
 import { INK_GLSL, inkUniforms, MAX_DETAIL, patchShader, sheetShader, TILE_GLSL } from "./shaders.js";
 import { naiveLut } from "./inklut.js";
@@ -120,18 +119,6 @@ export class BookScene {
     container.appendChild(r.domElement);
     this.renderer = r;
     this.tiles = new TileCache(r); // the pages' tiles on the GPU (see tiles.js); bound to the pages by uploads.js
-    // The pages' data by folio, as every shader that draws a page reads it (pagedata.js): the
-    // page table, and the page array their images go in (uploads.js placeImage).
-    this.pageTable = new PageTable();
-    this.pageArray = new LayerArray(r, { mips: true, name: "pages" });
-    // The sharper images shown for now (a video's or a screenshot's pages, the client viewer's
-    // spread at rest: uploads.js showPageImage), every reader of a page preferring them (pvBest).
-    this.sharpArray = new LayerArray(r, { mips: true, name: "sharp pages" });
-    // An array made larger moves every image's scale in it: the page table written again.
-    this.pageArray.onGrow = this.sharpArray.onGrow = () => {
-      uploads.showAllPages(this);
-      this.dirty = true;
-    };
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#56575b");
@@ -196,8 +183,7 @@ export class BookScene {
     this.gpuTime = { timer: r.getContext().getExtension("EXT_disjoint_timer_query_webgl2"), queries: [], ms: 0, at: -Infinity };
     // Drawn frames (frameStats): when, the main thread's time, and that time by part (the
     // performance check's breakdown, see FRAME_PARTS).
-    this.frameLog = { time: new Float64Array(256), cpu: new Float64Array(256), calls: new Float64Array(256), parts: FRAME_PARTS.map(() => new Float64Array(256)), n: 0 };
-    r.info.autoReset = false; // counted over a whole frame (#frame), not reset by every render of it
+    this.frameLog = { time: new Float64Array(256), cpu: new Float64Array(256), parts: FRAME_PARTS.map(() => new Float64Array(256)), n: 0 };
     this.partTimes = new Float64Array(FRAME_PARTS.length); // this frame's, as they are measured
     this.casters = { current: false }; // see nearestCasters
 
@@ -239,20 +225,13 @@ export class BookScene {
       // Where no shadow caster comes near (see nearestCasters).
       uCasterMap: { value: null },
       uCasterMapOn: { value: 0 },
-      // The tile cache's texture array (TILE_GLSL) and the pages' tables, a layer each.
+      // The tile cache's texture array (TILE_GLSL; each page's table is its own uniform).
       uTiles: { value: this.tiles.texture },
-      uTileTables: { value: this.tiles.tables.texture },
-      // The page table and the page array (PAGE_DATA_GLSL).
-      uPageTable: this.pageTable.uniform,
-      uPages: { value: this.pageArray.texture },
-      uSharp: { value: this.sharpArray.texture },
       // The pages' inks to colour (INK_GLSL): the table, the plates that print, whether the
       // pages are inks at all (see setPageKind).
       uInkLut: { value: this.inkLut },
       uInkOn: { value: new THREE.Vector4(1, 1, 1, 1) },
       uInkPages: { value: 0 },
-      // A flying stack's filler faces in the batches' page shader (pvFiller): inkFillerMaterial's colour.
-      uFillerColor: { value: new THREE.Color() },
     };
     this.edgeMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide });
     this.coverEdgeMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide }); // the covers' cut edges
@@ -295,19 +274,6 @@ vec2 pvTurnDir( vec2 d ) {
 // The base image, at a place in the artwork (as TILE_GLSL asks a page's).
 vec4 pageSample( sampler2D t, vec2 uv, vec2 dx, vec2 dy ) {
   return textureGrad( t, pvTurn( uv ), pvTurnDir( dx ) * 0.7, pvTurnDir( dy ) * 0.7 );
-}
-// Its tiles (TILE_GLSL): its table is a texture of its own, its base image and spot channels \`map\` and uSpots.
-uniform sampler2D uTileTable;
-uniform vec4 uTilePage;
-uniform float uTileOn;
-vec4 pvTableFetch( ivec2 e ) {
-  return texelFetch( uTileTable, e, 0 );
-}
-vec4 pvBase( vec2 uv, vec2 dx, vec2 dy ) {
-  return pageSample( map, uv, dx, dy );
-}
-vec4 pvSpots( vec2 uv, vec2 dx, vec2 dy ) {
-  return pageSample( uSpots, uv, dx, dy );
 }
 ${TILE_GLSL}
 #endif
@@ -355,10 +321,7 @@ ${TILE_GLSL}
     this.sheetDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     this.sheetDepth.onBeforeCompile = (shader) => sheetShader(shader, this.shared);
     this.sheetDepth.customProgramCacheKey = () => "bookview-sheet";
-    /** @type {Map<THREE.MeshStandardMaterial, THREE.MeshStandardMaterial>} the sheets' cut edges with their pages' ink at them (see #makeInkEdges) */
-    this.inkEdges = new Map();
     this.sheetFiller = fillerMaterial(this); // the faces between a flying stack's sheets (see layoutLeaves)
-    this.inkFiller = inkFillerMaterial(this); // the same, each with its page's image (made anew with each book, see #makeInkEdges)
     // Cotton headbands: the bead and its cloth tail (a single sheet: seen from either side).
     this.headbandMat = new THREE.MeshStandardMaterial({ color: 0xece4d2, roughness: 0.85, side: THREE.DoubleSide });
     // A hardcover's case spine inside: what shows of it is the joint, which the endpaper
@@ -376,15 +339,6 @@ ${TILE_GLSL}
     this.float = null; // the floating preset's tilt of the book, if chosen
     this.model = null;
     this.leaves = [];
-    this.occluder = null; // see draw.js makeOccluder
-    this.occluderEvery = OCCLUDER_EVERY; // its sheets: every this-many-th (0: none, for the performance check)
-    this.batches = null; // the sheets drawn in batches (see draw.js makeBatches); `debugNoBatch = true` draws every sheet on its own
-    this.debugNoBatch = false;
-    this.debugShadowFull = false; // the shadow map at full size while pages move too (draw.js shadowSize): the performance check's comparison
-    /** @type {{full: number, maps: Map<number, THREE.WebGLRenderTarget>, low: boolean} | null} the shadow map's two sizes (draw.js shadowSize) */
-    this.shadowMaps = null;
-    this.depthPass = null; // the sheets' depth drawn first (draw.js makeDepthFirst): off but for the performance check's comparison
-    this.depthFirst = false;
     this.extras = null;
     this.opening = 0;
     this.closed = 0; // 0 open … 1 closed, animated
@@ -591,21 +545,12 @@ ${TILE_GLSL}
 
     this.opening = Math.min(this.opening, this.model.leafCount);
     this.leaves = Array.from({ length: this.model.leafCount }, (_, i) => makeLeaf(this, i));
-    this.#makeInkEdges();
-    // The pages' rows of the page table: what the book sets, afresh (the images stay).
-    const folios = 2 * this.leaves.length;
-    this.pageTable.ensure(folios);
-    this.tiles.setFolios(folios);
-    this.pageTable.clearBook();
-    this.pageTable.set(1, 1, 1, 1); // the outsides of the covers: no gutter shade there
-    if (spec.pageCount % 2 === 0) this.pageTable.set(folios, 1, 1, 1);
+    this.leaves[0].front.userData.uniforms.uOuterCover.value = 1;
+    if (spec.pageCount % 2 === 0) this.leaves[this.leaves.length - 1].back.userData.uniforms.uOuterCover.value = 1;
     for (const [i, leaf] of this.leaves.entries()) {
       leaf.theta = leaf.to = leaf.from = restingAngle(this.model, i, this.opening);
     }
     makeSheets(this);
-    makeOccluder(this);
-    makeBatches(this);
-    setDepthFirst(this, this.depthFirst); // (the batches' materials too)
     this.extras = makeExtras(this);
     this.#applyFinish();
     uploads.showAllPages(this);
@@ -630,13 +575,13 @@ ${TILE_GLSL}
     // endpaper's colour, printed or not) and the lining across the joints.
     const cased = this.model?.style.spine === "case" && this.leaves.length > 1;
     const endpaper = { ...this.paper, color: this.paper.endpaperColor ?? this.paper.color };
-    const apply = (m, stock, folio = null) => {
+    const apply = (m, stock) => {
       m.color.set(stock.color);
       m.roughness = stock.roughness;
       m.specularIntensity = stock.specular ?? 0.2;
       // Never exactly 0: toggling clearcoat on/off would recompile every shader.
       m.clearcoat = Math.max(0.001, stock.clearcoat);
-      if (folio !== null) this.pageTable.set(folio, 1, 0, stock.show);
+      m.userData.uniforms.uShow.value = stock.show;
     };
     const n = this.leaves.length;
     for (const leaf of this.leaves) {
@@ -644,53 +589,30 @@ ${TILE_GLSL}
       const stock = cover ? this.paper.cover : this.paper;
       const inside = cased && cover; // a board's inside is its pastedown
       const flyleaf = cased && this.model.firstBlockLeaf === 2 && (leaf.i === 1 || leaf.i === n - 2);
-      const front = flyleaf || (inside && leaf.i > 0) ? endpaper : stock;
-      const back = flyleaf || (inside && leaf.i === 0) ? endpaper : stock;
-      apply(leaf.front, front, 2 * leaf.i + 1);
-      apply(leaf.back, back, 2 * leaf.i + 2);
-      leaf.stock = front === this.paper && back === this.paper ? "page" : "other"; // the batches draw the pages' stock (draw.js batchable)
+      apply(leaf.front, flyleaf || (inside && leaf.i > 0) ? endpaper : stock);
+      apply(leaf.back, flyleaf || (inside && leaf.i === 0) ? endpaper : stock);
       if (inside) {
         // A board is greyboard: nothing printed on one side shows on the other (the cover's
         // print showed faintly on the endpaper inside, the designer's hardcover).
-        this.pageTable.set(2 * leaf.i + 1, 1, 0, 0);
-        this.pageTable.set(2 * leaf.i + 2, 1, 0, 0);
+        leaf.front.userData.uniforms.uShow.value = 0;
+        leaf.back.userData.uniforms.uShow.value = 0;
       }
     }
-    for (const b of Object.values(this.batches ?? {})) if (b.own) apply(b.material, this.paper); // the batches': the pages' stock
     this.#syncTurnIns();
     this.edgeMat.color.set(this.paper.color).multiplyScalar(0.9);
     this.sheetFiller.color.set(this.paper.color);
-    this.inkFiller.color.copy(this.sheetFiller.color).multiplyScalar(0.9);
-    this.shared.uFillerColor.value.copy(this.inkFiller.color);
+    for (const leaf of this.leaves ?? []) for (const f of leaf.fillers ?? []) f.color.copy(this.sheetFiller.color).multiplyScalar(0.9);
     this.coverEdgeMat.color.set(this.paper.cover.color).multiplyScalar(0.9);
     this.coverMat.color.set(this.paper.cover.color).multiplyScalar(0.96); // the spine's cut ends
     this.liningMat.color.set(endpaper.color).multiplyScalar(0.95); // the endpaper across a hardcover's joint, in its shade
     this.liningMat.roughness = this.paper.roughness;
     this.#syncSheetEdges();
-    syncFoldStock(this);
     this.#syncSpineStock(); // artwork on the spine is printed on the cover stock
     this.dirty = true;
   }
 
   #syncSheetEdges() {
     for (const [base, m] of this.sheetEdges) m.color.copy(base.color);
-    for (const [base, m] of this.inkEdges) m.color.copy(base.color);
-  }
-
-  /**
-   * The sheets' cut edges with their pages' ink at them (inkEdgeMaterial): one for the pages'
-   * stock, one for the covers', made anew with each book, after its faces' materials: three
-   * draws a sheet's parts in its materials' order of making, and the edges came last (drawn
-   * first, they changed which of two surfaces meeting at a rim wins the tie there).
-   */
-  #makeInkEdges() {
-    for (const m of this.inkEdges.values()) m.dispose();
-    this.inkEdges = new Map([this.edgeMat, this.coverEdgeMat].map((base) => [base, inkEdgeMaterial(this, base)]));
-    for (const leaf of this.leaves) if (leaf.edgeBase) leaf.mesh.material[2] = this.inkEdges.get(leaf.edgeBase);
-    const filler = this.inkFiller;
-    this.inkFiller = inkFillerMaterial(this); // (the same reason: after the faces' materials)
-    this.inkFiller.color.copy(filler.color);
-    filler.dispose();
   }
 
   /**
@@ -754,11 +676,6 @@ ${TILE_GLSL}
     }
     out.delete(folio);
     return [...out].filter((f) => f >= 1 && f <= 2 * this.leaves.length);
-  }
-
-  /** The sharp images' array let go once none is shown (after a capture: it can be hundreds of MB). */
-  releaseSharp() {
-    if (!this.overrides.size) this.sharpArray.dispose();
   }
 
   /**
@@ -854,11 +771,11 @@ ${TILE_GLSL}
     const cased = this.model?.style.spine === "case" && this.leaves.length > 1;
     const n = this.leaves.length;
     for (const leaf of this.leaves ?? []) {
-      /** @type {[number, THREE.MeshPhysicalMaterial | null][]} */
-      const sides = [[2 * leaf.i + 1, cased && leaf.i === n - 1 ? this.backWrapMat : null], [2 * leaf.i + 2, cased && leaf.i === 0 ? this.frontWrapMat : null]];
-      for (const [folio, wrap] of sides) {
-        if (wrap) this.pageTable.set4(folio, 4, wrap.color.r, wrap.color.g, wrap.color.b, 1);
-        else this.pageTable.set4(folio, 4, 0, 0, 0, 0);
+      for (const [m, wrap] of [[leaf.front, cased && leaf.i === n - 1 ? this.backWrapMat : null], [leaf.back, cased && leaf.i === 0 ? this.frontWrapMat : null]]) {
+        const t = m.userData.uniforms.uTurnIn?.value;
+        if (!t) continue;
+        if (wrap) t.set(wrap.color.r, wrap.color.g, wrap.color.b, 1);
+        else t.set(0, 0, 0, 0);
       }
     }
   }
@@ -1131,15 +1048,17 @@ ${TILE_GLSL}
 
   /** Side glue on this page: glued to the cover `mm` from the spine (0: none). See the page shader. */
   setPageGlue(folio, mm) {
-    if (!this.#pageMaterial(folio)) return;
-    this.pageTable.set(folio, 1, 2, mm);
+    const m = this.#pageMaterial(folio);
+    if (!m) return;
+    m.userData.uniforms.uGlue.value = mm;
     this.dirty = true;
   }
 
   /** The cover's hinge score on this (outside) page, `mm` from the spine (0: none). */
   setCoverScore(folio, mm) {
-    if (!this.#pageMaterial(folio)) return;
-    this.pageTable.set(folio, 1, 3, mm);
+    const m = this.#pageMaterial(folio);
+    if (!m) return;
+    m.userData.uniforms.uScore.value = mm;
     this.dirty = true;
   }
 
@@ -1300,10 +1219,9 @@ ${TILE_GLSL}
         m.dispose();
       }
       for (const m of leaf.mesh.material.slice(3)) m.dispose(); // a coil page's twins (their textures are the page's)
+      if (leaf.mesh.material[2].userData.edgeOf) leaf.mesh.material[2].dispose(); // its edges' (the same)
     }
     this.leaves = [];
-    freeOccluder(this);
-    freeBatches(this);
     for (const flap of this.flaps.values()) freeFlap(this, flap); // the flaps lay on them
     this.flaps.clear();
     uploads.dropDetails(this); // sharp strips on their way: for the old book's leaves
@@ -1361,9 +1279,7 @@ ${TILE_GLSL}
     const { animating, moving } = this.#update(this.clock ?? time);
     parts[PART.update] = performance.now() - started - parts[PART.layout] - parts[PART.uploads];
     const inMotion = animating || moving;
-    // (One more once things stand still while the shadow map is at its moving size: the
-    // full one is drawn then, see draw.js shadowSize.)
-    const draw = inMotion || this.dirty || !!this.shadowMaps?.low;
+    const draw = inMotion || this.dirty;
     this.#readGpuTime();
     if (!draw) {
       // At rest, settled, nothing waiting to go to the GPU: no more frames until something
@@ -1387,7 +1303,6 @@ ${TILE_GLSL}
     const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
     const query = g.timer && inMotion && g.queries.length < 4 ? gl.createQuery() : null;
     if (query) gl.beginQuery(g.timer.TIME_ELAPSED_EXT, query);
-    this.renderer.info.reset();
     this.composer.render();
     if (query) {
       gl.endQuery(g.timer.TIME_ELAPSED_EXT);
@@ -1399,7 +1314,6 @@ ${TILE_GLSL}
     const at = log.n % log.time.length;
     log.time[at] = started;
     log.cpu[at] = performance.now() - started;
-    log.calls[at] = this.renderer.info.render.calls; // the frame's draw calls (the shadow map's too, when drawn again)
     parts.forEach((ms, i) => { log.parts[i][at] = ms; });
     log.n++;
   }

@@ -34,3 +34,7 @@ tools/jpegwasm/target/
 # The heavy test document (tools/make-heavy-pdf.py): too large for GitHub
 testfiles/heavy*.pdf
 testfiles/long-layouts-*.pdf
+
+# Python bytecode
+__pycache__/
+*.pyc
