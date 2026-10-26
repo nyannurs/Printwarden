@@ -175,7 +175,9 @@ export class LayerArray {
  *   2: 1 once the page has tiles, the layer of their table (tiles.js), its levels, its rows a level;
  *   3: the page in level-0 texels (x, y);
  *   4: a board's turn-in: its colour and a 1 when on;
- *   5-8: its spot matrix (spotInk in uploads.js), a column a texel.
+ *   5-8: its spot matrix (spotInk in uploads.js), a column a texel;
+ *   9: 1 if that matrix isn't all nothing (the page shader reads it only then); 1 if the face
+ *      is a flying stack's filler (layout.js).
  * Written here, sent whole when anything changed (flush, before a frame is drawn: small).
  */
 export class PageTable {
@@ -242,6 +244,7 @@ export class PageTable {
   setSpotInk(folio, matrix) {
     const e = matrix.elements;
     for (let c = 0; c < 4; c++) this.set4(folio, 5 + c, e[4 * c], e[4 * c + 1], e[4 * c + 2], e[4 * c + 3]);
+    this.set(folio, 9, 0, e.some((v) => v !== 0) ? 1 : 0);
   }
 
   /** What the book sets cleared (a book built anew: setBook): show-through, the covers' outsides, glue, score, turn-ins. */
@@ -258,7 +261,7 @@ export class PageTable {
       this.set4(folio, 0, -1, -1, 1, 1);
       this.set4(folio, 2, 0, 0, 0, 0);
       this.set4(folio, 3, 0, 0, 0, 0);
-      for (let c = 0; c < 4; c++) this.set4(folio, 5 + c, 0, 0, 0, 0);
+      for (let c = 0; c < 5; c++) this.set4(folio, 5 + c, 0, 0, 0, 0);
     }
   }
 

@@ -6,11 +6,13 @@
 // Last, it asks for a few seconds of panning by hand and measures the mouse's own rate and
 // what was drawn: a frame can only be drawn when the mouse reports a move. Then dragging round
 // three more views: the closed book, the open book as framed, its piles from low at the
-// fore-edge; the last two also without the occluder and without multisampling (what the
-// paper block costs where hidden points are shaded, see draw.js makeOccluder). Turning pages,
+// fore-edge; the last two also without the occluder, without multisampling, and with the
+// sheets' depth drawn first (what the paper block costs where hidden points are shaded, and
+// what saves it: see draw.js makeOccluder, makeDepthFirst). Turning pages,
 // the main thread's time is broken down by part (FRAME_PARTS in scene.js). About 55 seconds
 // and the hand panning; everything is put back as it was.
 
+import { setDepthFirst } from "../viewer/draw.js";
 import { FRAME_PARTS } from "../viewer/scene.js";
 
 const SECONDS = 2.2; // each run; the first 0.4 s isn't counted (shaders compiling)
@@ -168,6 +170,7 @@ export async function runProbe(scene, onProgress) {
       for (const m of pages()) m.needsUpdate = true;
     });
     await dragging("  no multisampling", () => setSamples(0), () => setSamples(samples));
+    await dragging("  sheets' depth first", () => setDepthFirst(scene, true), () => setDepthFirst(scene, false));
     const top = new Set([scene.opening - 1, scene.opening]);
     await dragging("  only the two open pages", () => {
       for (const l of scene.leaves) l.hidden = !top.has(l.i);
@@ -233,6 +236,8 @@ export async function runProbe(scene, onProgress) {
       await dragging("  no occluder", () => { scene.occluderEvery = 0; }, () => { scene.occluderEvery = every; });
       place();
       await dragging("  no multisampling", () => setSamples(0), () => setSamples(samples));
+      place();
+      await dragging("  sheets' depth first", () => setDepthFirst(scene, true), () => setDepthFirst(scene, false));
     }
   } finally {
     scene.debugNoPivot = false;

@@ -144,7 +144,10 @@ export function layoutLeaves(scene) {
     const filler = scene.debugFillerInk === false ? scene.sheetFiller : scene.inkFiller;
     leaf.mesh.material[0] = frontHidden ? filler : leaf.front;
     leaf.mesh.material[1] = backHidden ? filler : leaf.back;
-    leaf.filler = frontHidden || backHidden; // drawn on its own then (see draw.js batchable)
+    leaf.filler = frontHidden || backHidden;
+    // For the batches' page shader, which draws a filler face as inkFillerMaterial does (pvFiller).
+    scene.pageTable.set(2 * leaf.i + 1, 9, 1, frontHidden ? 1 : 0);
+    scene.pageTable.set(2 * leaf.i + 2, 9, 1, backHidden ? 1 : 0);
   }
   // Only sheets whose shape changed go to the GPU: while one page turns, the rest hold still.
   // Sheets are drawn a little thinner than they are (LEAF_FILL), so neighbours never share a

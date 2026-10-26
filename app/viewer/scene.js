@@ -18,7 +18,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { CAMERA_PRESETS, CameraRig, presetHome } from "./camera.js";
 import * as capture from "./capture.js";
-import { drawOrder, freeBatches, freeOccluder, makeBatches, makeOccluder, OCCLUDER_EVERY, shadows } from "./draw.js";
+import { drawOrder, freeBatches, freeOccluder, makeBatches, makeOccluder, OCCLUDER_EVERY, setDepthFirst, shadows } from "./draw.js";
 import { layoutGround, makeExtras, syncFoldStock } from "./extras.js";
 import { frameCamera, placeCamera, visiblePages, visibleSpine } from "./framing.js";
 import { bindInput, glideZoom, panBy } from "./input.js";
@@ -242,6 +242,8 @@ export class BookScene {
       uInkLut: { value: this.inkLut },
       uInkOn: { value: new THREE.Vector4(1, 1, 1, 1) },
       uInkPages: { value: 0 },
+      // A flying stack's filler faces in the batches' page shader (pvFiller): inkFillerMaterial's colour.
+      uFillerColor: { value: new THREE.Color() },
     };
     this.edgeMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide });
     this.coverEdgeMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide }); // the covers' cut edges
@@ -369,6 +371,8 @@ ${TILE_GLSL}
     this.occluderEvery = OCCLUDER_EVERY; // its sheets: every this-many-th (0: none, for the performance check)
     this.batches = null; // the sheets drawn in batches (see draw.js makeBatches); `debugNoBatch = true` draws every sheet on its own
     this.debugNoBatch = false;
+    this.depthPass = null; // the sheets' depth drawn first (draw.js makeDepthFirst): off but for the performance check's comparison
+    this.depthFirst = false;
     this.extras = null;
     this.opening = 0;
     this.closed = 0; // 0 open … 1 closed, animated
@@ -589,6 +593,7 @@ ${TILE_GLSL}
     makeSheets(this);
     makeOccluder(this);
     makeBatches(this);
+    setDepthFirst(this, this.depthFirst); // (the batches' materials too)
     this.extras = makeExtras(this);
     this.#applyFinish();
     uploads.showAllPages(this);
@@ -644,6 +649,7 @@ ${TILE_GLSL}
     this.edgeMat.color.set(this.paper.color).multiplyScalar(0.9);
     this.sheetFiller.color.set(this.paper.color);
     this.inkFiller.color.copy(this.sheetFiller.color).multiplyScalar(0.9);
+    this.shared.uFillerColor.value.copy(this.inkFiller.color);
     this.coverEdgeMat.color.set(this.paper.cover.color).multiplyScalar(0.9);
     this.coverMat.color.set(this.paper.cover.color).multiplyScalar(0.96); // the spine's cut ends
     this.liningMat.color.set(endpaper.color).multiplyScalar(0.95); // the endpaper across a hardcover's joint, in its shade

@@ -7,7 +7,7 @@ import { HOLE_OFFSET_MM, leafShape } from "./model.js";
 import {
   EDGE_FRAGMENT_HEADER, EDGE_INK, INK_GLSL, inkUniforms,
   FINISH_FRAGMENT, FINISH_HIGHLIGHT, FINISH_REFLECTION, HOLE_DISCARD, LEAF_FILL, LEAF_ROWS, MAX_DETAIL, MID_ROW,
-  OTHER_ROWS, PAGE_DATA_GLSL, PAGE_FRAGMENT_HEADER, PAGE_MAP_FRAGMENT, pageDataUniforms, PAPER_ROLLOFF, patchShader, sheetShader, SHOW_THROUGH,
+  OTHER_ROWS, PAGE_DATA_GLSL, PAGE_FRAGMENT_HEADER, PAGE_MAP_FRAGMENT, PAGE_VERTEX, PAGE_VERTEX_HEADER, pageDataUniforms, PAPER_ROLLOFF, patchShader, sheetShader, SHOW_THROUGH,
 } from "./shaders.js";
 import { makeInkTexture } from "./textures.js";
 import { noSpotInk, spotInk } from "./uploads.js";
@@ -304,6 +304,10 @@ export function pageMaterial(scene, holesOf = null, { own = true } = {}) {
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, m.userData.uniforms, scene.shared);
     sheetShader(shader, scene.shared);
+    shader.vertexShader = patchShader(shader.vertexShader, [
+      ["flat varying int vSheet;", (line) => PAGE_VERTEX_HEADER + line],
+      ["vec3 transformed = sheetPosition();", (line) => line + "\n" + PAGE_VERTEX],
+    ]);
     shader.fragmentShader = patchShader(shader.fragmentShader, [
       ["void main() {", PAGE_FRAGMENT_HEADER + "void main() {\n  pvLoadPage( vFolio );\n" + (holesOf ? HOLE_DISCARD : "")],
       ["#include <map_fragment>", PAGE_MAP_FRAGMENT + SHOW_THROUGH],

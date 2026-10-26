@@ -164,6 +164,26 @@ mat4 pvSpotInk( int folio ) {
 }
 `;
 
+// The page's own from the page table, read in the vertex shader and handed to the page
+// shader (see PAGE_FRAGMENT_HEADER's vPage*): after the vertex's folio is known (sheetShader).
+export const PAGE_VERTEX_HEADER = /* glsl */ `
+uniform highp sampler2D uPageTable;
+flat varying vec4 vPageA, vPageB, vPageC, vPageD, vPageE, vPageF;
+`;
+export const PAGE_VERTEX = /* glsl */ `
+  {
+    int other = ( vFolio & 1 ) == 1 ? vFolio + 1 : vFolio - 1;
+    vec4 back = texelFetch( uPageTable, ivec2( 0, other ), 0 );
+    vec4 flags = texelFetch( uPageTable, ivec2( 9, vFolio ), 0 );
+    vPageA = texelFetch( uPageTable, ivec2( 0, vFolio ), 0 );
+    vPageB = texelFetch( uPageTable, ivec2( 1, vFolio ), 0 ) + vec4( 0.0, 2.0 * flags.y, 0.0, 0.0 ); // (a filler face: 2 more, see pvLoadPage)
+    vPageC = texelFetch( uPageTable, ivec2( 2, vFolio ), 0 );
+    vPageD = vec4( texelFetch( uPageTable, ivec2( 3, vFolio ), 0 ).xy, back.xy );
+    vPageE = texelFetch( uPageTable, ivec2( 4, vFolio ), 0 );
+    vPageF = vec4( back.zw, flags.x, texelFetch( uPageTable, ivec2( 9, other ), 0 ).x );
+  }
+`;
+
 /** The page data's uniforms (the scene's shared ones) on a shader that reads pages by folio. */
 export function pageDataUniforms(shader, shared) {
   shader.uniforms.uPageTable = shared.uPageTable;
@@ -452,6 +472,11 @@ uniform float uFinishKind;  // 0 none, 1 gloss varnish, 2 gold, 3 silver, 4 copp
 // board's inside (the endpaper pasted down is the page's size; round it, on the squares at
 // head, foot and fore-edge, the cover's turn-in shows: rgb its colour, a 1 on); its spot
 // matrix (see INK_GLSL); and the other side's image, channels and matrix, for showing through.
+// Read once a vertex (PAGE_VERTEX), handed down unchanged (flat): the page is the same over a
+// face. (Read for every point shaded, until 2026-10-26: on a GPU that shades every hidden layer
+// of the paper block, Apple's under ANGLE, nine reads a point times dozens of layers doubled
+// the frame's time.) The spot matrices, sixteen numbers each, only for a page that has spots.
+flat varying vec4 vPageA, vPageB, vPageC, vPageD, vPageE, vPageF;
 float pvLayer, pvSpotsLayer, pvTilesLayer;
 vec2 pvScale;
 float uShow, uOuterCover, uGlue, uScore, uTileOn;
@@ -460,20 +485,22 @@ mat4 uSpotInk;
 float pvBackLayer, pvBackSpotsLayer;
 vec2 pvBackScale;
 mat4 uBackSpotInk;
+// A face between a flying stack's sheets (layoutLeaves): its page's image, unlit, in the shade
+// of the sheets' edges (uFillerColor), as inkFillerMaterial draws it, so the sheet stays in the
+// batch. Flagged by 2 added to "outside of a cover" (never both: a cover's outside is never
+// against another sheet).
+bool pvFiller;
+uniform vec3 uFillerColor;
 void pvLoadPage( int folio ) {
-  vec4 a = pvPageTexel( folio, 0 );
-  pvLayer = a.x; pvSpotsLayer = a.y; pvScale = a.zw;
-  vec4 b = pvPageTexel( folio, 1 );
-  uShow = b.x; uOuterCover = b.y; uGlue = b.z; uScore = b.w;
-  vec4 c = pvPageTexel( folio, 2 );
-  vec4 d = pvPageTexel( folio, 3 );
-  uTileOn = c.x; pvTilesLayer = c.y; uTilePage = vec4( d.xy, c.zw );
-  uTurnIn = pvPageTexel( folio, 4 );
-  uSpotInk = pvSpotInk( folio );
+  pvLayer = vPageA.x; pvSpotsLayer = vPageA.y; pvScale = vPageA.zw;
+  pvFiller = vPageB.y > 1.5;
+  uShow = vPageB.x; uOuterCover = vPageB.y - ( pvFiller ? 2.0 : 0.0 ); uGlue = vPageB.z; uScore = vPageB.w;
+  uTileOn = vPageC.x; pvTilesLayer = vPageC.y; uTilePage = vec4( vPageD.xy, vPageC.zw );
+  uTurnIn = vPageE;
   int other = ( folio & 1 ) == 1 ? folio + 1 : folio - 1;
-  vec4 e = pvPageTexel( other, 0 );
-  pvBackLayer = e.x; pvBackSpotsLayer = e.y; pvBackScale = e.zw;
-  uBackSpotInk = pvSpotInk( other );
+  pvBackLayer = vPageD.z; pvBackSpotsLayer = vPageD.w; pvBackScale = vPageF.xy;
+  uSpotInk = vPageF.z > 0.5 ? pvSpotInk( folio ) : mat4( 0.0 );
+  uBackSpotInk = vPageF.w > 0.5 ? pvSpotInk( other ) : mat4( 0.0 );
 }
 // A texture of the page's own (a strip, an image shown instead), sampled as its layer would be.
 vec4 pageSample( sampler2D t, vec2 uv, vec2 dx, vec2 dy ) {
@@ -589,6 +616,9 @@ export const FINISH_HIGHLIGHT = /* glsl */ `
   if ( pvFoil > 0.0 ) {
     float peak = max( max( outgoingLight.r, outgoingLight.g ), max( outgoingLight.b, 1e-4 ) );
     outgoingLight = mix( outgoingLight, outgoingLight * min( 1.0, 0.92 / peak ), pvFoil );
+  }
+  if ( pvFiller ) {
+    outgoingLight = uFillerColor * sRGBTransferEOTF( pvPageColor( pvImageAt( pvLayer, pvScale, vMapUv ), pvSpotsAt( pvSpotsLayer, pvScale, vMapUv ), uSpotInk ) ).rgb;
   }
 `;
 

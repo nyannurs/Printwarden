@@ -4,6 +4,7 @@
 import * as THREE from "three";
 
 import { occluderMaterial, pageMaterial } from "./leaf.js";
+import { sheetShader } from "./shaders.js";
 
 /** The occluder (see makeOccluder) takes every this-many-th sheet, besides the piles' top sheets. */
 export const OCCLUDER_EVERY = 8;
@@ -231,12 +232,15 @@ export function freeBatches(scene) {
 
 /**
  * Whether a sheet can be drawn in the batches this frame: a sheet of the pages' stock (the
- * covers and endpapers have their own), not a board, no face of it a filler (a flying stack's,
- * see layoutLeaves) or on a texture of its own (an image shown instead, a capture's strips, a
- * spot finish: see pageMaterial), and nothing being debugged.
+ * covers and endpapers have their own), not a board, no face of it on a texture of its own (an
+ * image shown instead, a capture's strips, a spot finish: see pageMaterial), and nothing being
+ * debugged. A flying stack's filler faces are drawn in the batch too (pvFiller in the page
+ * shader); as plain paper (debugFillerInk false) on their own. (Out of the batch, a stack of a
+ * hundred sheets swung over at once was 300 more draw calls in every frame of its flight.)
  */
 function batchable(scene, leaf) {
-  if (leaf.board || leaf.stock !== "page" || leaf.filler || scene.debugNoBatch) return false;
+  if (leaf.board || leaf.stock !== "page" || scene.debugNoBatch) return false;
+  if (leaf.filler && scene.debugFillerInk === false) return false;
   for (const m of [leaf.front, leaf.back]) {
     const u = m.userData.uniforms;
     if (u.uOwn.value || u.uDetailCount.value || u.uFinishKind.value) return false;
@@ -310,6 +314,7 @@ export function makeOccluder(scene) {
   mesh.renderOrder = -1e6; // before the sheets (see drawOrder)
   scene.block.add(mesh);
   scene.occluder.mesh = mesh;
+  makeDepthFirst(scene, geo.attributes.position, bases);
 }
 
 export function freeOccluder(scene) {
@@ -319,6 +324,68 @@ export function freeOccluder(scene) {
   o.geo.dispose();
   o.mesh.material.dispose();
   scene.occluder = null;
+  const d = scene.depthPass;
+  if (d) {
+    scene.block.remove(d.mesh);
+    d.geo.dispose();
+    for (const m of d.mesh.material) m.dispose();
+    scene.depthPass = null;
+  }
+}
+
+/**
+ * The sheets' depth first (`scene.depthFirst`, off: for the performance check's comparison):
+ * every sheet's faces and cut edges, exactly where the sheets are drawn (the same vertices, the
+ * same program text: invariant), drawn for their depth alone before anything is shaded, in one
+ * mesh (two draws: faces one-sided as the pages are, edges both sides); the sheets are then
+ * shaded without writing depth (setDepthFirst), so each point is shaded once, for the surface in
+ * front. A coil's strips of holes are left out (they keep writing their own depth). The test of
+ * why the occluder did nothing on Apple's GPUs (2026-10-26): there a shader that writes its own
+ * coverage (ANGLE adds that to every one) and writes depth is depth-tested only after it runs,
+ * so depth already in the buffer saves nothing; without the depth write it can be tested first.
+ * (The 0.15.7 depth pass did this, a draw per sheet; batched, it is two.)
+ */
+function makeDepthFirst(scene, position, bases) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", position); // the occluder's: the same buffer on the GPU
+  const faces = [];
+  const edges = [];
+  for (const [i, leaf] of scene.leaves.entries()) {
+    const src = leaf.geo.index.array;
+    for (const g of leaf.geo.groups) {
+      const out = g.materialIndex === 2 ? edges : g.materialIndex <= 1 ? faces : null;
+      if (!out) continue;
+      for (let k = g.start; k < g.start + g.count; k++) out.push(src[k] + bases[i]);
+    }
+  }
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array([...faces, ...edges]), 1));
+  geo.addGroup(0, faces.length, 0);
+  geo.addGroup(faces.length, edges.length, 1);
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
+  const material = (side) => {
+    const m = new THREE.MeshDepthMaterial({ colorWrite: false, side });
+    m.onBeforeCompile = (shader) => sheetShader(shader, scene.shared);
+    m.customProgramCacheKey = () => "bookview-depth-first";
+    return m;
+  };
+  const mesh = new THREE.Mesh(geo, [material(THREE.FrontSide), material(THREE.DoubleSide)]);
+  mesh.frustumCulled = false;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.raycast = () => {};
+  mesh.renderOrder = -2e6; // before the occluder and every sheet
+  mesh.visible = false;
+  scene.block.add(mesh);
+  scene.depthPass = { mesh, geo };
+}
+
+/** The sheets' depth first or not (see makeDepthFirst): the pass shown, the pages' and edges' depth writes off, or back on. */
+export function setDepthFirst(scene, on) {
+  scene.depthFirst = on;
+  if (scene.depthPass) scene.depthPass.mesh.visible = on;
+  const faces = Object.values(scene.batches ?? {}).filter((b) => b.mesh.name !== "strips").map((b) => b.material);
+  for (const m of [...faces, ...scene.inkEdges.values(), ...scene.leaves.flatMap((l) => [l.front, l.back])]) m.depthWrite = !on;
+  scene.dirty = true;
 }
 
 /**
