@@ -15,7 +15,7 @@ import { makeSamplePdf } from "../pdf/sample.js";
 import { APP_NAME, APP_VERSION, canQuit, latestRelease, onMenuCommand, openReleases, quit, savePdf, SYSTEM_MEMORY } from "../platform.js";
 import { tileBudget } from "../viewer/tiles.js";
 import { BookScene } from "../viewer/scene.js";
-import { prepareCaptureTile, renderScreenshot, renderVideo } from "./capture.js";
+import { prepareCaptureTile, renderScreenshot, renderVideo, restoreCapture } from "./capture.js";
 import { buildClientHtml, exportClientViewer } from "./client.js";
 import { applyProfile, colourOptions, profileBytes, setColourProfile, setPlates, spotsChanged } from "./colour.js";
 import { InkView } from "./inkview.js";
@@ -41,7 +41,7 @@ export const state = {
   pages: null, // SourcePage[]
   cover: null, // a separate cover file: {name, bytes, pages}, or null (see coverPages in analysis.js)
   spineArt: null, // spine artwork from a PDF: {name, bytes, box, sizeMm, image}, or null (spine-panel.js)
-  finish: null, // a spot finish: {name, pages, kind, images}, or null (finish.js)
+  finish: null, // a spot finish: {name, pages, kind, images, bytes, jobs}, or null (finish.js)
   pendingFinishKind: null, // the finish chosen before a finish PDF was imported
   capturing: false, // a screenshot or video is being rendered (capture.js)
   renderer: null, // set once the render workers are up
@@ -206,31 +206,35 @@ async function openDocument({ file, source, binding = null, signaturePages = nul
   }
 }
 
+/** A flap's image height on screen (px): a capture asks for its own (see refreshFlaps). */
+export const FLAP_HEIGHT = 1600;
+
 /**
  * What the covers carry besides their pages: side glue and the hinge score (perfect and
  * sewn: the first and last page glued to the cover for `glueMm` from the spine, C2 and
  * page 1, the last page and C3; the score outside on C1 and C4), and a cover file's flaps,
- * folded in over C2 and C3 (their images rendered from the cover file's outside page).
+ * folded in over C2 and C3 (their images rendered from the cover file's outside page,
+ * `flapHeight` px tall). Resolves once the flaps are on (or none are needed).
  */
-function applyCoverExtras(a) {
+function applyCoverExtras(a, flapHeight = FLAP_HEIGHT) {
   const n = a.book.pages.length;
   const glued = sideGlueMm(a.setup.binding, a.setup.glueMm, n);
   for (const f of [2, 3, n - 2, n - 1]) scene.setPageGlue(f, glued);
   for (const f of [1, n]) scene.setCoverScore(f, glued);
   const flap = a.coverFile && a.coverFile.flapMm > 0.5 && a.coverFile.frontFlapRect ? a.coverFile : null;
-  const key = flap ? `${state.name}|${state.cover?.name}|${flap.flapMm.toFixed(2)}|${n}` : "";
-  if (key === state.flapKey) return;
+  const key = flap ? `${state.name}|${state.cover?.name}|${flap.flapMm.toFixed(2)}|${n}|${flapHeight}` : "";
+  if (key === state.flapKey) return Promise.resolve();
   state.flapKey = key;
   if (!flap) {
     scene.setPageFlap(2, null);
     scene.setPageFlap(n - 1, null);
-    return;
+    return Promise.resolve();
   }
   const reach = flap.flapMm;
-  state.rendererReady.then(async (r) => {
+  return state.rendererReady.then(async (r) => {
     const [front, back] = await Promise.all([
-      r.render(COVER_BASE, flap.frontFlapRect, 1600, 50, { mode: "ink", cache: false }),
-      r.render(COVER_BASE, flap.backFlapRect, 1600, 50, { mode: "ink", cache: false }),
+      r.render(COVER_BASE, flap.frontFlapRect, flapHeight, 50, { mode: "ink", cache: false }),
+      r.render(COVER_BASE, flap.backFlapRect, flapHeight, 50, { mode: "ink", cache: false }),
     ]);
     if (state.flapKey !== key) { // another book since
       front?.close?.();
@@ -393,6 +397,14 @@ function scenePaper(paper, setup, pageCount) {
 
 // --- view --------------------------------------------------------------------------
 
+/**
+ * The cover file's flaps drawn again at `height` px (a capture's own resolution, see
+ * ui/capture.js; the screen's when left out). Resolves once they are on.
+ */
+export function refreshFlaps(height = FLAP_HEIGHT) {
+  return state.analysis ? applyCoverExtras(state.analysis, height) : Promise.resolve();
+}
+
 export function onOpeningChanged() {
   if (state.capturing) return; // a video turning pages: the window stays as it was
   showIcon($("close-btn"), scene.isClosed || scene.atCover ? "open" : "close");
@@ -470,5 +482,5 @@ prepareSpareWorkers(300);
 
 // For debugging from the developer console.
 window.app = {
-  state, scene, openDocument, updateSetup, updateTiles, tileStats, setColourProfile, setPlates, prepareCaptureTile, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
+  state, scene, openDocument, updateSetup, updateTiles, tileStats, setColourProfile, setPlates, prepareCaptureTile, restoreCapture, buildClientHtml, openSpinePanel, importSpineArt, renderVideo, importFinish, openFinishDialog,
 };

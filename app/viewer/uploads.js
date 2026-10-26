@@ -22,10 +22,11 @@ const PAGE_COLOR_SPACE = THREE.NoColorSpace;
 
 /**
  * @typedef {{layer: number, spotsLayer: number, width: number, height: number, spotNames: string[],
- *            tex: THREE.Texture | null}} PageImage
- *   a page's image on the GPU: its layer of the page array and its spot channels' (-1: none),
- *   or a texture of its own (`tex`: an image without its smaller copies, one of another size
- *   than the array's, or no room in it).
+ *            tex: THREE.Texture | null, array?: import("./pagedata.js").LayerArray}} PageImage
+ *   a page's image on the GPU: its layer of a layer array (the page array, or the sharp array
+ *   for an image shown for now) and its spot channels' (-1: none), or a texture of its own
+ *   (`tex`: an image without its smaller copies, as the client viewer's when it has no worker
+ *   to make them, or one the GPU had no room for).
  */
 
 /** Forget every page's image and tiles (a new file). */
@@ -34,9 +35,10 @@ export function clearPages(scene) {
   scene.uploads.clear();
   for (const page of scene.pageTextures.values()) freePage(scene, page);
   scene.pageTextures.clear();
-  for (const tex of scene.overrides.values()) tex.dispose();
+  for (const page of scene.overrides.values()) freePage(scene, page);
   scene.overrides.clear();
   scene.pageArray.dispose(); // the next file's pages may be another size
+  scene.sharpArray.dispose();
   scene.pageTable.clearImages();
   scene.tiles.reset();
   scene.spotNames.clear();
@@ -46,8 +48,8 @@ export function clearPages(scene) {
 /** A page's image let go: its layers free again, its own texture disposed. */
 function freePage(scene, page) {
   if (!page) return;
-  scene.pageArray.release(page.layer);
-  scene.pageArray.release(page.spotsLayer);
+  page.array?.release(page.layer);
+  page.array?.release(page.spotsLayer);
   page.tex?.dispose();
 }
 
@@ -91,7 +93,7 @@ export function renumberPages(scene, map) {
     return out;
   };
   scene.pageTextures = move(scene.pageTextures, (page) => freePage(scene, page));
-  scene.overrides = move(scene.overrides, (tex) => tex.dispose());
+  scene.overrides = move(scene.overrides, (page) => freePage(scene, page));
   scene.uploads = move(scene.uploads, ({ image }) => image?.close());
   scene.spotNames = move(scene.spotNames, () => {});
   scene.pageTable.renumber(map);
@@ -141,20 +143,16 @@ export function setPageTexture(scene, folio, image) {
 }
 
 /**
- * Show `image` on a page for now instead of its own (a video's sharper pages), or its own
- * again (null). Not taken: the caller frees it, after.
+ * Show `image` on a page for now instead of its own (a video's or a screenshot's sharper page,
+ * the client viewer's full-size spread at rest), or its own again (null). Into the sharp array
+ * (every reader of the page takes it from there: its face, its cut edges, a fold, show-through,
+ * see pvBest), else (an image without its smaller copies) on a texture of its own, for its face
+ * alone. Not taken: the caller frees it, after.
  */
 export function showPageImage(scene, folio, image) {
-  disposeTexture(scene.overrides.get(folio), scene.blank);
-  if (image) {
-    const tex = pageTexture(scene, image);
-    scene.overrides.set(folio, tex);
-    // Bytes (with their smaller copies): on the GPU now, and let go (an image is the caller's).
-    if (image.data) {
-      warm(scene, tex);
-      freeImage(tex);
-    }
-  } else scene.overrides.delete(folio);
+  freePage(scene, scene.overrides.get(folio));
+  scene.overrides.delete(folio);
+  if (image) scene.overrides.set(folio, placeImage(scene, image, scene.sharpArray, 8));
   showPage(scene, folio);
   bindTiles(scene, folio);
   scene.dirty = true;
@@ -186,17 +184,21 @@ export function showPage(scene, folio) {
   const page = scene.pageTextures.get(folio);
   const pt = scene.pageTable;
   pt.ensure(folio);
-  const arr = scene.pageArray;
-  if (page && page.layer >= 0) pt.set4(folio, 0, page.layer, page.spotsLayer, page.width / arr.width, page.height / arr.height);
+  /** @param {PageImage | undefined} p */
+  const inArray = (p) => !!p && p.layer >= 0 && !!p.array;
+  /** @param {PageImage} p */
+  const set = (texel, p) => pt.set4(folio, texel, p.layer, p.spotsLayer, p.width / p.array.width, p.height / p.array.height);
+  if (inArray(page)) set(0, page);
   else pt.set4(folio, 0, -1, -1, 1, 1);
-  const own = shown ?? page?.tex ?? null;
-  const u = mat.userData.uniforms;
+  if (inArray(shown)) set(10, shown);
+  else pt.set4(folio, 10, -1, -1, 1, 1);
+  // A texture of its own (no smaller copies): on the face alone.
+  const own = shown ? shown.tex : page?.tex ?? null;
   mat.map = own ?? scene.blank;
-  u.uOwn.value = own ? 1 : 0;
-  u.uOwnSpots.value = own?.userData.spots ?? scene.noSpots;
+  mat.userData.uniforms.uOwn.value = own ? 1 : 0;
   // The page's own channels: its tiles' too, which may come before its image (an image shown
   // for now is of the same page, but has channels only if it was drawn with them).
-  spotInk(scene, (shown ? shown.userData.spotNames : scene.spotNames.get(folio)) ?? [], _spotInk);
+  spotInk(scene, (shown ? shown.spotNames : scene.spotNames.get(folio)) ?? [], _spotInk);
   pt.setSpotInk(folio, _spotInk);
 }
 
@@ -328,7 +330,7 @@ export function flushUploads(scene) {
     freePage(scene, scene.pageTextures.get(folio));
     scene.pageTextures.delete(folio);
     if (image) {
-      const page = placeImage(scene, image);
+      const page = placeImage(scene, image, scene.pageArray, 2 * scene.leaves.length + 8);
       scene.pageTextures.set(folio, page);
       scene.spotNames.set(folio, page.spotNames);
       n++;
@@ -339,28 +341,30 @@ export function flushUploads(scene) {
 }
 
 /**
- * A page's image onto the GPU: into a layer of the page array (its spot channels into another)
- * when it comes with every smaller copy (made where it was drawn, pdf/mips.js: the GPU's own
- * can be a half texel off) and fits the array (the first image's size); else on a texture of
- * its own, drawn from once (warm), its pixels let go.
+ * A page's image onto the GPU: into a layer of `arr` (its spot channels into another) when it
+ * comes with every smaller copy (made where it was drawn, pdf/mips.js: the GPU's own can be a
+ * half texel off); the array made larger when the image doesn't fit or there is no layer free
+ * (LayerArray.grow: what it holds copied over exactly; `layers`: how many it starts with).
+ * Only an image without its smaller copies (the client viewer's without a worker), or one the
+ * GPU has no room for, goes on a texture of its own, drawn from once (warm), its pixels let go.
+ * (Until 2026-10-26 an image larger than the first one had a texture of its own too: its face
+ * showed it, but its sheet's cut edges, a fold and the other side's show-through drew paper.)
  * @returns {PageImage}
  */
-function placeImage(scene, image) {
-  const arr = scene.pageArray;
+function placeImage(scene, image, arr, layers) {
   const spotNames = image.spotNames ?? [];
   const { width, height } = image;
   const levels = Math.floor(Math.log2(Math.max(width, height))) + 1;
   const whole = !!image.data && (image.mips?.length ?? 0) >= levels - 1;
-  if (whole && arr.fits(width, height) && arr.ensure(width, height, Math.max(16, 2 * scene.leaves.length + 8))) {
+  const need = image.spots ? 2 : 1;
+  if (whole && arr.ensure(width, height, Math.max(16, layers))
+    && (arr.fits(width, height) || arr.grow(width, height, arr.layers))
+    && (arr.free.length >= need || arr.grow(width, height, arr.layers + Math.max(need, arr.layers >> 1)))) {
     const layer = arr.take();
-    const spotsLayer = layer >= 0 && image.spots ? arr.take() : -1;
-    if (layer >= 0 && (!image.spots || spotsLayer >= 0)) {
-      arr.upload(layer, width, height, image.data, image.mips);
-      if (spotsLayer >= 0) arr.upload(spotsLayer, width, height, image.spots, image.spotMips);
-      return { layer, spotsLayer, width, height, spotNames, tex: null };
-    }
-    arr.release(layer);
-    arr.release(spotsLayer);
+    const spotsLayer = image.spots ? arr.take() : -1;
+    arr.upload(layer, width, height, image.data, image.mips);
+    if (spotsLayer >= 0) arr.upload(spotsLayer, width, height, image.spots, image.spotMips);
+    return { layer, spotsLayer, width, height, spotNames, tex: null, array: arr };
   }
   const tex = pageTexture(scene, image);
   warm(scene, tex);
@@ -388,7 +392,9 @@ export function showAllPages(scene) {
 export function flushTiles(scene, time) {
   let changed = false;
   if (scene.tiles.pending) {
-    for (const folio of scene.tiles.flush(TILES_PER_FRAME, time)) bindTiles(scene, folio);
+    // One a frame while the view or the book moves, more at rest: on the author's Mac a tile
+    // took several ms of the main thread, and three a frame were the hiccup after a jump.
+    for (const folio of scene.tiles.flush(scene.settled ? TILES_PER_FRAME : 1, time)) bindTiles(scene, folio);
     changed = true;
   }
   return scene.tiles.tick(time) || changed;

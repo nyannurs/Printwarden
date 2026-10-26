@@ -29,7 +29,7 @@ import { HOLE_OFFSET_MM, makeBook, restingAngle, turnCurl } from "./model.js";
 import { INK_GLSL, inkUniforms, MAX_DETAIL, patchShader, sheetShader, TILE_GLSL } from "./shaders.js";
 import { naiveLut } from "./inklut.js";
 import { disposeTexture, makeContactMap, makeGrain, makeInkLut, makeInkPaper, makeInkTexture, makeWhite } from "./textures.js";
-import { TileCache } from "./tiles.js";
+import { SPINE_FOLIO, TileCache } from "./tiles.js";
 import * as uploads from "./uploads.js";
 
 const TURN_MS = 720;
@@ -124,6 +124,14 @@ export class BookScene {
     // page table, and the page array their images go in (uploads.js placeImage).
     this.pageTable = new PageTable();
     this.pageArray = new LayerArray(r, { mips: true, name: "pages" });
+    // The sharper images shown for now (a video's or a screenshot's pages, the client viewer's
+    // spread at rest: uploads.js showPageImage), every reader of a page preferring them (pvBest).
+    this.sharpArray = new LayerArray(r, { mips: true, name: "sharp pages" });
+    // An array made larger moves every image's scale in it: the page table written again.
+    this.pageArray.onGrow = this.sharpArray.onGrow = () => {
+      uploads.showAllPages(this);
+      this.dirty = true;
+    };
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#56575b");
@@ -237,6 +245,7 @@ export class BookScene {
       // The page table and the page array (PAGE_DATA_GLSL).
       uPageTable: this.pageTable.uniform,
       uPages: { value: this.pageArray.texture },
+      uSharp: { value: this.sharpArray.texture },
       // The pages' inks to colour (INK_GLSL): the table, the plates that print, whether the
       // pages are inks at all (see setPageKind).
       uInkLut: { value: this.inkLut },
@@ -724,6 +733,42 @@ ${TILE_GLSL}
   /** A page's tiles let go (its image changed: ui/pages.js). */
   forgetTiles(folio) {
     uploads.forgetTiles(this, folio);
+  }
+
+  /**
+   * The pages whose print a page's picture shows besides its own: the other side of its leaf
+   * (show-through) and, where it is folded, the other half of its sheet (the fold carries
+   * both halves' print, see foldSheetMaterial). For a capture, which draws them as sharp.
+   * @returns {number[]} folios
+   */
+  pagesWith(folio) {
+    const leaf = Math.ceil(folio / 2) - 1;
+    const out = new Set([folio % 2 ? folio + 1 : folio - 1]);
+    for (const mesh of [this.extras?.fold, this.extras?.signatureFolds]) {
+      for (const [a, b] of mesh?.geometry.userData.pairs ?? []) {
+        if (a !== leaf && b !== leaf) continue;
+        const other = a === leaf ? b : a;
+        out.add(2 * other + 1);
+        out.add(2 * other + 2);
+      }
+    }
+    out.delete(folio);
+    return [...out].filter((f) => f >= 1 && f <= 2 * this.leaves.length);
+  }
+
+  /** The sharp images' array let go once none is shown (after a capture: it can be hundreds of MB). */
+  releaseSharp() {
+    if (!this.overrides.size) this.sharpArray.dispose();
+  }
+
+  /**
+   * The spine artwork's tiles drawn or not: off while a capture shows it drawn at its own
+   * resolution (ui/capture.js), whose base image is then sharper than any tile kept.
+   */
+  setSpineTiles(on) {
+    if (on) uploads.bindTiles(this, SPINE_FOLIO);
+    else this.spineInk.uTileOn.value = 0;
+    this.dirty = true;
   }
 
   #applyFinish() {

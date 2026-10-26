@@ -19,7 +19,7 @@
 
 import * as THREE from "three";
 
-import { LayerArray } from "./pagedata.js";
+import { clearErrors, LayerArray } from "./pagedata.js";
 
 export const TILE = 1024; // a tile's side in texels, border included
 export const TILE_BORDER = 4; // texels of the neighbours at each edge: filtering never sees a tile's edge
@@ -349,7 +349,7 @@ export class TileCache {
     while (layers >= 16) {
       tex = gl.createTexture();
       this.renderer.state.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
-      while (gl.getError() !== gl.NO_ERROR); // (errors of others, cleared: ours is read below)
+      clearErrors(gl); // (errors of others: ours is read below)
       gl.texStorage3D(gl.TEXTURE_2D_ARRAY, TILE_MIPS + 1, gl.RGBA8, TILE, TILE, layers);
       if (gl.getError() === gl.NO_ERROR) break;
       gl.deleteTexture(tex);

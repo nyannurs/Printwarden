@@ -204,6 +204,29 @@ export async function renderSpineArt(art) {
 }
 
 /**
+ * The spine artwork drawn again `heightPx` tall (its height on the artwork's page) for a
+ * capture (ui/capture.js), shown in place of its base image, its tiles off. Resolves to what
+ * puts the screen's back (null: no artwork on the spine).
+ * @returns {Promise<(() => void) | null>}
+ */
+export async function spineAt(heightPx) {
+  const art = spineTakesArtwork(state.setup.binding) ? state.spineArt : null;
+  if (!art?.pool || !art.image) return null;
+  const image = await art.pool.render(0, art.box, Math.round(heightPx), 0, { cache: false, mode: "ink" });
+  if (!image) return null;
+  const base = art.image;
+  art.image = image;
+  applySpine();
+  scene.setSpineTiles(false);
+  return () => {
+    art.image = base;
+    applySpine();
+    scene.setSpineTiles(true);
+    image.close?.();
+  };
+}
+
+/**
  * The spine artwork shown from now (or none): the one before let go, its thread and its
  * tiles; the spot colours listed again (it may have its own).
  */

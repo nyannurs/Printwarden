@@ -290,8 +290,7 @@ export function pageMaterial(scene, holesOf = null, { own = true } = {}) {
   });
   if (own) m.defines = { ...m.defines, PV_OWN: "" }; // (added to three's own: STANDARD, PHYSICAL)
   m.userData.uniforms = holesOf?.userData.uniforms ?? (own ? {
-    uOwn: { value: 0 }, // 1: the page's image is `map` (uploads.js showPage), with its spot channels
-    uOwnSpots: { value: scene.noSpots },
+    uOwn: { value: 0 }, // 1: the page's image is `map` (uploads.js showPage): one the arrays couldn't take (no spot channels)
     // Up to MAX_DETAIL sharp strips laid over the page (see detail.js).
     ...Object.fromEntries(Array.from({ length: MAX_DETAIL }, (_, i) => [
       [`uDetail${i}`, { value: scene.blank }],
@@ -453,7 +452,7 @@ export function inkFillerMaterial(scene) {
     shader.fragmentShader = patchShader(shader.fragmentShader, [
       ["void main() {", INK_GLSL + PAGE_DATA_GLSL + "flat varying int vFolio;\nvoid main() {"],
       ["#include <map_fragment>", `{
-  vec4 page = pvPageTexel( vFolio, 0 );
+  vec4 page = pvBest( vFolio );
   diffuseColor *= sRGBTransferEOTF( pvPageColor( pvImageAt( page.x, page.zw, vMapUv ), pvSpotsAt( page.y, page.zw, vMapUv ), pvSpotInk( vFolio ) ) );
 }`],
     ]);

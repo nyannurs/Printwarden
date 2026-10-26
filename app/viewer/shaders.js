@@ -122,9 +122,32 @@ export function inkUniforms(shader, shared) {
 // its layer (1 for a page the layer's size); a page without one is paper (no ink, or white for
 // sRGB pages), without spot channels no spots. The folio comes from the vertex (vFolio, see
 // SHEET_VERTEX), or is any folio asked for (the other side of the leaf, a fold's pages).
+// A layer number says which array: 0 and up the page array's, -1 none, -2 and down the sharp
+// array's (layer -2 - n: a video's or a screenshot's sharper image of the page, see pvBest).
+const PAGE_LAYERS_GLSL = /* glsl */ `
+vec4 pvLayerGrad( float layer, vec2 uv, vec2 dx, vec2 dy, vec4 none ) {
+  if ( layer < -1.5 ) return textureGrad( uSharp, vec3( uv, -layer - 2.0 ), dx, dy );
+  if ( layer < 0.0 ) return none;
+  return textureGrad( uPages, vec3( uv, layer ), dx, dy );
+}
+vec4 pvLayerAt( float layer, vec2 uv, float bias, vec4 none ) {
+  if ( layer < -1.5 ) return texture( uSharp, vec3( uv, -layer - 2.0 ), bias );
+  if ( layer < 0.0 ) return none;
+  return texture( uPages, vec3( uv, layer ), bias );
+}
+// A page's image, as every reader takes it: its sharper one where it has one, else its own
+// (the page table's texel 0: the layer, the spot channels' layer, the scale in the layer).
+vec4 pvBest( int folio ) {
+  vec4 own = texelFetch( uPageTable, ivec2( 0, folio ), 0 );
+  vec4 sharp = texelFetch( uPageTable, ivec2( 10, folio ), 0 );
+  return sharp.x >= 0.0 ? vec4( -sharp.x - 2.0, sharp.y >= 0.0 ? -sharp.y - 2.0 : -1.0, sharp.zw ) : own;
+}
+`;
 export const PAGE_DATA_GLSL = /* glsl */ `
 uniform highp sampler2D uPageTable;
 uniform highp sampler2DArray uPages;
+uniform highp sampler2DArray uSharp;
+${PAGE_LAYERS_GLSL}
 vec4 pvPageTexel( int folio, int t ) {
   return texelFetch( uPageTable, ivec2( t, folio ), 0 );
 }
@@ -136,28 +159,22 @@ vec4 pvPaper() {
 // about one pixel per screen pixel is read from its full level, not blended with the next
 // smaller one. (Four taps a pixel until 0.17.75: soft at the image's own size, moiré smaller.)
 vec4 pvImage( float layer, vec2 scale, vec2 uv, vec2 dx, vec2 dy ) {
-  if ( layer < 0.0 ) return pvPaper();
-  return textureGrad( uPages, vec3( uv * scale, layer ), dx * scale * 0.7, dy * scale * 0.7 );
+  return pvLayerGrad( layer, uv * scale, dx * scale * 0.7, dy * scale * 0.7, pvPaper() );
 }
 vec4 pvImageAt( float layer, vec2 scale, vec2 uv ) {
-  if ( layer < 0.0 ) return pvPaper();
-  return texture( uPages, vec3( uv * scale, layer ) );
+  return pvLayerAt( layer, uv * scale, 0.0, pvPaper() );
 }
 vec4 pvImageLod( float layer, vec2 scale, vec2 uv, float bias ) {
-  if ( layer < 0.0 ) return pvPaper();
-  return texture( uPages, vec3( uv * scale, layer ), bias );
+  return pvLayerAt( layer, uv * scale, bias, pvPaper() );
 }
 vec4 pvSpotsGrad( float layer, vec2 scale, vec2 uv, vec2 dx, vec2 dy ) {
-  if ( layer < 0.0 ) return vec4( 0.0 );
-  return textureGrad( uPages, vec3( uv * scale, layer ), dx * scale * 0.7, dy * scale * 0.7 );
+  return pvLayerGrad( layer, uv * scale, dx * scale * 0.7, dy * scale * 0.7, vec4( 0.0 ) );
 }
 vec4 pvSpotsAt( float layer, vec2 scale, vec2 uv ) {
-  if ( layer < 0.0 ) return vec4( 0.0 );
-  return texture( uPages, vec3( uv * scale, layer ) );
+  return pvLayerAt( layer, uv * scale, 0.0, vec4( 0.0 ) );
 }
 vec4 pvSpotsLod( float layer, vec2 scale, vec2 uv, float bias ) {
-  if ( layer < 0.0 ) return vec4( 0.0 );
-  return texture( uPages, vec3( uv * scale, layer ), bias );
+  return pvLayerAt( layer, uv * scale, bias, vec4( 0.0 ) );
 }
 mat4 pvSpotInk( int folio ) {
   return mat4( pvPageTexel( folio, 5 ), pvPageTexel( folio, 6 ), pvPageTexel( folio, 7 ), pvPageTexel( folio, 8 ) );
@@ -169,13 +186,18 @@ mat4 pvSpotInk( int folio ) {
 export const PAGE_VERTEX_HEADER = /* glsl */ `
 uniform highp sampler2D uPageTable;
 flat varying vec4 vPageA, vPageB, vPageC, vPageD, vPageE, vPageF;
+vec4 pvBest( int folio ) {
+  vec4 own = texelFetch( uPageTable, ivec2( 0, folio ), 0 );
+  vec4 sharp = texelFetch( uPageTable, ivec2( 10, folio ), 0 );
+  return sharp.x >= 0.0 ? vec4( -sharp.x - 2.0, sharp.y >= 0.0 ? -sharp.y - 2.0 : -1.0, sharp.zw ) : own;
+}
 `;
 export const PAGE_VERTEX = /* glsl */ `
   {
     int other = ( vFolio & 1 ) == 1 ? vFolio + 1 : vFolio - 1;
-    vec4 back = texelFetch( uPageTable, ivec2( 0, other ), 0 );
+    vec4 back = pvBest( other );
     vec4 flags = texelFetch( uPageTable, ivec2( 9, vFolio ), 0 );
-    vPageA = texelFetch( uPageTable, ivec2( 0, vFolio ), 0 );
+    vPageA = pvBest( vFolio );
     vPageB = texelFetch( uPageTable, ivec2( 1, vFolio ), 0 ) + vec4( 0.0, 2.0 * flags.y, 0.0, 0.0 ); // (a filler face: 2 more, see pvLoadPage)
     vPageC = texelFetch( uPageTable, ivec2( 2, vFolio ), 0 );
     vPageD = vec4( texelFetch( uPageTable, ivec2( 3, vFolio ), 0 ).xy, back.xy );
@@ -188,6 +210,7 @@ export const PAGE_VERTEX = /* glsl */ `
 export function pageDataUniforms(shader, shared) {
   shader.uniforms.uPageTable = shared.uPageTable;
   shader.uniforms.uPages = shared.uPages;
+  shader.uniforms.uSharp = shared.uSharp;
   shader.uniforms.uPageSize = shared.uPageSize;
 }
 
@@ -209,8 +232,8 @@ export const EDGE_INK = /* glsl */ `
     vec2 atBack = vec2( 1.0 - at.x, at.y );
     int front = 2 * vSheet + 1;
     int back = front + 1;
-    vec4 f = pvPageTexel( front, 0 );
-    vec4 b = pvPageTexel( back, 0 );
+    vec4 f = pvBest( front );
+    vec4 b = pvBest( back );
     vec3 inkFront = sRGBTransferEOTF( pvPageColor( pvImageLod( f.x, f.zw, at, 1.0 ), pvSpotsLod( f.y, f.zw, at, 1.0 ), pvSpotInk( front ) ) ).rgb;
     vec3 inkBack = sRGBTransferEOTF( pvPageColor( pvImageLod( b.x, b.zw, atBack, 1.0 ), pvSpotsLod( b.y, b.zw, atBack, 1.0 ), pvSpotInk( back ) ) ).rgb;
     diffuseColor.rgb *= mix( vec3( 1.0 ), 0.5 * ( inkFront + inkBack ), PV_EDGE_INK );
@@ -457,8 +480,7 @@ uniform vec2 uPageSize;   // mm
 uniform vec2 uGutter;      // shade width (mm), depth at the fold
 uniform float uOpenness;
 #ifdef PV_OWN
-uniform float uOwn;        // 1: the page's image is \`map\` (and its spot channels uOwnSpots), not its layer
-uniform sampler2D uOwnSpots;
+uniform float uOwn;        // 1: the page's image is \`map\` (one the arrays couldn't take: no spot channels), not its layer
 uniform float uDetailCount; // sharp strips over the page, see MAX_DETAIL
 ${DETAIL_UNIFORMS}
 uniform sampler2D uFinish;  // spot finish mask, see FINISH_FRAGMENT
@@ -514,7 +536,7 @@ vec4 pvBase( vec2 uv, vec2 dx, vec2 dy ) {
 }
 vec4 pvSpots( vec2 uv, vec2 dx, vec2 dy ) {
 #ifdef PV_OWN
-  if ( uOwn > 0.5 ) return pageSample( uOwnSpots, uv, dx, dy );
+  if ( uOwn > 0.5 ) return vec4( 0.0 );
 #endif
   return pvSpotsGrad( pvSpotsLayer, pvScale, uv, dx, dy );
 }

@@ -13,6 +13,15 @@ import * as THREE from "three";
 export const PT_TEXELS = 16;
 
 /**
+ * WebGL's error flags read until clear: a few at most (one per kind). Never until clear
+ * whatever happens: with the context lost, getError answers CONTEXT_LOST forever, and a loop
+ * waiting for NO_ERROR froze the app (2026-10-26, a capture asking for gigabytes of texture).
+ */
+export function clearErrors(gl) {
+  for (let i = 0; i < 16 && gl.getError() !== gl.NO_ERROR; i++);
+}
+
+/**
  * A texture array of RGBA8 layers, allocated whole on first use (texStorage3D, a layer's size
  * being the first image's), handed to three as the texture behind a uniform (bound by it,
  * never uploaded: version 0), its layers taken and given back. `mips`: with every mip level
@@ -34,6 +43,8 @@ export class LayerArray {
     /** @type {number[]} layers free to take */
     this.free = [];
     this.failed = false;
+    /** @type {(() => void) | null} called when the array grew (grow): its images' scales changed */
+    this.onGrow = null;
   }
 
   /** Whether an image of this size can go in: the array's size once allocated, any before. */
@@ -49,25 +60,138 @@ export class LayerArray {
   ensure(width, height, layers) {
     if (this.layers) return !this.failed;
     if (this.failed) return false;
-    const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
-    let n = Math.max(4, Math.min(layers, gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS)));
-    const levels = this.mips ? Math.floor(Math.log2(Math.max(width, height))) + 1 : 1;
-    let tex = null;
-    while (n >= 4) {
-      tex = gl.createTexture();
-      this.renderer.state.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
-      while (gl.getError() !== gl.NO_ERROR); // (errors of others, cleared: ours is read below)
-      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.RGBA8, width, height, n);
-      if (gl.getError() === gl.NO_ERROR) break;
-      gl.deleteTexture(tex);
-      tex = null;
-      n >>= 1;
-    }
-    if (!tex) {
+    const made = this.#allocate(width, height, layers, 4);
+    if (!made) {
       this.failed = true;
       console.warn(`[${this.name}] no room on the GPU for ${layers} layers of ${width} x ${height}`);
       return false;
     }
+    this.#adopt(made, width, height);
+    this.free = Array.from({ length: made.layers }, (_, i) => made.layers - 1 - i); // taken from the end: 0 first
+    return true;
+  }
+
+  /**
+   * The array made larger, for an image that doesn't fit or one more than it holds: at least
+   * width × height, at least `layers` layers, what it holds copied over exactly, every level, on
+   * the GPU (texel for texel; past an image's old edge its edge texels again, as upload pads).
+   * Each image keeps its layer; its scale in the layer changes (onGrow: the page table is
+   * written again). False if the GPU can't make the larger one (the array stays as it was).
+   */
+  grow(width, height, layers) {
+    if (!this.layers) return this.ensure(width, height, layers);
+    const W = Math.max(width, this.width);
+    const H = Math.max(height, this.height);
+    const n = Math.max(layers, this.layers);
+    const made = this.#allocate(W, H, n, this.layers);
+    if (!made) {
+      console.warn(`[${this.name}] no room on the GPU to grow to ${n} layers of ${W} x ${H}`);
+      return false;
+    }
+    this.#copyInto({ ...made, width: W, height: H });
+    const gl = this.renderer.getContext();
+    gl.deleteTexture(this.glTexture);
+    const old = this.layers;
+    this.#adopt(made, W, H);
+    for (let l = made.layers - 1; l >= old; l--) this.free.unshift(l); // the new layers, taken last
+    this.onGrow?.();
+    return true;
+  }
+
+  /** A texture of `n` layers (fewer if the GPU refuses: half and half again, down to `least`), or null. */
+  #allocate(width, height, n, least) {
+    const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
+    n = Math.max(least, Math.min(n, gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS)));
+    const levels = this.mips ? Math.floor(Math.log2(Math.max(width, height))) + 1 : 1;
+    while (n >= least) {
+      if (gl.isContextLost()) return null;
+      const tex = gl.createTexture();
+      this.renderer.state.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+      clearErrors(gl); // (errors of others: ours is read below)
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.RGBA8, width, height, n);
+      if (gl.getError() === gl.NO_ERROR) return { tex, layers: n, levels };
+      gl.deleteTexture(tex);
+      if (n === least) break;
+      n = Math.max(least, n >> 1);
+    }
+    return null;
+  }
+
+  /** What this array holds, into `made` (larger): a draw per layer and level, each texel fetched as it is. */
+  #copyInto(made) {
+    const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
+    const c = (LayerArray.#copier ??= LayerArray.#makeCopier(gl));
+    const fb = gl.createFramebuffer();
+    gl.useProgram(c.program);
+    gl.bindVertexArray(c.vao);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    for (const cap of [gl.BLEND, gl.DEPTH_TEST, gl.STENCIL_TEST, gl.SCISSOR_TEST, gl.CULL_FACE]) gl.disable(cap);
+    gl.colorMask(true, true, true, true);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.glTexture);
+    gl.uniform1i(c.uOld, 0);
+    for (let layer = 0; layer < this.layers; layer++) {
+      for (let level = 0; level < made.levels; level++) {
+        const from = Math.min(level, this.levels - 1);
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, made.tex, level, layer);
+        gl.viewport(0, 0, Math.max(1, made.width >> level), Math.max(1, made.height >> level));
+        gl.uniform1i(c.uLayer, layer);
+        gl.uniform1i(c.uLevel, from);
+        gl.uniform2i(c.uSize, Math.max(1, this.width >> from), Math.max(1, this.height >> from));
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fb);
+    gl.bindVertexArray(null);
+    this.renderer.resetState(); // three's record of what is bound and enabled, as it is now
+  }
+
+  static #copier = null;
+
+  /** The copy's program: one triangle over the layer, each texel fetched from the old array (clamped to its size). */
+  static #makeCopier(gl) {
+    const shader = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`layer copy: ${gl.getShaderInfoLog(s)}`);
+      return s;
+    };
+    const program = gl.createProgram();
+    gl.attachShader(program, shader(gl.VERTEX_SHADER, `#version 300 es
+void main() {
+  vec2 p = vec2( float( ( gl_VertexID << 1 ) & 2 ), float( gl_VertexID & 2 ) );
+  gl_Position = vec4( p * 2.0 - 1.0, 0.0, 1.0 );
+}`));
+    gl.attachShader(program, shader(gl.FRAGMENT_SHADER, `#version 300 es
+precision highp float;
+precision highp sampler2DArray;
+uniform sampler2DArray uOld;
+uniform int uLayer;
+uniform int uLevel;
+uniform ivec2 uSize;
+out vec4 color;
+void main() {
+  color = texelFetch( uOld, ivec3( min( ivec2( gl_FragCoord.xy ), uSize - 1 ), uLayer ), uLevel );
+}`));
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(`layer copy: ${gl.getProgramInfoLog(program)}`);
+    return {
+      program,
+      vao: gl.createVertexArray(),
+      uOld: gl.getUniformLocation(program, "uOld"),
+      uLayer: gl.getUniformLocation(program, "uLayer"),
+      uLevel: gl.getUniformLocation(program, "uLevel"),
+      uSize: gl.getUniformLocation(program, "uSize"),
+    };
+  }
+
+  /** `made` becomes this array's texture: its parameters set, handed to three. */
+  #adopt(made, width, height) {
+    const gl = /** @type {WebGL2RenderingContext} */ (this.renderer.getContext());
+    const { tex, layers, levels } = made;
+    this.renderer.state.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, this.mips ? gl.LINEAR_MIPMAP_LINEAR : gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, this.mips ? gl.LINEAR : gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -85,10 +209,8 @@ export class LayerArray {
     this.glTexture = tex;
     this.width = width;
     this.height = height;
-    this.layers = n;
+    this.layers = layers;
     this.levels = levels;
-    this.free = Array.from({ length: n }, (_, i) => n - 1 - i); // taken from the end: 0 first
-    return true;
   }
 
   /** A free layer, or -1. */
@@ -177,7 +299,10 @@ export class LayerArray {
  *   4: a board's turn-in: its colour and a 1 when on;
  *   5-8: its spot matrix (spotInk in uploads.js), a column a texel;
  *   9: 1 if that matrix isn't all nothing (the page shader reads it only then); 1 if the face
- *      is a flying stack's filler (layout.js).
+ *      is a flying stack's filler (layout.js);
+ *  10: a sharper image of the page in the sharp array, if it has one (a video's or a
+ *      screenshot's, see uploads.js showPageImage): its layer, its spot channels' (-1: none),
+ *      its scale there. Every reader of the page prefers it (pvBest in PAGE_DATA_GLSL).
  * Written here, sent whole when anything changed (flush, before a frame is drawn: small).
  */
 export class PageTable {
@@ -218,6 +343,7 @@ export class PageTable {
     data.fill(0, o, o + PT_TEXELS * 4);
     data.set([-1, -1, 1, 1], o); // no image, no spots, at scale 1
     data[o + 4] = 0.01; // show-through, as a page material had it before its stock is set
+    data.set([-1, -1, 1, 1], o + 40); // no sharper image
   }
 
   /** One value: `texel` 0..PT_TEXELS-1, `comp` 0..3. */
@@ -262,6 +388,7 @@ export class PageTable {
       this.set4(folio, 2, 0, 0, 0, 0);
       this.set4(folio, 3, 0, 0, 0, 0);
       for (let c = 0; c < 5; c++) this.set4(folio, 5 + c, 0, 0, 0, 0);
+      this.set4(folio, 10, -1, -1, 1, 1);
     }
   }
 

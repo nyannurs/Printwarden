@@ -10,7 +10,7 @@ import { finishDialog } from "./dialogs.js";
 import { toast } from "./dom.js";
 
 const FINISH_KINDS = { gloss: 1, gold: 2, silver: 3, copper: 4 };
-const FINISH_HEIGHT = 1600; // px per page: masks are soft-edged shapes, not type
+export const FINISH_HEIGHT = 1600; // px per page: masks are soft-edged shapes, not type
 
 /**
  * A finish PDF (the varnish or foil layer on its own): its pages render as masks, in the
@@ -41,12 +41,31 @@ export async function importFinish(file = null) {
     const profile = await profileBytes(state.colour, state.colour.choice);
     const images = await renderMany(file.bytes, jobs.map((j) => ({ ...j, height: FINISH_HEIGHT })), profile);
     for (const image of state.finish?.images.values() ?? []) image.close();
-    state.finish = { name: file.name, pages: pages.length, kind: state.finish?.kind ?? state.pendingFinishKind ?? "gloss", images: new Map(jobs.map((j, k) => [j.folio, images[k]])) };
+    // Its bytes and jobs kept: a capture draws a page's mask again at its own resolution (finishAt).
+    state.finish = { name: file.name, pages: pages.length, kind: state.finish?.kind ?? state.pendingFinishKind ?? "gloss", images: new Map(jobs.map((j, k) => [j.folio, images[k]])), bytes: file.bytes, jobs };
     applyFinish();
   } catch (err) {
     console.error(err);
     toast(`Couldn't use ${file.name} as the finish: ${err.message}`, "error");
   }
+}
+
+/**
+ * The finish's masks of some pages (`heights`: folio -> px) drawn again at that height, for a
+ * capture (ui/capture.js): shown in place of the screen's until applyFinish puts those back.
+ * The images are the caller's to close. Resolves to them (folio -> image).
+ * @param {Map<number, number>} heights
+ */
+export async function finishAt(heights) {
+  const f = state.finish;
+  if (!f?.bytes) return new Map();
+  const jobs = f.jobs.filter((j) => heights.has(j.folio)).map((j) => ({ ...j, height: heights.get(j.folio) }));
+  if (!jobs.length) return new Map();
+  const profile = await profileBytes(state.colour, state.colour.choice);
+  const images = await renderMany(f.bytes, jobs, profile);
+  const sharp = new Map(jobs.map((j, k) => [j.folio, images[k]]));
+  scene.setFinish({ kind: FINISH_KINDS[f.kind], images: new Map([...f.images, ...sharp]) });
+  return sharp;
 }
 
 export function applyFinish() {
