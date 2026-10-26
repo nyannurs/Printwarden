@@ -88,6 +88,7 @@ They run the real app from source, off-screen and never focused, so you can keep
 | `renders.py` | Fixed views of a document, saved and compared: a change that shouldn't alter the picture must leave every pixel within 1 or 2 levels. `sheet` makes a contact sheet of two sets: per view before, after, and the pixels that changed in red. |
 | `exports.py` | A 4K screenshot and a short MP4 through the app's own save, timed. |
 | `perf.py` | The frame loop at rest (no frames at all) and dragging (one per refresh), then the performance check's report. |
+| `overdraw.py` | How many sheet layers are shaded per pixel in fixed views, with the occluder's sheets chosen several ways (`--every 0 8 4`): what a GPU that can't skip hidden points pays, counted exactly on any computer; a heat map a view. |
 | `memory.py` | Memory and idle activity with every page visited. At rest the app should use no processor time. |
 | `make-testfiles.mjs` | The test documents, each with what to expect printed on it. Deterministic: run again, the same bytes. |
 | `make-long-pdf.mjs`, `prepare-long-photos.py`, `make-heavy-pdf.py` | Long and heavy test books: 240 pages of photos and layouts, and a file of large CMYK photos. |

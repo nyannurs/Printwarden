@@ -33,6 +33,82 @@ test("scene: three.js shaders take our changes, and every kind of sheet draws", 
   }
 });
 
+test("the occluder changes no pixel, of any sheet it is made of, in any binding; pushed out of the paper it would", async () => {
+  // See draw.js makeOccluder: a surface inside the paper, drawn first for its depth alone.
+  const box = document.createElement("div");
+  box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 320px; height: 200px;";
+  document.body.append(box);
+  const scene = new BookScene(box);
+  const gl = scene.renderer.getContext();
+  const W = gl.drawingBufferWidth;
+  const H = gl.drawingBufferHeight;
+  const shot = () => {
+    scene.lastRequest = -1e9;
+    scene.debugSample(0.5, 0.5);
+    const px = new Uint8Array(W * H * 4);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    return px;
+  };
+  const differ = (a, b) => {
+    let worst = 0;
+    let count = 0;
+    for (let i = 0; i < a.length; i++) {
+      const d = Math.abs(a[i] - b[i]);
+      if (d > worst) worst = d;
+      if (d > 2) count++;
+    }
+    return { worst, count };
+  };
+  const view = (az, el, zoom) => {
+    const g = scene.rig;
+    g.free = true;
+    g.pan = { x: 0, y: 0, z: 0 };
+    g.azimuth = g.home.azimuth + az;
+    g.elevation = el;
+    g.zoom = zoom;
+    g.springing = false;
+    g.dragging = false;
+    scene.zoomBias = 1;
+  };
+  const bad = [];
+  try {
+    for (const binding of ["perfect", "saddle", "sewn", "hardcover", "spiral", "wire-o"]) {
+      scene.setBook({ pageCount: 44, pageSize: { width: 148, height: 210 }, binding, paper });
+      const n = scene.model.leafCount;
+      const views = {
+        spread: () => { scene.goTo(Math.floor(n / 2), { animate: false }); scene.setClosed(false, { animate: false }); scene.rig.free = false; scene.settleCamera(); },
+        closed: () => { scene.goTo(0, { animate: false }); scene.setClosed(true, { animate: false }); scene.rig.free = false; scene.settleCamera(); },
+        foreEdge: () => { scene.goTo(Math.floor(n / 2), { animate: false }); scene.setClosed(false, { animate: false }); view(Math.PI / 2, 0.12, 0.6); },
+        below: () => { scene.goTo(Math.floor(n / 2), { animate: false }); scene.setClosed(false, { animate: false }); view(0.7, -0.6, 1); },
+        midTurn: () => { scene.clock = 1000; scene.goTo(Math.floor(n / 2), { animate: false }); scene.setClosed(false, { animate: false }); scene.rig.free = false; scene.settleCamera(); scene.goTo(Math.floor(n / 2) + 1); scene.clock = 1250; scene.debugStep(); },
+      };
+      for (const [name, go] of Object.entries(views)) {
+        const where = `${binding}, ${name}`;
+        go();
+        scene.occluderEvery = 0;
+        const without = shot();
+        for (const every of [8, 1]) {
+          scene.occluderEvery = every;
+          const d = differ(without, shot());
+          if (d.worst > 2) bad.push(`${where}, every ${every}: ${d.count} pixels changed, by up to ${d.worst}`);
+        }
+        // The same test must catch the surface pushed out of the paper, past the faces.
+        scene.occluderEvery = 1;
+        scene.occluder.side.value = 1.5;
+        const d = differ(without, shot());
+        scene.occluder.side.value = 0;
+        if (d.count < 50) bad.push(`${where}: pushed out of the paper, only ${d.count} pixels changed (the check can't see the occluder)`);
+        scene.clock = null;
+      }
+    }
+    eq(bad, []);
+  } finally {
+    scene.clock = null;
+    scene.occluderEvery = 8;
+    box.remove();
+  }
+});
+
 /** A leaf's cross-section as drawn: an outline as thick as the sheet (see geometry.test.js). */
 function outlineOf(scene, leaf) {
   const p = leaf.profile;

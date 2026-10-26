@@ -193,6 +193,7 @@ const SHEET_VERTEX = /* glsl */ `
 uniform highp sampler2D uSheets;
 uniform ivec3 uSheetLayout; // a sheet's block width, sheets per column, first row of the other rows
 uniform float uSheetLift; // drawn this far off the sheet's surface, along its normal (a flap on a cover): 0 for the sheets themselves
+uniform float uSheetSide; // the surfaces' offset from the cross-section, scaled: 1 for the sheets; 0 draws the surface at the cross-section itself, inside the paper (the occluder, see draw.js)
 ivec2 sheetBlock;
 int sheetJ;
 int sheetN;
@@ -230,13 +231,26 @@ vec3 sheetPoint( int k, int r, float side ) {
   float c = cos( t.z );
   float zz = 2.0 * float( r ) / float( SHEET_ROWS - 1 ) - 1.0;
   float d = sheetBow( r ) * t.w * t.w * ( 0.4 + 0.6 * zz * zz );
-  vec2 p = t.xy + vec2( - c, s ) * ( side * ( sheetHalf + uSheetLift ) + d );
+  vec2 p = t.xy + vec2( - c, s ) * ( uSheetSide * side * ( sheetHalf + uSheetLift ) + d );
   return vec3( p, sheetZ0 + sheetHeight * float( r ) / float( SHEET_ROWS - 1 ) );
 }
 vec3 sheetPosition() {
   int code = int( position.z + 0.5 );
   sheetLoad( code >> 4 );
-  return sheetPoint( int( position.x + 0.5 ), int( position.y + 0.5 ), ( code & 1 ) == 0 ? 1.0 : - 1.0 );
+  int k = int( position.x + 0.5 );
+  int r = int( position.y + 0.5 );
+  float side = ( code & 1 ) == 0 ? 1.0 : - 1.0;
+  if ( uSheetSide == 0.0 ) {
+    // The occluder (see draw.js makeOccluder): its rim an eighth of a cell in from the
+    // sheet's, so it lies inside the paper with room to spare (on the rim itself it would tie
+    // with the edges, whose triangles bow a hair off the curve it follows).
+    int k2 = k == 0 ? 1 : k == sheetN - 1 ? sheetN - 2 : k;
+    int r2 = r == 0 ? 1 : r == SHEET_ROWS - 1 ? SHEET_ROWS - 2 : r;
+    vec3 a = mix( sheetPoint( k, r, side ), sheetPoint( k2, r, side ), 0.125 );
+    vec3 b = mix( sheetPoint( k, r2, side ), sheetPoint( k2, r2, side ), 0.125 );
+    return mix( a, b, 0.125 );
+  }
+  return sheetPoint( k, r, side );
 }
 vec3 sheetNormal() {
   int code = int( position.z + 0.5 );
@@ -531,10 +545,12 @@ export function sheetShader(shader, uniforms) {
   shader.uniforms.uSheets = uniforms.uSheets;
   shader.uniforms.uSheetLayout = uniforms.uSheetLayout;
   shader.uniforms.uSheetLift ??= { value: 0 };
+  shader.uniforms.uSheetSide ??= { value: 1 };
   shader.uniforms.uCasterMap = uniforms.uCasterMap;
   shader.uniforms.uCasterMapOn = uniforms.uCasterMapOn;
-  // The same point from every program that draws a sheet, to the last bit: its faces' depth,
-  // drawn first, must match their shading (see makeLeaf).
+  // The same point from every program that draws a sheet, to the last bit: no program may
+  // disagree with another about where a sheet is (the occluder, draw.js makeOccluder, keeps
+  // clear of the sheets' surfaces, but only by a margin that this keeps exact).
   shader.vertexShader = "invariant gl_Position;\n" + patchShader(shader.vertexShader, [
     ["void main() {", SHEET_VERTEX + "void main() {"],
     ["#include <beginnormal_vertex>", "vec3 objectNormal = sheetNormal();"],

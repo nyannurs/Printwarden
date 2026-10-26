@@ -6,8 +6,10 @@
 // Last, it asks for a few seconds of panning by hand and measures the mouse's own rate and
 // what was drawn: a frame can only be drawn when the mouse reports a move. Then dragging round
 // three more views: the closed book, the open book as framed, its piles from low at the
-// fore-edge. Turning pages, the main thread's time is broken down by part (FRAME_PARTS in
-// scene.js). About 45 seconds and the hand panning; everything is put back as it was.
+// fore-edge; the last two also without the occluder and without multisampling (what the
+// paper block costs where hidden points are shaded, see draw.js makeOccluder). Turning pages,
+// the main thread's time is broken down by part (FRAME_PARTS in scene.js). About 55 seconds
+// and the hand panning; everything is put back as it was.
 
 import { FRAME_PARTS } from "../viewer/scene.js";
 
@@ -202,13 +204,13 @@ export async function runProbe(scene, onProgress) {
       }, at: { zoom: 1, azimuth: rig.home.azimuth, elevation: rig.home.elevation } },
       { label: "Open book, framed", open: () => {
         scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
-      }, at: { zoom: 1, azimuth: rig.home.azimuth, elevation: rig.home.elevation } },
+      }, at: { zoom: 1, azimuth: rig.home.azimuth, elevation: rig.home.elevation }, block: true },
       { label: "Low at the fore-edge", open: () => {
         scene.goTo(Math.max(1, Math.floor(scene.model.leafCount / 2)), { animate: false });
-      }, at: { zoom: 0.6, azimuth: rig.home.azimuth + Math.PI / 2, elevation: 0.12 } },
+      }, at: { zoom: 0.6, azimuth: rig.home.azimuth + Math.PI / 2, elevation: 0.12 }, block: true },
     ];
     lines.push("");
-    for (const { label, open, at } of views) {
+    for (const { label, open, at, block } of views) {
       open();
       const place = () => {
         rig.free = true;
@@ -218,6 +220,14 @@ export async function runProbe(scene, onProgress) {
       };
       place();
       await dragging(label);
+      if (!block) continue;
+      // Where the paper block fills the view: without the occluder (see draw.js makeOccluder),
+      // and without multisampling (which is what keeps Apple's GPUs from skipping hidden points).
+      const every = scene.occluderEvery;
+      place();
+      await dragging("  no occluder", () => { scene.occluderEvery = 0; }, () => { scene.occluderEvery = every; });
+      place();
+      await dragging("  no multisampling", () => setSamples(0), () => setSamples(samples));
     }
   } finally {
     scene.debugNoPivot = false;

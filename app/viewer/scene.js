@@ -18,7 +18,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { CAMERA_PRESETS, CameraRig, presetHome } from "./camera.js";
 import * as capture from "./capture.js";
-import { drawOrder, shadows } from "./draw.js";
+import { drawOrder, freeOccluder, makeOccluder, OCCLUDER_EVERY, shadows } from "./draw.js";
 import { layoutGround, makeExtras } from "./extras.js";
 import { frameCamera, placeCamera, visiblePages, visibleSpine } from "./framing.js";
 import { bindInput, glideZoom, panBy } from "./input.js";
@@ -339,6 +339,8 @@ ${TILE_GLSL}
     this.float = null; // the floating preset's tilt of the book, if chosen
     this.model = null;
     this.leaves = [];
+    this.occluder = null; // see draw.js makeOccluder
+    this.occluderEvery = OCCLUDER_EVERY; // its sheets: every this-many-th (0: none, for the performance check)
     this.extras = null;
     this.opening = 0;
     this.closed = 0; // 0 open … 1 closed, animated
@@ -551,6 +553,7 @@ ${TILE_GLSL}
       leaf.theta = leaf.to = leaf.from = restingAngle(this.model, i, this.opening);
     }
     makeSheets(this);
+    makeOccluder(this);
     this.extras = makeExtras(this);
     this.#applyFinish();
     uploads.showAllPages(this);
@@ -1191,6 +1194,7 @@ ${TILE_GLSL}
       if (leaf.mesh.material[2].userData.edgeOf) leaf.mesh.material[2].dispose(); // its edges' (the same)
     }
     this.leaves = [];
+    freeOccluder(this);
     for (const flap of this.flaps.values()) freeFlap(this, flap); // the flaps lay on them
     this.flaps.clear();
     uploads.dropDetails(this); // sharp strips on their way: for the old book's leaves

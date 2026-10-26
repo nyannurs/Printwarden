@@ -12,6 +12,9 @@ import {
 import { makeInkTexture } from "./textures.js";
 import { noSpotInk, spotInk } from "./uploads.js";
 
+/** A coil sheet's occluder starts this far past its holes (see makeLeaf). */
+const OCCLUDER_HOLE_MARGIN_MM = 10;
+
 /** The first and last leaves are the covers (a single leaf is both). */
 export function isCover(model, i) {
   return i === 0 || i === model.leafCount - 1;
@@ -139,10 +142,17 @@ export function makeLeaf(scene, i) {
     : edgeMaterial(scene, isCover(scene.model, i) ? scene.coverEdgeMat : scene.edgeMat, front, back);
   const materials = [front, back, edges];
   const style = scene.model.style;
+  // The front face's triangles the occluder is made of (see draw.js makeOccluder): all of
+  // them, or a coil sheet's from OCCLUDER_HOLE_MARGIN_MM past its holes (a ray in through a
+  // hole at a grazing angle runs on inside the paper; the occluder mustn't be where it can
+  // reach: seen at 3 degrees it was, 1 mm past the strip, and the sheet below went missing).
+  let occluderStart = 0;
   if (style.spine === "coil") {
     // The punched holes only in the strip along the spine that has them (see pageMaterial).
     const reach = HOLE_OFFSET_MM + (style.holeRadius ?? 2.5) + 1;
     const kh = Math.min(n - 1, Math.max(1, size.s.findIndex((sv) => sv >= reach)));
+    const kc = size.s.findIndex((sv) => sv >= reach + OCCLUDER_HOLE_MARGIN_MM);
+    occluderStart = kc < 0 ? faceCount : 6 * Math.min(n - 1, kc) * (R - 1);
     const strip = 6 * kh * (R - 1);
     materials.push(pageMaterial(scene, true, front), pageMaterial(scene, false, back));
     geo.addGroup(0, strip, 3);
@@ -171,7 +181,7 @@ export function makeLeaf(scene, i) {
   // The faces between a flying stack's sheets (see layoutLeaves): each its page's image,
   // unlit (see inkFiller).
   const fillers = [inkFiller(scene, front), inkFiller(scene, back)];
-  const leaf = { i, mesh, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL };
+  const leaf = { i, mesh, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL, occluderRange: { start: occluderStart, count: faceCount - occluderStart } };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
@@ -317,6 +327,24 @@ function pageMaterial(scene, isFront, holesOf = null) {
   };
   m.customProgramCacheKey = () => (holesOf ? "bookview-page-holes" : "bookview-page");
   if (holesOf) m.userData.twinOf = holesOf;
+  return m;
+}
+
+/**
+ * The occluder's material (see draw.js makeOccluder): the depth alone of the surface at the
+ * sheets' cross-sections (uSheetSide 0, inside the paper), pushed two depth units away from
+ * the camera besides (pushed away it can only hide less, never more; a tie with a drawn
+ * surface would let the background through). Only by units, never by the slope: a slope's
+ * unit is one pixel's worth of depth, which seen at an angle is many times the paper's
+ * thickness, and a factor of 1 pushed it clear out of the sheet, where it did nothing.
+ */
+export function occluderMaterial(scene) {
+  const m = new THREE.MeshDepthMaterial({ colorWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: 2 });
+  m.onBeforeCompile = (shader) => {
+    sheetShader(shader, scene.shared);
+    shader.uniforms.uSheetSide = scene.occluder.side;
+  };
+  m.customProgramCacheKey = () => "bookview-occluder";
   return m;
 }
 

@@ -101,6 +101,7 @@ In a stack turning together, a sheet's face against the next sheet can't be seen
 ### Order and depth
 
 - **Nearest first** (draw.js `drawOrder`): sheets are sorted by distance from the camera, so the graphics card skips what lies behind a sheet already drawn.
+- **The occluder** (draw.js `makeOccluder`): before the sheets, the surface at the cross-section of every eighth sheet and of the piles' top sheets is drawn for its depth alone, in one draw. It lies inside the paper, between a sheet's two faces, so it can never be seen and can only hide what that sheet hides anyway; but its depth is in the buffer before the sheets are shaded, so a ray into a pile stops within eight sheets even where the graphics card can't skip hidden points on its own. (Apple's GPUs under Chromium and Safari: every shader is translated for Metal with an output saying which samples it covers, and such a shader can't be skipped before it runs. The paper block seen low at the fore-edge was shaded dozens of sheets deep.) Its rim stays an eighth of a grid cell inside the sheet's, and a coil sheet's part starts 10 mm past its holes (a ray in through a hole at a grazing angle runs on inside the paper). `scene.occluderEvery` picks the sheets (0: none; the performance check compares); `tools/overdraw.py` counts what it saves.
 
 ## Shading
 

@@ -3,6 +3,11 @@
 
 import * as THREE from "three";
 
+import { occluderMaterial } from "./leaf.js";
+
+/** The occluder (see makeOccluder) takes every this-many-th sheet, besides the piles' top sheets. */
+export const OCCLUDER_EVERY = 8;
+
 /**
  * Render the view into `target` (whose size it takes). `view`: the part of a larger
  * image this is (a screenshot tile), or null for all of it.
@@ -147,7 +152,107 @@ export function drawOrder(scene) {
   order.forEach((i, rank) => {
     scene.leaves[i].mesh.renderOrder = -1000 + rank;
   });
+  chooseOccluders(scene);
   showFlaps(scene);
+}
+
+/**
+ * The occluder: a surface drawn before the sheets for its depth alone, which nothing can
+ * see (it lies inside the paper) and which hides what lies behind it before the graphics
+ * card shades it. A sheet's faces lie half the paper either side of its cross-section, its
+ * edges close the slab between them; the surface at the cross-section itself (uSheetSide 0,
+ * on the front face's own vertex grid) lies inside that slab, so a ray reaching it has come
+ * in through a face or an edge that is drawn: it can only hide what the sheet hides already.
+ * Its rim is an eighth of a cell in from the sheet's (sheetPosition), and a coil sheet's part
+ * starts well past its holes (leaf.occluderRange): nowhere a ray could reach it without
+ * having come in through something drawn. Of every OCCLUDER_EVERY-th sheet and of the sheets on top of
+ * the piles: a ray into a pile then crosses at most that many sheets before it stops. One
+ * mesh, one draw: the sheets' places as their meshes hold them (see makeLeaf), its index
+ * rebuilt when the choice of sheets changes (chooseOccluders). Nothing else: no shadow, no
+ * picking.
+ *
+ * (Apple's GPUs remove hidden points before shading them, whatever the drawing order; but
+ * under Chromium and Safari every shader is translated for Metal with an output saying which
+ * samples it covers, written whenever the target is multisampled (ANGLE, TranslatorMSL), and
+ * a shader that can change its own coverage can't be removed before it runs. Seen low at the
+ * fore-edge, an open book's piles were shaded sheet by sheet, dozens deep: 19.5 ms a frame on
+ * the author's M4 Pro, 2026-10-24. Depth that is in the buffer before a sheet is drawn does
+ * reject it: every sheet's faces drawn first for their depth, 0.15.7 to 1.1.0, halved that
+ * frame once, but by 2026-10-24 cost more than it saved dragging round, building every sheet
+ * twice. This builds a few, once.)
+ */
+export function makeOccluder(scene) {
+  const bases = [];
+  let count = 0;
+  let total = 0;
+  for (const leaf of scene.leaves) {
+    bases.push(count);
+    count += leaf.geo.attributes.position.count;
+    total += leaf.occluderRange.count;
+  }
+  const place = new Float32Array(count * 3);
+  for (const [i, leaf] of scene.leaves.entries()) place.set(leaf.geo.attributes.position.array, bases[i] * 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(place, 3));
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(total), 1));
+  geo.setDrawRange(0, 0);
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
+  scene.occluder = { mesh: null, geo, bases, side: { value: 0 }, key: "" };
+  const mesh = new THREE.Mesh(geo, occluderMaterial(scene));
+  mesh.frustumCulled = false;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.raycast = () => {};
+  mesh.renderOrder = -1e6; // before the sheets (see drawOrder)
+  scene.block.add(mesh);
+  scene.occluder.mesh = mesh;
+}
+
+export function freeOccluder(scene) {
+  const o = scene.occluder;
+  if (!o) return;
+  scene.block.remove(o.mesh);
+  o.geo.dispose();
+  o.mesh.material.dispose();
+  scene.occluder = null;
+}
+
+/**
+ * Which sheets the occluder is made of this frame (see makeOccluder): every
+ * `scene.occluderEvery`-th (0: none, for the performance check's comparison), the covers, and
+ * the two sheets at the opening (the piles' tops); only sheets that are drawn.
+ */
+function chooseOccluders(scene) {
+  const o = scene.occluder;
+  if (!o) return;
+  const every = scene.occluderEvery;
+  const n = scene.leaves.length;
+  const chosen = [];
+  if (every > 0) {
+    for (const leaf of scene.leaves) {
+      const i = leaf.i;
+      const top = i === 0 || i === n - 1 || i === scene.opening - 1 || i === scene.opening;
+      if (leaf.mesh.visible && (top || i % every === 0)) chosen.push(i);
+    }
+  }
+  const key = chosen.join(",");
+  o.mesh.visible = chosen.length > 0;
+  if (key === o.key) return;
+  o.key = key;
+  const index = /** @type {THREE.BufferAttribute} */ (o.geo.index);
+  const out = /** @type {Uint32Array} */ (index.array);
+  let at = 0;
+  for (const i of chosen) {
+    const leaf = scene.leaves[i];
+    const g = leaf.occluderRange;
+    const src = leaf.geo.index.array;
+    const base = o.bases[i];
+    for (let k = g.start; k < g.start + g.count; k++) out[at++] = src[k] + base;
+  }
+  index.clearUpdateRanges();
+  index.addUpdateRange(0, at);
+  index.needsUpdate = true;
+  o.geo.setDrawRange(0, at);
 }
 
 /**
