@@ -437,6 +437,27 @@ for (const type of ["keydown", "focusout"]) {
     if (e.target instanceof HTMLSelectElement) delete e.target.dataset.pointer;
   }, true);
 }
+/** A field one types in (text, numbers), not a button or a box to tick. */
+const isTextField = (el) => el instanceof HTMLTextAreaElement
+  || (el instanceof HTMLInputElement && !["button", "checkbox", "radio", "range", "color", "file", "submit", "reset"].includes(el.type));
+
+// Tab moves nowhere: the app is used with the mouse, and focus walking the side rail's
+// buttons and the panel's menus showed rings and labels round whatever it landed on (the
+// author, 2026-10-26: "I hate that I can tab around the menus"). In a dialog it still steps
+// between the fields one types in, and only those, round and round (Shift+Tab back).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  e.preventDefault();
+  const dialog = isTextField(e.target) ? /** @type {Element} */ (e.target).closest("dialog") : null;
+  if (!dialog) return;
+  const fields = [...dialog.querySelectorAll("input, textarea")]
+    .filter((el) => isTextField(el) && !(/** @type {HTMLInputElement} */ (el).disabled) && /** @type {HTMLElement} */ (el).offsetParent);
+  const at = fields.indexOf(/** @type {Element} */ (e.target));
+  const next = /** @type {HTMLInputElement | undefined} */ (fields[(at + (e.shiftKey ? -1 : 1) + fields.length) % fields.length]);
+  next?.focus();
+  next?.select();
+}, true);
+
 document.addEventListener("keydown", (e) => {
   const select = e.target;
   if (!(select instanceof HTMLSelectElement) || openList) return;

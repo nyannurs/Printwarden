@@ -141,7 +141,7 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 - The refresh rate, from frames with nothing drawn.
 - **Panning where the view is**: as is, at half the pixels, without re-pivoting onto the paper.
 - **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, with the sheets' depth drawn first, and with every sheet but the two open pages.
-- **Turning pages quickly**: as is, without shadows, with the shadow map held (the soft shadows' search alone), with the search's shortcut kept, and with the shadow map at half size, each with the main thread's time by part (`FRAME_PARTS` in scene.js: the animations, laying out the sheets, uploads, finding the tiles the view needs, whether the shadow map is drawn again, sorting, the draw calls: the shadow map itself is drawn with them).
+- **Turning pages quickly**: as is, without shadows, and with the shadow map kept at full size while pages move, each with the main thread's time by part (`FRAME_PARTS` in scene.js: the animations, laying out the sheets, uploads, finding the tiles the view needs, whether the shadow map is drawn again, sorting, the draw calls: the shadow map itself is drawn with them).
 - **Dragging round three more views**: the closed book, the open book as framed, its piles from low at the fore-edge; the last two also without the occluder, without multisampling, and with the sheets' depth drawn first (see [3D view](3d-view.md), order and depth).
 - **Panning by hand**: the mouse's moves per second, frames drawn per second, the card's time.
 

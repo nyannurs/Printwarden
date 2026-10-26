@@ -204,21 +204,8 @@ export async function runProbe(scene, onProgress) {
       r.shadowMap.needsUpdate = true;
       for (const m of pages()) m.needsUpdate = true;
     });
-    // Which part of the shadows a turn pays for (see draw.js shadows): the map not drawn again
-    // (the soft shadows' full search alone), the search's shortcut kept, the map at half size.
-    await turning("  shadow map held", () => { scene.debugShadowHold = true; }, () => {
-      scene.debugShadowHold = false;
-      r.shadowMap.needsUpdate = true;
-    });
-    await turning("  shadow shortcut kept", () => { scene.debugCastersKept = true; }, () => { scene.debugCastersKept = false; });
-    const mapSize = scene.key.shadow.mapSize.x;
-    const resize = (size) => {
-      scene.key.shadow.mapSize.set(size, size);
-      scene.key.shadow.map?.dispose();
-      scene.key.shadow.map = null;
-      r.shadowMap.needsUpdate = true;
-    };
-    await turning("  shadow map half size", () => resize(mapSize / 2), () => resize(mapSize));
+    // The shadow map kept at full size while pages move, as before 2026-10-26 (see draw.js shadowSize).
+    await turning("  full shadow map moving", () => { scene.debugShadowFull = true; }, () => { scene.debugShadowFull = false; });
     // Dragging round more views, each from its own place.
     const views = [
       { label: "Closed book", open: () => {

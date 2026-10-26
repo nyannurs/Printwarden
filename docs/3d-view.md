@@ -124,6 +124,7 @@ Pages are shaded as ink on paper (shaders.js):
 
 - **Soft shadows** that harden where things touch (percentage-closer soft shadows), as under a large window rather than a point of light. A 4096 × 4096 shadow map.
 - **Drawn only when needed** (draw.js `shadows`): only when the layout, the book's placement or the light changed. Turning the camera leaves it as it is; redrawing it every frame cost a tenth of a frame.
+- **Half size while things move** (draw.js `shadowSize`): while pages turn, the shadow map is drawn at half its size (2048 instead of 4096), and at full size again the frame they stand still. On the author's M4 Pro that took page turns from 26–42 ms frames to 9 ms; the shadow edges on a turning page are a touch softer while it moves. Screenshots and videos always use the full map.
 - **A shortcut for the search** (`nearestCasters`): for each 8 × 8 block of the shadow map, the nearest caster's depth is found once per still shadow map.
 - **Cut edges take no shadow**: 0.15 mm faces at a grazing angle are the one place a shadow map's precision shows.
 - **The contact shadow** under the book follows wherever leaves lie low, and the table under it.

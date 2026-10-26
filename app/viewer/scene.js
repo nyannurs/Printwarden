@@ -371,8 +371,9 @@ ${TILE_GLSL}
     this.occluderEvery = OCCLUDER_EVERY; // its sheets: every this-many-th (0: none, for the performance check)
     this.batches = null; // the sheets drawn in batches (see draw.js makeBatches); `debugNoBatch = true` draws every sheet on its own
     this.debugNoBatch = false;
-    this.debugShadowHold = false; // the performance check's (see draw.js shadows)
-    this.debugCastersKept = false;
+    this.debugShadowFull = false; // the shadow map at full size while pages move too (draw.js shadowSize): the performance check's comparison
+    /** @type {{full: number, maps: Map<number, THREE.WebGLRenderTarget>, low: boolean} | null} the shadow map's two sizes (draw.js shadowSize) */
+    this.shadowMaps = null;
     this.depthPass = null; // the sheets' depth drawn first (draw.js makeDepthFirst): off but for the performance check's comparison
     this.depthFirst = false;
     this.extras = null;
@@ -1315,7 +1316,9 @@ ${TILE_GLSL}
     const { animating, moving } = this.#update(this.clock ?? time);
     parts[PART.update] = performance.now() - started - parts[PART.layout] - parts[PART.uploads];
     const inMotion = animating || moving;
-    const draw = inMotion || this.dirty;
+    // (One more once things stand still while the shadow map is at its moving size: the
+    // full one is drawn then, see draw.js shadowSize.)
+    const draw = inMotion || this.dirty || !!this.shadowMaps?.low;
     this.#readGpuTime();
     if (!draw) {
       // At rest, settled, nothing waiting to go to the GPU: no more frames until something

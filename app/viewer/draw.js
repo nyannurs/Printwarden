@@ -31,35 +31,51 @@ export function renderView(scene, target, view) {
  * laptop's).
  */
 export function shadows(scene) {
-  // For the performance check only (ui/probe.js): the shadow map held as it is while pages move
-  // (wrong shadows, the soft shadows' search in full: what that search costs alone), or the
-  // nearest casters' shortcut kept while it changes (a frame behind: what the shortcut saves).
-  if (scene.debugShadowHold) {
-    scene.shared.uCasterMapOn.value = 0;
-    return;
-  }
   const cam = scene.key.shadow.camera;
+  const was = scene.shadowState;
   const now = [scene.layoutVersion, ...scene.key.position.toArray(), ...scene.key.target.position.toArray(),
     ...scene.root.position.toArray(), scene.root.rotation.x, scene.root.rotation.y, scene.root.rotation.z,
     ...scene.block.position.toArray(), scene.block.rotation.x, scene.block.rotation.y, scene.block.rotation.z,
     cam.left, cam.right, cam.top, cam.bottom, cam.near, cam.far];
-  const was = scene.shadowState;
-  if (!was || was.length !== now.length || now.some((v, i) => v !== was[i])) {
+  const changed = !was || was.length !== now.length || now.some((v, i) => v !== was[i]);
+  if (changed) {
     scene.shadowState = now;
     scene.renderer.shadowMap.needsUpdate = true;
   }
+  shadowSize(scene, changed && !scene.capturing && !scene.debugShadowFull);
   // The nearest casters, once the shadow map has stood still for a frame (drawn, and not
   // about to be drawn again): while it changes every frame (a page turning) the soft shadows
   // search in full; while only the camera moves, they skip where nothing is near.
   const map = scene.key.shadow.map;
-  const settled = !!map && (!scene.renderer.shadowMap.needsUpdate || scene.debugCastersKept);
-  if (scene.debugCastersKept && scene.renderer.shadowMap.needsUpdate) scene.casters.current = false; // made again from the last map, below
+  const settled = !!map && !scene.renderer.shadowMap.needsUpdate;
   if (!settled) scene.casters.current = false;
   else if (!scene.casters.current) {
     nearestCasters(scene, map.texture);
     scene.casters.current = true;
   }
   scene.shared.uCasterMapOn.value = scene.casters.current ? 1 : 0;
+}
+
+/**
+ * The shadow map at half its size while what casts shadows moves (`moving`: it is drawn again
+ * this frame for a change, not for a capture), at its full size again the frame things stand
+ * still (drawn once more then): two maps kept, swapped, never made anew. On the author's M4 Pro
+ * turning pages quickly at half size kept 95 % of frames within 9.2 ms, as without shadows
+ * (9.3), against 26-42 ms at full size (2026-10-26); on the RTX 4060 the size made no
+ * difference. Still views, screenshots and videos are drawn with the full map, as before.
+ */
+function shadowSize(scene, moving) {
+  const shadow = scene.key.shadow;
+  const s = (scene.shadowMaps ??= { full: shadow.mapSize.x, maps: new Map(), low: false });
+  if (moving === s.low) return;
+  if (!moving) scene.renderer.shadowMap.needsUpdate = true; // still now: the full map, drawn
+  s.low = moving;
+  const size = moving ? s.full / 2 : s.full;
+  // Kept by size: three makes a map only where there is none (WebGLShadowMap.render).
+  if (shadow.map) s.maps.set(shadow.mapSize.x, shadow.map);
+  shadow.mapSize.set(size, size);
+  shadow.map = s.maps.get(size) ?? null;
+  scene.casters.current = false;
 }
 
 /**
