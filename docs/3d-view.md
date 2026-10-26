@@ -100,7 +100,7 @@ In a stack turning together, a sheet's face against the next sheet can't be seen
 
 ### Order and depth
 
-- **Nearest first** (draw.js `drawOrder`): sheets are sorted by distance from the camera, so the graphics card skips what lies behind a sheet already drawn.
+- **Nearest first** (draw.js `drawOrder`): the graphics card skips what lies behind a sheet already drawn. Each pile, and each stack of pages turning together, is drawn from the sheet nearest the camera's level across it, outward (measured along the sheets' normal): from above, the top sheet first; from below, the bottom one. Piles, stacks and single turning pages are then drawn nearest first. Sorting sheet by sheet by distance alone drew a pile's lower sheets before the ones covering them when seen low at the fore-edge or from below, and every hidden layer was shaded: 28-30 ms of GPU a frame on an RTX 4060 for a 240-page book, 4.5-5.7 ms drawn from the camera's side. The picture is the same in any order, except where two sheets a hairline apart tie in the depth buffer.
 
 ## Shading
 

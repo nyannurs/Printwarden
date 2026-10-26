@@ -124,29 +124,69 @@ const _look = new THREE.Vector3(); // the camera's place
 
 const _point = new THREE.Vector3();
 
+const _normal = new THREE.Vector3();
+
 /**
  * The sheets drawn nearest first, before anything else: the GPU then skips what lies behind
- * a sheet already drawn. Each by how far the camera is from a point a little past the middle
- * of its middle row: the sheets of a pile or of a stack in the air are parallel, so these
- * points are in their order from whichever side they are seen. (Not by depth along the view:
- * a stack standing upright in front of the camera lies edge-on to it, and its sheets all tie.
- * In a fixed order, top of each pile first, a pile swung over to close the book was drawn
- * back to front, every sheet shaded in full: 60 ms a frame at 44 pages, 300 at 240.)
+ * a sheet already drawn. A pile (the leaves lying on one side) and a stack in the air (leaves
+ * turning together) are sheets offset one from the next: each is drawn from the sheet nearest
+ * the camera's level across it, outward, the camera's place and each sheet's measured along
+ * the normal of its middle sheet (at a point a little past the middle of each sheet's middle
+ * row): above a pile its top sheet first, below it its bottom one, beside it from the camera's
+ * height up and down. Opaque and depth-tested, the sheets look the same in any order but
+ * where two of them tie in the depth buffer (a hairline apart, seen edge-on). Piles, stacks and pages turning on their own are then drawn nearest
+ * first, each by the distance to its nearest such point. (By that distance alone, sheet by
+ * sheet, low at the fore-edge a pile's lower sheets came before the ones covering them, and
+ * every hidden layer was shaded: 28 ms of GPU a frame on the author's RTX 4060, 5 drawn from
+ * the camera's side, 2026-10-27. Not by depth along the view either: a stack standing upright
+ * in front of the camera lies edge-on to it, and its sheets all tie. And not in a fixed order,
+ * top of each pile first: a pile swung over to close the book was drawn back to front, 60 ms a
+ * frame at 44 pages, 300 at 240.)
  */
 export function drawOrder(scene) {
   const cam = scene.camera;
   scene.block.updateWorldMatrix(true, false);
   cam.updateWorldMatrix(true, false);
   _look.setFromMatrixPosition(cam.matrixWorld);
-  const depth = scene.leaves.map((leaf) => {
+  const n = scene.leaves.length;
+  const at = (scene.orderPoints ??= { xyz: new Float64Array(0) });
+  if (at.xyz.length !== 3 * n) at.xyz = new Float64Array(3 * n);
+  const xyz = at.xyz;
+  const depth = scene.leaves.map((leaf, i) => {
     const p = leaf.profile;
     const k = Math.round(0.6 * (p.x.length - 1));
-    return _point.set(p.x[k], p.y[k], 0).applyMatrix4(scene.block.matrixWorld).distanceToSquared(_look);
+    _point.set(p.x[k], p.y[k], 0).applyMatrix4(scene.block.matrixWorld);
+    xyz[3 * i] = _point.x;
+    xyz[3 * i + 1] = _point.y;
+    xyz[3 * i + 2] = _point.z;
+    return _point.distanceToSquared(_look);
   });
-  const order = scene.leaves.map((_, i) => i).sort((a, b) => depth[a] - depth[b]);
-  order.forEach((i, rank) => {
-    scene.leaves[i].mesh.renderOrder = -1000 + rank;
-  });
+  // The stacks: a pile each side, the leaves turning together; a page turning on its own alone.
+  const stacks = new Map();
+  for (const leaf of scene.leaves) {
+    const key = leaf.group != null ? `g${leaf.group}` : leaf.start == null ? (leaf.theta >= 0 ? "right" : "left") : `own${leaf.i}`;
+    if (!stacks.has(key)) stacks.set(key, []);
+    stacks.get(key).push(leaf.i);
+  }
+  const runs = [];
+  for (const list of stacks.values()) {
+    if (list.length > 1) {
+      // Across the stack: along its middle sheet's normal there (the way the sheets are offset;
+      // not from the first sheet's point to the last's, which also runs along the sheets: those
+      // outside a bend run longer, so their points sit further along).
+      const p = scene.leaves[list[list.length >> 1]].profile;
+      const phi = p.phi[Math.round(0.6 * (p.x.length - 1))];
+      _normal.set(Math.cos(phi), -Math.sin(phi), 0).transformDirection(scene.block.matrixWorld);
+      const { x: dx, y: dy, z: dz } = _normal;
+      const across = (i) => xyz[3 * i] * dx + xyz[3 * i + 1] * dy + xyz[3 * i + 2] * dz;
+      const eye = _look.x * dx + _look.y * dy + _look.z * dz;
+      list.sort((i, j) => Math.abs(across(i) - eye) - Math.abs(across(j) - eye) || i - j);
+    }
+    runs.push({ list, near: Math.min(...list.map((i) => depth[i])) });
+  }
+  runs.sort((a, b) => a.near - b.near);
+  let rank = 0;
+  for (const { list } of runs) for (const i of list) scene.leaves[i].mesh.renderOrder = -1000 + rank++;
   showFlaps(scene);
 }
 
