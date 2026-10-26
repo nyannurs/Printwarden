@@ -94,5 +94,6 @@ These work only when running from source, never in a build:
 - **`BOOKVIEW_SMOKE_OPEN`, `BOOKVIEW_SMOKE_SAVE_AS`**: answer the open and save dialogs.
 - **`BOOKVIEW_LATEST=<tag>`**: stands in for GitHub's answer to the update check.
 - **`BOOKVIEW_LAB=<page>`**: opens an experiment page.
+- **`BOOKVIEW_ANGLE=<backend>`**: draws through another of ANGLE's backends (`gl`, `metal`, `d3d11`), to compare them. The performance check's GPU line shows which one ran.
 
 The tools in `tools/` use these (see [Testing](testing.md)).

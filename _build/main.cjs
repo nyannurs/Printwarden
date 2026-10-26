@@ -14,6 +14,9 @@ const SERVED = ["index.html", "product.json", "LICENSE", "NOTICE", "app", "vendo
 // Development only: BOOKVIEW_LAB=<page> opens an experiment from _lab/ (never in a build).
 const LAB = !app.isPackaged && process.env.BOOKVIEW_LAB;
 if (LAB) SERVED.push("_lab", "_testfiles");
+// Development only: BOOKVIEW_ANGLE=<backend> draws through another of ANGLE's backends (gl,
+// metal, d3d11, ...), to compare them (the Mac's paper block under Metal, 2026-10-27).
+if (!app.isPackaged && /^[a-z0-9]{1,16}$/.test(process.env.BOOKVIEW_ANGLE ?? "")) app.commandLine.appendSwitch("use-angle", process.env.BOOKVIEW_ANGLE);
 const product = JSON.parse(fs.readFileSync(path.join(WEB_ROOT, "product.json"), "utf8"));
 app.setName(product.name);
 
