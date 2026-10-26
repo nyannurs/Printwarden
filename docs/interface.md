@@ -25,6 +25,7 @@ What it adds is the window, the controls, and the bookkeeping of which page has 
 | `finish.js` | Spot finishes. |
 | `compass.js` | The view's compass. |
 | `probe.js` | The performance check. |
+| `trace.js` | A recording of whatever is done meanwhile (Ctrl/Cmd+Shift+L, on and off), reported for pasting to the developer. |
 | `report.js` | The view report (Ctrl/Cmd+Shift+G): the scene's snapshot, the setup and a picture, saved as one file (see [Testing](testing.md#view-reports)). |
 | `dom.js` | Shared pieces: toasts, the loading bar, the progress window, pills, the app's own scrollbars and dropdown lists, whole-pixel placement. |
 
@@ -133,6 +134,7 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 - **The frame counter**, updated four times a second from `scene.frameStats`.
 - **Black or white type** for the counter and the zoom value. Four times a second, the brightness of the picture under them is read back from the graphics card after a drawn frame (`scene.sampleUnder`). That is a few kilobytes, with no stall, and the better-contrasting color is chosen.
 - **Ctrl/Cmd+Shift+P** starts the performance check.
+- **Ctrl/Cmd+Shift+L** starts a recording (`trace.js`); the same again stops it and shows its report, to copy: every refresh's wait and the main thread's time by part, long tasks, the slowest moments with what happened around them (pages turned, the book opened or closed, page images, renders asked and landed, the heap collected).
 
 ## The performance check (`probe.js`)
 

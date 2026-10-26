@@ -8,6 +8,7 @@ import { inspector, scene, startImport, state } from "./app.js";
 import { reportDialog } from "./dialogs.js";
 import { $, addMenu, fitPill, menuOpening, toast } from "./dom.js";
 import { runProbe } from "./probe.js";
+import { startTrace } from "./trace.js";
 
 const VIEW_PREF = "cameraPreset";
 const BACKGROUND_PREF = "background";
@@ -211,6 +212,21 @@ export function initView() {
     } finally {
       probing = false;
     }
+  });
+
+  // A recording (trace.js): Cmd/Ctrl+Shift+L starts it, the same again stops it and shows the report.
+  let stopTrace = null;
+  document.addEventListener("keydown", (e) => {
+    if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.code !== "KeyL" || !state.analysis || probing) return;
+    e.preventDefault();
+    if (!stopTrace) {
+      stopTrace = startTrace(scene, state);
+      toast("Recording: do what you want looked at, then press Ctrl/Cmd+Shift+L again", "info");
+      return;
+    }
+    const text = stopTrace();
+    stopTrace = null;
+    reportDialog("Recording", text);
   });
 
   setInterval(showFrameStats, 250);
