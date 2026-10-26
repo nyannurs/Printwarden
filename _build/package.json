@@ -1,7 +1,7 @@
 {
   "name": "printwarden-desktop",
   "private": true,
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-or-later",
   "version": "0.0.0",
   "description": "Desktop shell. App name and version live in ../product.json.",
   "main": "main.cjs",
