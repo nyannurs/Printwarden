@@ -140,10 +140,11 @@ export function layoutLeaves(scene) {
     // as a page.
     const frontHidden = against(leaf, leaf.i - 1); // the front lies on the leaf before
     const backHidden = against(leaf, leaf.i + 1);
-    // Each its page's image, unlit (inkFiller); `app.scene.debugFillerInk = false` plain paper.
-    const plain = scene.debugFillerInk === false;
-    leaf.mesh.material[0] = frontHidden ? (plain ? scene.sheetFiller : leaf.fillers[0]) : leaf.front;
-    leaf.mesh.material[1] = backHidden ? (plain ? scene.sheetFiller : leaf.fillers[1]) : leaf.back;
+    // Each its page's image, unlit (inkFillerMaterial); `app.scene.debugFillerInk = false` plain paper.
+    const filler = scene.debugFillerInk === false ? scene.sheetFiller : scene.inkFiller;
+    leaf.mesh.material[0] = frontHidden ? filler : leaf.front;
+    leaf.mesh.material[1] = backHidden ? filler : leaf.back;
+    leaf.filler = frontHidden || backHidden; // drawn on its own then (see draw.js batchable)
   }
   // Only sheets whose shape changed go to the GPU: while one page turns, the rest hold still.
   // Sheets are drawn a little thinner than they are (LEAF_FILL), so neighbours never share a

@@ -43,11 +43,12 @@ export async function runProbe(scene, onProgress) {
   lines.push(`Refresh: ${(1000 / refresh).toFixed(0)} Hz (${refresh.toFixed(1)} ms)`, "");
 
   const median = (a) => a.slice().sort((x, y) => x - y)[a.length >> 1];
-  const stats = (ivals, cpu, gpu) => {
+  const stats = (ivals, cpu, gpu, calls) => {
     const s = ivals.slice().sort((a, b) => a - b);
     const q = (p) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
     const g = gpu.length ? `   gpu ${median(gpu).toFixed(1)} ms` : "";
-    return `${(1000 / q(0.5)).toFixed(0).padStart(4)} fps   p95 ${q(0.95).toFixed(1).padStart(5)} ms   worst ${s[s.length - 1].toFixed(1).padStart(5)} ms   main thread ${median(cpu).toFixed(1)} ms${g}`;
+    const c = calls.length ? `   draws ${median(calls)}` : "";
+    return `${(1000 / q(0.5)).toFixed(0).padStart(4)} fps   p95 ${q(0.95).toFixed(1).padStart(5)} ms   worst ${s[s.length - 1].toFixed(1).padStart(5)} ms   main thread ${median(cpu).toFixed(1)} ms${g}${c}`;
   };
   // The graphics card's time for the frames of a run, where it can be timed (see #adaptResolution).
   const gpuNow = (since) => (scene.gpuTime.timer && scene.gpuTime.at > since ? scene.gpuTime.ms : null);
@@ -76,8 +77,12 @@ export async function runProbe(scene, onProgress) {
         n0 = log.n;
       }
     }
-    for (let k = n0; k < log.n; k++) cpu.push(log.cpu[k % log.time.length]);
-    lines.push(`${label.padEnd(28)} ${ivals.length ? stats(ivals, cpu.length ? cpu : [0], gpu) : "no frames"}`);
+    const calls = [];
+    for (let k = n0; k < log.n; k++) {
+      cpu.push(log.cpu[k % log.time.length]);
+      calls.push(log.calls[k % log.time.length]);
+    }
+    lines.push(`${label.padEnd(28)} ${ivals.length ? stats(ivals, cpu.length ? cpu : [0], gpu, calls) : "no frames"}`);
     if (parts && log.n > n0) {
       const mean = (a) => {
         let sum = 0;
@@ -165,9 +170,9 @@ export async function runProbe(scene, onProgress) {
     await dragging("  no multisampling", () => setSamples(0), () => setSamples(samples));
     const top = new Set([scene.opening - 1, scene.opening]);
     await dragging("  only the two open pages", () => {
-      for (const l of scene.leaves) l.mesh.visible = top.has(l.i);
+      for (const l of scene.leaves) l.hidden = !top.has(l.i);
     }, () => {
-      for (const l of scene.leaves) l.mesh.visible = true;
+      for (const l of scene.leaves) l.hidden = false;
     });
     lines.push("");
     // Pages turned quickly: one every 150 ms, forward then back.

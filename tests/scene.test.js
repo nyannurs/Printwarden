@@ -109,6 +109,67 @@ test("the occluder changes no pixel, of any sheet it is made of, in any binding;
   }
 });
 
+test("the sheets draw in batches: a few draws for a book, a sheet with a texture of its own drawn alone and back in again", async () => {
+  // See draw.js makeBatches, batchable.
+  const box = document.createElement("div");
+  box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 320px; height: 200px;";
+  document.body.append(box);
+  const scene = new BookScene(box);
+  const r = scene.renderer;
+  const leafOf = () => new Map(scene.leaves.map((l) => [l.mesh, l]));
+  // One frame's draws: the sheets' own, and the batches'.
+  const draws = () => {
+    scene.lastRequest = -1e9;
+    scene.debugSample(0.5, 0.5);
+    const leaves = leafOf();
+    const batches = new Set(Object.values(scene.batches ?? {}).map((b) => b.mesh));
+    let own = 0;
+    let batched = 0;
+    const orig = r.renderBufferDirect.bind(r);
+    r.renderBufferDirect = (camera, sc, geometry, material, object, group) => {
+      if (camera === scene.camera) {
+        if (leaves.has(object)) own++;
+        else if (batches.has(object)) batched++;
+      }
+      return orig(camera, sc, geometry, material, object, group);
+    };
+    scene.composer.render();
+    r.renderBufferDirect = orig;
+    return { own, batched };
+  };
+  try {
+    for (const [binding, batchesExpected] of [["saddle", 2], ["perfect", 2], ["spiral", 3], ["hardcover", 2]]) {
+      scene.setBook({ pageCount: 44, pageSize: { width: 148, height: 210 }, binding, paper });
+      scene.goTo(11, { animate: false });
+      const d = draws();
+      eq(d.batched, batchesExpected, `${binding}: the batches (faces, edges, a coil's strips)`);
+      // The covers (their own stock; a hardcover's boards) are drawn on their own: 3 draws a sheet, 5 for a coil's.
+      eq(d.own, 2 * (binding === "spiral" ? 5 : 3), `${binding}: the sheets drawn on their own`);
+      ok(scene.leaves[5].mesh.visible === false, `${binding}: a page's own mesh isn't drawn while it is in the batches`);
+    }
+    scene.setBook({ pageCount: 44, pageSize: { width: 148, height: 210 }, binding: "saddle", paper });
+    scene.goTo(11, { animate: false });
+    const before = draws();
+    // An image shown instead (a video's) puts the sheet on its own; its own again, back in the batches.
+    const canvas = new OffscreenCanvas(64, 64);
+    canvas.getContext("2d").fillRect(0, 0, 64, 64);
+    scene.showPageImage(11, await createImageBitmap(canvas));
+    const shown = draws();
+    eq(shown.own, before.own + 3, "the sheet with an image of its own: drawn on its own");
+    ok(scene.leaves[5].mesh.visible, "its mesh shown");
+    scene.showPageImage(11, null);
+    eq(draws().own, before.own, "its own image gone: in the batches again");
+    // Every sheet on its own, for comparison: the batches draw nothing.
+    scene.debugNoBatch = true;
+    const none = draws();
+    ok(none.batched <= 2, `the batches draw nothing (three still calls for them, with no ranges: ${none.batched})`);
+    eq(none.own, 22 * 3);
+    scene.debugNoBatch = false;
+  } finally {
+    box.remove();
+  }
+});
+
 /** A leaf's cross-section as drawn: an outline as thick as the sheet (see geometry.test.js). */
 function outlineOf(scene, leaf) {
   const p = leaf.profile;

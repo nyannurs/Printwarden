@@ -136,7 +136,7 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 
 ## The performance check (`probe.js`)
 
-`runProbe(scene, onProgress)` measures the computer it runs on and returns a text report:
+`runProbe(scene, onProgress)` measures the computer it runs on and returns a text report (each run: frames a second, the 95th percentile and the worst frame, the main thread's time, the graphics card's where it can be timed, and the draw calls a frame):
 - The GPU, the screen (pixel ratio, canvas size, multisampling), processor threads, the book.
 - The refresh rate, from frames with nothing drawn.
 - **Panning where the view is**: as is, at half the pixels, without re-pivoting onto the paper.

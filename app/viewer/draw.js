@@ -3,7 +3,7 @@
 
 import * as THREE from "three";
 
-import { occluderMaterial } from "./leaf.js";
+import { occluderMaterial, pageMaterial } from "./leaf.js";
 
 /** The occluder (see makeOccluder) takes every this-many-th sheet, besides the piles' top sheets. */
 export const OCCLUDER_EVERY = 8;
@@ -139,6 +139,7 @@ const _point = new THREE.Vector3();
  * back to front, every sheet shaded in full: 60 ms a frame at 44 pages, 300 at 240.)
  */
 export function drawOrder(scene) {
+  scene.pageTable.flush(); // the pages' data as the frame draws it (pagedata.js)
   const cam = scene.camera;
   scene.block.updateWorldMatrix(true, false);
   cam.updateWorldMatrix(true, false);
@@ -149,11 +150,114 @@ export function drawOrder(scene) {
     return _point.set(p.x[k], p.y[k], 0).applyMatrix4(scene.block.matrixWorld).distanceToSquared(_look);
   });
   const order = scene.leaves.map((_, i) => i).sort((a, b) => depth[a] - depth[b]);
-  order.forEach((i, rank) => {
-    scene.leaves[i].mesh.renderOrder = -1000 + rank;
+  const rank = new Int32Array(scene.leaves.length);
+  order.forEach((i, k) => {
+    scene.leaves[i].mesh.renderOrder = -1000 + k;
+    rank[i] = k;
   });
+  chooseBatched(scene, rank);
   chooseOccluders(scene);
   showFlaps(scene);
+}
+
+/**
+ * The sheets drawn in batches: three meshes (three's BatchedMesh, one draw each with
+ * WEBGL_multi_draw, else one program for all their draws) hold every sheet's faces, a coil's
+ * strips of holes, and its cut edges; each sheet is an instance, shown or not frame by frame
+ * (chooseBatched), drawn in the sheets' order (drawOrder: nearest first). The page shader
+ * finds the page from the vertex (vFolio) and everything of it in the page table (pagedata.js),
+ * so one material draws them all. A sheet that needs a material of its own stays out and its
+ * own mesh is drawn (see batchable): 120 sheets were 360 draw calls of the page material, with
+ * its forty uniforms and sixteen textures each, 4 ms of the main thread a frame.
+ */
+export function makeBatches(scene) {
+  const leaves = scene.leaves;
+  freeBatches(scene);
+  if (!leaves.length) return;
+  const faces = pageMaterial(scene, null, { own: false });
+  const kinds = {
+    faces: { parts: [0, 1], material: faces, order: -1003 },
+    strips: { parts: [3, 4], material: pageMaterial(scene, faces, { own: false }), order: -1002 },
+    edges: { parts: [2], material: scene.inkEdges.get(scene.edgeMat), order: -1001 },
+  };
+  scene.batches = {};
+  for (const [name, { parts, material, order }] of Object.entries(kinds)) {
+    const subs = leaves.map((leaf) => leaf.geo.groups.filter((g) => parts.includes(g.materialIndex)));
+    const counts = subs.map((groups) => groups.reduce((a, g) => a + g.count, 0));
+    const indices = counts.reduce((a, b) => a + b, 0);
+    if (!indices) {
+      if (name !== "edges") material.dispose();
+      continue;
+    }
+    const vertices = leaves.reduce((a, leaf, i) => a + (counts[i] ? leaf.geo.attributes.position.count : 0), 0);
+    const mesh = new THREE.BatchedMesh(leaves.length, vertices, indices, material);
+    mesh.name = name;
+    mesh.frustumCulled = false;
+    mesh.perObjectFrustumCulled = false;
+    mesh.sortObjects = true;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.customDepthMaterial = scene.sheetDepth;
+    mesh.renderOrder = order; // before every sheet drawn on its own: faces, then a coil's strips, then the edges, as a sheet's own parts go
+    mesh.raycast = () => {}; // picking is the sheets' own (see makeLeaf)
+    const rank = new Int32Array(leaves.length);
+    mesh.setCustomSort((list) => /** @type {{index: number}[]} */ (/** @type {unknown} */ (list)).sort((a, b) => rank[a.index] - rank[b.index]));
+    const ids = leaves.map((leaf, i) => {
+      if (!counts[i]) return -1;
+      const sub = new THREE.BufferGeometry();
+      for (const a of ["position", "uv", "edgeUv"]) sub.setAttribute(a, leaf.geo.getAttribute(a));
+      const index = new Uint32Array(counts[i]);
+      let at = 0;
+      for (const g of subs[i]) {
+        index.set(/** @type {any} */ (leaf.geo.index.array).subarray(g.start, g.start + g.count), at);
+        at += g.count;
+      }
+      sub.setIndex(new THREE.BufferAttribute(index, 1));
+      return mesh.addInstance(mesh.addGeometry(sub));
+    });
+    scene.block.add(mesh);
+    scene.batches[name] = { mesh, ids, rank, material, own: name !== "edges" };
+  }
+}
+
+export function freeBatches(scene) {
+  for (const b of Object.values(scene.batches ?? {})) {
+    scene.block.remove(b.mesh);
+    b.mesh.dispose();
+    if (b.own) b.material.dispose();
+  }
+  scene.batches = null;
+}
+
+/**
+ * Whether a sheet can be drawn in the batches this frame: a sheet of the pages' stock (the
+ * covers and endpapers have their own), not a board, no face of it a filler (a flying stack's,
+ * see layoutLeaves) or on a texture of its own (an image shown instead, a capture's strips, a
+ * spot finish: see pageMaterial), and nothing being debugged.
+ */
+function batchable(scene, leaf) {
+  if (leaf.board || leaf.stock !== "page" || leaf.filler || scene.debugNoBatch) return false;
+  for (const m of [leaf.front, leaf.back]) {
+    const u = m.userData.uniforms;
+    if (u.uOwn.value || u.uDetailCount.value || u.uFinishKind.value) return false;
+  }
+  return true;
+}
+
+/** Each sheet into the batches or out of them (its own mesh drawn instead), and the batches' order (see makeBatches). */
+function chooseBatched(scene, rank) {
+  const B = scene.batches;
+  for (const leaf of scene.leaves) {
+    const batched = !!B && !leaf.hidden && batchable(scene, leaf);
+    leaf.mesh.visible = !leaf.hidden && !batched;
+    if (!B) continue;
+    for (const b of Object.values(B)) {
+      const id = b.ids[leaf.i];
+      if (id < 0) continue;
+      b.mesh.setVisibleAt(id, batched);
+      b.rank[id] = rank[leaf.i];
+    }
+  }
 }
 
 /**
@@ -220,7 +324,8 @@ export function freeOccluder(scene) {
 /**
  * Which sheets the occluder is made of this frame (see makeOccluder): every
  * `scene.occluderEvery`-th (0: none, for the performance check's comparison), the covers, and
- * the two sheets at the opening (the piles' tops); only sheets that are drawn.
+ * the two sheets at the opening (the piles' tops); only sheets that are drawn (leaf.hidden: the
+ * performance check's "only the two open pages").
  */
 function chooseOccluders(scene) {
   const o = scene.occluder;
@@ -232,7 +337,7 @@ function chooseOccluders(scene) {
     for (const leaf of scene.leaves) {
       const i = leaf.i;
       const top = i === 0 || i === n - 1 || i === scene.opening - 1 || i === scene.opening;
-      if (leaf.mesh.visible && (top || i % every === 0)) chosen.push(i);
+      if (!leaf.hidden && (top || i % every === 0)) chosen.push(i);
     }
   }
   const key = chosen.join(",");

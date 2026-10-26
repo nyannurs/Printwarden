@@ -5,9 +5,9 @@
 import * as THREE from "three";
 import { HOLE_OFFSET_MM, leafShape } from "./model.js";
 import {
-  EDGE_FRAGMENT_HEADER, EDGE_INK, EDGE_INK_SHARE, EDGE_INSET_MM, INK_GLSL, inkUniforms,
+  EDGE_FRAGMENT_HEADER, EDGE_INK, INK_GLSL, inkUniforms,
   FINISH_FRAGMENT, FINISH_HIGHLIGHT, FINISH_REFLECTION, HOLE_DISCARD, LEAF_FILL, LEAF_ROWS, MAX_DETAIL, MID_ROW,
-  OTHER_ROWS, PAGE_FRAGMENT_HEADER, PAGE_MAP_FRAGMENT, PAPER_ROLLOFF, patchShader, sheetShader, SHOW_THROUGH,
+  OTHER_ROWS, PAGE_DATA_GLSL, PAGE_FRAGMENT_HEADER, PAGE_MAP_FRAGMENT, pageDataUniforms, PAPER_ROLLOFF, patchShader, sheetShader, SHOW_THROUGH,
 } from "./shaders.js";
 import { makeInkTexture } from "./textures.js";
 import { noSpotInk, spotInk } from "./uploads.js";
@@ -134,12 +134,14 @@ export function makeLeaf(scene, i) {
   }
   geo.setIndex(idx);
   const faceCount = 6 * (n - 1) * (R - 1);
-  const front = pageMaterial(scene, true);
-  const back = pageMaterial(scene, false);
+  const front = pageMaterial(scene);
+  const back = pageMaterial(scene);
   const board = size.board; // a hardcover's board: its edges are covered too
-  const edges = board
-    ? scene.sheetEdges.get(i === 0 ? scene.frontWrapMat : scene.backWrapMat) // covered by the case
-    : edgeMaterial(scene, isCover(scene.model, i) ? scene.coverEdgeMat : scene.edgeMat, front, back);
+  // Its cut edges: covered by the case (a board), else the pages' ink at the cut, one material
+  // for every sheet of the stock, set in by the scene once every face's material is made (its
+  // edgeBase says which; see BookScene #makeInkEdges).
+  const edgeBase = board ? null : isCover(scene.model, i) ? scene.coverEdgeMat : scene.edgeMat;
+  const edges = board ? scene.sheetEdges.get(i === 0 ? scene.frontWrapMat : scene.backWrapMat) : scene.inkEdges.get(edgeBase) ?? null;
   const materials = [front, back, edges];
   const style = scene.model.style;
   // The front face's triangles the occluder is made of (see draw.js makeOccluder): all of
@@ -154,7 +156,7 @@ export function makeLeaf(scene, i) {
     const kc = size.s.findIndex((sv) => sv >= reach + OCCLUDER_HOLE_MARGIN_MM);
     occluderStart = kc < 0 ? faceCount : 6 * Math.min(n - 1, kc) * (R - 1);
     const strip = 6 * kh * (R - 1);
-    materials.push(pageMaterial(scene, true, front), pageMaterial(scene, false, back));
+    materials.push(pageMaterial(scene, front), pageMaterial(scene, back));
     geo.addGroup(0, strip, 3);
     geo.addGroup(strip, faceCount - strip, 0);
     geo.addGroup(faceCount, strip, 4);
@@ -168,9 +170,6 @@ export function makeLeaf(scene, i) {
   mesh.onBeforeRender = (renderer, scene, camera, geometry, material) => {
     const base = material.userData.twinOf;
     if (base) twin(material, base);
-    const page = material.userData.fillerOf;
-    if (page) /** @type {THREE.MeshBasicMaterial} */ (material).map = page.map ?? page.userData.white; // the page's image, as it is now
-    if (material.userData.edgeOf) inkEdges(material);
   };
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -178,10 +177,10 @@ export function makeLeaf(scene, i) {
   mesh.customDepthMaterial = scene.sheetDepth;
   scene.block.add(mesh);
   const profile = { x: new Float32Array(n), y: new Float32Array(n), phi: new Float32Array(n) };
-  // The faces between a flying stack's sheets (see layoutLeaves): each its page's image,
-  // unlit (see inkFiller).
-  const fillers = [inkFiller(scene, front), inkFiller(scene, back)];
-  const leaf = { i, mesh, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL, occluderRange: { start: occluderStart, count: faceCount - occluderStart } };
+  // `hidden`: not drawn at all (the performance check); `stock`: "page" for a sheet of the
+  // pages' stock (setPaper), `filler`: a face of it is a flying stack's filler (layoutLeaves):
+  // whether it is drawn in the batches or on its own (see draw.js batchable).
+  const leaf = { i, mesh, geo, front, back, edgeBase, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, pick: null, stale: true, fill: LEAF_FILL, hidden: false, stock: "page", filler: false, occluderRange: { start: occluderStart, count: faceCount - occluderStart } };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
@@ -270,15 +269,18 @@ export function uploadSheets(scene, changed) {
 }
 
 /**
- * A page's material. `holesOf`: the same page's material, for a twin that also punches a
- * coil's holes: it shares that one's uniforms and takes its settings before every draw
- * (see makeLeaf). Only the strip along the spine uses it: a shader that can discard
- * fragments keeps the GPU from skipping the ones hidden under sheets above, and a pile
- * shaded sheet by sheet costs several times as much.
+ * A page face's own material (see PAGE_FRAGMENT_HEADER): the page's stock, and what only
+ * some pages have, each on a texture of its own (an image shown instead of its layer, a
+ * capture's sharp strips, a spot finish); the page itself, and everything else of it, from the
+ * page table by the vertex's folio. `holesOf`: the same face's material, for a twin that also
+ * punches a coil's holes: it shares that one's uniforms and takes its settings before every
+ * draw (see makeLeaf). Only the strip along the spine uses it: a shader that can discard
+ * fragments keeps the GPU from skipping the ones hidden under sheets above, and a pile shaded
+ * sheet by sheet costs several times as much.
  */
-function pageMaterial(scene, isFront, holesOf = null) {
+export function pageMaterial(scene, holesOf = null, { own = true } = {}) {
   const m = new THREE.MeshPhysicalMaterial({
-    map: scene.blank,
+    map: scene.blank, // (the uv: the page's image is its layer, or `map` when uOwn)
     bumpMap: scene.grain,
     bumpScale: 0.3,
     roughness: 0.92,
@@ -286,38 +288,24 @@ function pageMaterial(scene, isFront, holesOf = null) {
     clearcoat: 0.001,
     clearcoatRoughness: 0.3,
   });
-  m.userData.uniforms = holesOf?.userData.uniforms ?? {
-    uBack: { value: scene.blank },
-    // The page's spot channels and spot matrix, the other side's for its show-through (see
-    // uploads.js showPage).
-    uSpots: { value: scene.noSpots },
-    uSpotInk: { value: noSpotInk() },
-    uBackSpots: { value: scene.noSpots },
-    uBackSpotInk: { value: noSpotInk() },
-    uShow: { value: 0.01 },
-    uSpineAtU0: { value: isFront ? 1 : 0 },
+  if (own) m.defines = { ...m.defines, PV_OWN: "" }; // (added to three's own: STANDARD, PHYSICAL)
+  m.userData.uniforms = holesOf?.userData.uniforms ?? (own ? {
+    uOwn: { value: 0 }, // 1: the page's image is `map` (uploads.js showPage), with its spot channels
+    uOwnSpots: { value: scene.noSpots },
     // Up to MAX_DETAIL sharp strips laid over the page (see detail.js).
     ...Object.fromEntries(Array.from({ length: MAX_DETAIL }, (_, i) => [
       [`uDetail${i}`, { value: scene.blank }],
       [`uDetailRect${i}`, { value: new THREE.Vector4(0, 0, 0, 0) }],
     ]).flat()),
     uDetailCount: { value: 0 },
-    // The page's tiles (viewer/tiles.js): its table and its pyramid's shape, bound by the scene (uploads.js bindTiles).
-    uTileTable: { value: scene.tiles.emptyTable },
-    uTilePage: { value: new THREE.Vector4(1, 1, 0, 1) },
-    uTileOn: { value: 0 },
-    uOuterCover: { value: 0 }, // 1 on the outside of the covers: no gutter shade there
     uFinish: { value: scene.none }, // spot finish mask (any ink = finished), see setFinish
     uFinishKind: { value: 0 },
-    uGlue: { value: 0 }, // side glue and the score: see setPageGlue, setCoverScore
-    uScore: { value: 0 },
-    uTurnIn: { value: new THREE.Vector4(0, 0, 0, 0) }, // a board's inside: the cover's turn-in round the endpaper (setPaper)
-  };
+  } : {});
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, m.userData.uniforms, scene.shared);
     sheetShader(shader, scene.shared);
     shader.fragmentShader = patchShader(shader.fragmentShader, [
-      ["void main() {", PAGE_FRAGMENT_HEADER + "void main() {\n" + (holesOf ? HOLE_DISCARD : "")],
+      ["void main() {", PAGE_FRAGMENT_HEADER + "void main() {\n  pvLoadPage( vFolio );\n" + (holesOf ? HOLE_DISCARD : "")],
       ["#include <map_fragment>", PAGE_MAP_FRAGMENT + SHOW_THROUGH],
       ["#include <lights_physical_fragment>", (line) => line + "\n" + FINISH_FRAGMENT],
       ["vec3 totalDiffuse = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;", (line) => line + PAPER_ROLLOFF],
@@ -325,7 +313,7 @@ function pageMaterial(scene, isFront, holesOf = null) {
       ["#include <opaque_fragment>", (line) => FINISH_HIGHLIGHT + line],
     ]);
   };
-  m.customProgramCacheKey = () => (holesOf ? "bookview-page-holes" : "bookview-page");
+  m.customProgramCacheKey = () => `bookview-page${own ? "-own" : ""}${holesOf ? "-holes" : ""}`;
   if (holesOf) m.userData.twinOf = holesOf;
   return m;
 }
@@ -445,25 +433,25 @@ export function freeFlap(scene, mesh) {
 }
 
 /**
- * A face between a flying stack's sheets, as its page: the page's image, unlit, in the
- * shade of the sheets' edges (see fillerMaterial). Where an edge face in front drops pixels
- * (the author's Mac), what shows through near the edge is the page's own print, as at rest,
- * where the pages behind the edges are drawn in full: the "ink" along a stack's edges. (Plain
- * paper, 0.17.90, showed the edges blank while the stack flew, the ink there on landing.)
+ * A face between a flying stack's sheets, as its page: the page's image (by the vertex's
+ * folio: one material for every such face), unlit, in the shade of the sheets' edges (see
+ * fillerMaterial). Where an edge face in front drops pixels (the author's Mac), what shows
+ * through near the edge is the page's own print, as at rest, where the pages behind the edges
+ * are drawn in full: the "ink" along a stack's edges. (Plain paper, 0.17.90, showed the edges
+ * blank while the stack flew, the ink there on landing.)
  */
-function inkFiller(scene, page) {
-  const m = new THREE.MeshBasicMaterial({ map: page.map ?? scene.blank, side: THREE.DoubleSide });
-  m.color.copy(scene.sheetFiller.color).multiplyScalar(0.9);
-  m.userData.fillerOf = page;
-  page.userData.white = scene.blank;
+export function inkFillerMaterial(scene) {
+  const m = new THREE.MeshBasicMaterial({ map: scene.blank, side: THREE.DoubleSide }); // (map: the uv)
   m.onBeforeCompile = (shader) => {
     sheetShader(shader, scene.shared);
     inkUniforms(shader, scene.shared);
-    shader.uniforms.uSpots = page.userData.uniforms.uSpots; // the page's own, as its image is
-    shader.uniforms.uSpotInk = page.userData.uniforms.uSpotInk;
+    pageDataUniforms(shader, scene.shared);
     shader.fragmentShader = patchShader(shader.fragmentShader, [
-      ["void main() {", INK_GLSL + "uniform sampler2D uSpots;\nuniform mat4 uSpotInk;\nvoid main() {"],
-      ["#include <map_fragment>", "diffuseColor *= sRGBTransferEOTF( pvPageColor( texture2D( map, vMapUv ), texture2D( uSpots, vMapUv ), uSpotInk ) );"],
+      ["void main() {", INK_GLSL + PAGE_DATA_GLSL + "flat varying int vFolio;\nvoid main() {"],
+      ["#include <map_fragment>", `{
+  vec4 page = pvPageTexel( vFolio, 0 );
+  diffuseColor *= sRGBTransferEOTF( pvPageColor( pvImageAt( page.x, page.zw, vMapUv ), pvSpotsAt( page.y, page.zw, vMapUv ), pvSpotInk( vFolio ) ) );
+}`],
     ]);
   };
   m.customProgramCacheKey = () => "bookview-sheet-ink-filler";
@@ -527,27 +515,18 @@ export function pageHit(model, leaf, ray, front, near = 0, far = Infinity) {
 }
 
 /**
- * A sheet's cut edges (head, foot, fore-edge): the paper's edge colour (`base`, the shared
- * edge material's), with the ink at its pages' edges, front and back, laid on it (see
- * EDGE_INK): one per sheet, its pages' images being its own.
+ * The sheets' cut edges (head, foot, fore-edge): the paper's edge colour (`base`, the shared
+ * edge material's, copied to it by the scene), with the ink at its pages' edges, front and
+ * back, laid on it (see EDGE_INK): one material for every sheet of the stock, the sheet and
+ * its pages from the vertex.
  */
-function edgeMaterial(scene, base, front, back) {
+export function inkEdgeMaterial(scene, base) {
   const m = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide });
-  m.userData.uniforms = {
-    uEdgeFront: { value: scene.blank },
-    uEdgeBack: { value: scene.blank },
-    uEdgeFrontSpots: { value: scene.noSpots },
-    uEdgeBackSpots: { value: scene.noSpots },
-    uEdgeFrontSpotInk: { value: noSpotInk() },
-    uEdgeBackSpotInk: { value: noSpotInk() },
-    uEdgeInset: { value: new THREE.Vector2(EDGE_INSET_MM / scene.model.width, EDGE_INSET_MM / scene.model.height) },
-    uEdgeInk: { value: EDGE_INK_SHARE },
-  };
-  m.userData.edgeOf = { base, front, back, white: scene.blank };
+  m.color.copy(base.color);
   m.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, m.userData.uniforms);
     sheetShader(shader, scene.shared);
     inkUniforms(shader, scene.shared);
+    pageDataUniforms(shader, scene.shared);
     shader.vertexShader = patchShader(shader.vertexShader, [
       ["void main() {", "attribute vec2 edgeUv;\nvarying vec2 vEdgeUv;\nvoid main() {"],
       ["vec3 transformed = sheetPosition();", (line) => line + "\n  vEdgeUv = edgeUv;"],
@@ -564,19 +543,6 @@ function edgeMaterial(scene, base, front, back) {
   };
   m.customProgramCacheKey = () => "bookview-sheet-edge";
   return m;
-}
-
-/** A sheet's edges take the paper's edge colour and the pages' images they show now. */
-function inkEdges(m) {
-  const { base, front, back, white } = m.userData.edgeOf;
-  m.color.copy(base.color);
-  const u = m.userData.uniforms;
-  u.uEdgeFront.value = front.map ?? white;
-  u.uEdgeBack.value = back.map ?? white;
-  u.uEdgeFrontSpots.value = front.userData.uniforms.uSpots.value;
-  u.uEdgeBackSpots.value = back.userData.uniforms.uSpots.value;
-  u.uEdgeFrontSpotInk.value.copy(front.userData.uniforms.uSpotInk.value);
-  u.uEdgeBackSpotInk.value.copy(back.userData.uniforms.uSpotInk.value);
 }
 
 /** A page material's twin (see pageMaterial) takes the settings the page's material has now. */

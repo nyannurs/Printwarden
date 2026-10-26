@@ -35,7 +35,7 @@ node tools/make-testfiles.mjs
 | `geometry.test.js` | The geometry proof: no two sheets pass through each other, in any binding, at rest at any opening, closed on either cover, closing and opening, mid-turn, with several pages in the air, flipping fast forward and back. Every pair of sheets that could meet is tested, as outlines at their drawn thickness (`crossings.js`). |
 | `turning.test.js` | Turning, opening and closing in every binding, frame by frame on the scene's own clock: no frame jumps. Single and double clicks, quick bursts, back and forth, closing from the middle, opening deep in, 80 pages. |
 | `fold.test.js` | A stapled booklet's folds: each sheet's fold stays inside the one round it while opening and closing, at three paper thicknesses; no kink at the gutter mid-turn; the staples' legs only at the center spread. |
-| `scene.test.js` | Every kind of sheet drawn once: three.js's shaders, changed as text, still compile. |
+| `scene.test.js` | Every kind of sheet drawn once: three.js's shaders, changed as text, still compile. The occluder changes no pixel (and would, pushed out of the paper). The sheets draw in batches: a few draws a book, a sheet with a texture of its own drawn alone and back in again. |
 | `sharpness.test.js` | When a page keeps its base image and when it gets strips; strips reach the page's edges; a video's page images per frame, the turning page included; strips go to the graphics card like any page image. |
 | `checklist.test.js` | Points from designer testing that numbers can settle: endpapers, boards and the headband on the spine, side glue in Preflight, staples and creep, signatures nesting with creep, switching bindings on one book. |
 | `panel.test.js` | The side panel, built with the app's own stylesheets at several window sizes: every control and label on whole pixels. |
@@ -89,6 +89,7 @@ They run the real app from source, off-screen and never focused, so you can keep
 | `exports.py` | A 4K screenshot and a short MP4 through the app's own save, timed. |
 | `perf.py` | The frame loop at rest (no frames at all) and dragging (one per refresh), then the performance check's report. |
 | `overdraw.py` | How many sheet layers are shaded per pixel in fixed views, with the occluder's sheets chosen several ways (`--every 0 8 4`): what a GPU that can't skip hidden points pays, counted exactly on any computer; a heat map a view. |
+| `drawcalls.py` | One frame's draw calls by what they draw (sheet faces, edges, fillers, the occluder, the folds, the shadow map's), at three views. |
 | `memory.py` | Memory and idle activity with every page visited. At rest the app should use no processor time. |
 | `make-testfiles.mjs` | The test documents, each with what to expect printed on it. Deterministic: run again, the same bytes. |
 | `make-long-pdf.mjs`, `prepare-long-photos.py`, `make-heavy-pdf.py` | Long and heavy test books: 240 pages of photos and layouts, and a file of large CMYK photos. |

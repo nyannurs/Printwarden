@@ -19,6 +19,8 @@
 
 import * as THREE from "three";
 
+import { LayerArray } from "./pagedata.js";
+
 export const TILE = 1024; // a tile's side in texels, border included
 export const TILE_BORDER = 4; // texels of the neighbours at each edge: filtering never sees a tile's edge
 export const TILE_PAYLOAD = TILE - 2 * TILE_BORDER; // what a tile covers of its page
@@ -274,8 +276,10 @@ export function tileBudget(systemBytes) {
 
 /**
  * The cache on the GPU: one texture array of TILE × TILE layers, allocated when the first
- * tile comes (the client viewer never needs it), its tables as small textures the page
- * shader reads with texelFetch, and the uploads paced a few a frame (flush).
+ * tile comes (the client viewer never needs it); the pages' tables in a texture array of their
+ * own (a layer a page, the page table says which: pagedata.js), read by texelFetch in the page
+ * shader; the spine's table a small texture (its shader binds it); and the uploads paced a few
+ * a frame (flush).
  */
 export class TileCache {
   /** @param {THREE.WebGLRenderer} renderer */
@@ -289,8 +293,14 @@ export class TileCache {
     this.texture = new THREE.DataArrayTexture(new Uint8Array(4), 1, 1, 1);
     /** @type {THREE.DataTexture} the table of a page without tiles */
     this.emptyTable = TileCache.#tableTexture(new Uint8Array(4), 1, 1);
-    /** @type {Map<number, THREE.DataTexture>} folio -> its table on the GPU */
+    /** @type {Map<number, THREE.DataTexture>} folio -> its table on the GPU (the spine's only; the pages' are layers) */
     this.tableTextures = new Map();
+    // The pages' tables, a layer each (shared uniform uTileTables): the size of the first page's
+    // (every page of the book is the same size); a page whose table is larger has no tiles.
+    this.tables = new LayerArray(renderer, { mips: false, name: "tile tables" });
+    /** @type {Map<number, number>} folio -> its table's layer */
+    this.tableLayers = new Map();
+    this.folios = 0; // how many the book has (setFolios): the tables array's layers
     /** @type {{folio: number, level: number, ix: number, iy: number, page: ReturnType<typeof tilePage>, tile: {data: Uint8Array, mips?: Uint8Array[], spots?: Uint8Array | null, spotMips?: Uint8Array[], close?: () => void}, stamp: string}[]} */
     this.queue = [];
     this.failed = false; // the texture array couldn't be made: tiles off
@@ -390,7 +400,7 @@ export class TileCache {
       const { folio, level, ix, iy, page, tile, stamp } = this.queue.shift();
       const placed = this.index.place(folio, level, ix, iy, page, now, stamp, !!tile.spots);
       if (placed === null) { tile.close?.(); continue; } // every layer in use by this view: next time
-      if (!this.tableTextures.has(folio)) newTables.add(folio);
+      if (!this.tableTextures.has(folio) && !this.tableLayers.has(folio)) newTables.add(folio);
       this.renderer.state.bindTexture(gl.TEXTURE_2D_ARRAY, this.glTexture);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
@@ -420,35 +430,64 @@ export class TileCache {
     return fading;
   }
 
+  /** How many folios the book has: the tables array is made for them (before their first table). */
+  setFolios(n) {
+    this.folios = n;
+  }
+
   #syncTables() {
     for (const [folio, t] of this.index.tables) {
       if (!t.dirty) continue;
       t.dirty = false;
-      let tex = this.tableTextures.get(folio);
-      if (!tex) {
-        tex = TileCache.#tableTexture(t.data, t.width, t.height);
-        this.tableTextures.set(folio, tex);
-      } else tex.needsUpdate = true;
+      if (folio === SPINE_FOLIO) {
+        let tex = this.tableTextures.get(folio);
+        if (!tex) {
+          tex = TileCache.#tableTexture(t.data, t.width, t.height);
+          this.tableTextures.set(folio, tex);
+        } else tex.needsUpdate = true;
+        continue;
+      }
+      let layer = this.tableLayers.get(folio);
+      if (layer === undefined) {
+        if (!this.tables.fits(t.width, t.height) || !this.tables.ensure(t.width, t.height, this.folios + 8)) continue; // no tiles for this page
+        layer = this.tables.take();
+        if (layer < 0) continue;
+        this.tableLayers.set(folio, layer);
+      }
+      this.tables.upload(layer, t.width, t.height, t.data);
     }
   }
 
-  /** What a page's material binds: its table and its pyramid's shape (null without tiles). */
+  /**
+   * What the page table (pagedata.js) holds for a page's tiles: the layer of its table and its
+   * pyramid's shape; for the spine, its table texture (its shader's own uniform). Null without tiles.
+   */
   pageUniforms(folio) {
     const t = this.index?.tables.get(folio);
-    const tex = this.tableTextures.get(folio);
-    if (!t || !tex) return null;
-    return { table: tex, page: [t.page.w0, t.page.h0, TILE_MAX_LEVEL, t.page.rows] };
+    if (!t) return null;
+    const page = [t.page.w0, t.page.h0, TILE_MAX_LEVEL, t.page.rows];
+    if (folio === SPINE_FOLIO) {
+      const tex = this.tableTextures.get(folio);
+      return tex ? { table: tex, page } : null;
+    }
+    const layer = this.tableLayers.get(folio);
+    return layer === undefined ? null : { layer, page };
   }
 
   /** The folios with tables (to bind again when the leaves are built anew). */
   pages() {
-    return [...this.tableTextures.keys()];
+    return [...this.tableTextures.keys(), ...this.tableLayers.keys()];
   }
 
   forgetPage(folio) {
     this.index?.forgetPage(folio);
     this.tableTextures.get(folio)?.dispose();
     this.tableTextures.delete(folio);
+    const layer = this.tableLayers.get(folio);
+    if (layer !== undefined) {
+      this.tables.release(layer);
+      this.tableLayers.delete(folio);
+    }
     this.queue = this.queue.filter((q) => q.folio !== folio || (q.tile.close?.(), false));
   }
 
@@ -462,15 +501,19 @@ export class TileCache {
     this.index?.renumber(map);
     for (const [folio, tex] of this.tableTextures) if (!map.has(folio)) tex.dispose();
     this.tableTextures = new Map([...this.tableTextures].filter(([folio]) => map.has(folio)).map(([folio, tex]) => [/** @type {number} */ (map.get(folio)), tex]));
+    for (const [folio, layer] of this.tableLayers) if (!map.has(folio)) this.tables.release(layer);
+    this.tableLayers = new Map([...this.tableLayers].filter(([folio]) => map.has(folio)).map(([folio, layer]) => [/** @type {number} */ (map.get(folio)), layer]));
     this.queue = this.queue.filter((q) => map.has(q.folio) || (q.tile.close?.(), false));
     for (const q of this.queue) q.folio = /** @type {number} */ (map.get(q.folio));
   }
 
-  /** Everything let go (a new document); the texture array stays for the next. */
+  /** Everything let go (a new document); the texture arrays go with it (the next document's tables may differ in size). */
   reset() {
     this.index?.reset();
     for (const tex of this.tableTextures.values()) tex.dispose();
     this.tableTextures.clear();
+    this.tableLayers.clear();
+    this.tables.dispose();
     for (const q of this.queue) q.tile.close?.();
     this.queue.length = 0;
   }
