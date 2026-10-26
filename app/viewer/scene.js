@@ -371,6 +371,8 @@ ${TILE_GLSL}
     this.occluderEvery = OCCLUDER_EVERY; // its sheets: every this-many-th (0: none, for the performance check)
     this.batches = null; // the sheets drawn in batches (see draw.js makeBatches); `debugNoBatch = true` draws every sheet on its own
     this.debugNoBatch = false;
+    this.debugShadowHold = false; // the performance check's (see draw.js shadows)
+    this.debugCastersKept = false;
     this.depthPass = null; // the sheets' depth drawn first (draw.js makeDepthFirst): off but for the performance check's comparison
     this.depthFirst = false;
     this.extras = null;

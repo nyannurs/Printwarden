@@ -31,6 +31,13 @@ export function renderView(scene, target, view) {
  * laptop's).
  */
 export function shadows(scene) {
+  // For the performance check only (ui/probe.js): the shadow map held as it is while pages move
+  // (wrong shadows, the soft shadows' search in full: what that search costs alone), or the
+  // nearest casters' shortcut kept while it changes (a frame behind: what the shortcut saves).
+  if (scene.debugShadowHold) {
+    scene.shared.uCasterMapOn.value = 0;
+    return;
+  }
   const cam = scene.key.shadow.camera;
   const now = [scene.layoutVersion, ...scene.key.position.toArray(), ...scene.key.target.position.toArray(),
     ...scene.root.position.toArray(), scene.root.rotation.x, scene.root.rotation.y, scene.root.rotation.z,
@@ -45,7 +52,8 @@ export function shadows(scene) {
   // about to be drawn again): while it changes every frame (a page turning) the soft shadows
   // search in full; while only the camera moves, they skip where nothing is near.
   const map = scene.key.shadow.map;
-  const settled = !!map && !scene.renderer.shadowMap.needsUpdate;
+  const settled = !!map && (!scene.renderer.shadowMap.needsUpdate || scene.debugCastersKept);
+  if (scene.debugCastersKept && scene.renderer.shadowMap.needsUpdate) scene.casters.current = false; // made again from the last map, below
   if (!settled) scene.casters.current = false;
   else if (!scene.casters.current) {
     nearestCasters(scene, map.texture);
