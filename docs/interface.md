@@ -142,9 +142,9 @@ Each dialog is a function that returns a promise of the choices, or null if canc
 - The GPU, the screen (pixel ratio, canvas size, multisampling), processor threads, the book.
 - The refresh rate, from frames with nothing drawn.
 - **Panning where the view is**: as is, at half the pixels, without re-pivoting onto the paper.
-- **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, and every sheet but the two open pages, and with the sheets' depth drawn first (every sheet's faces and cut edges for their depth alone before anything is shaded, the sheets then shaded without writing depth: each point shaded once, whatever the order; the same picture).
+- **Dragging round the book**: as is, then without each of half the pixels, shadows, multisampling, and every sheet but the two open pages.
 - **Turning pages quickly**: as is and without shadows, each with the main thread's time by part (`FRAME_PARTS` in scene.js: the animations, laying out the sheets, page images and tiles to the graphics card (images, uploads), finding the tiles the view needs, whether the shadow map is drawn again, sorting, the draw calls: the shadow map itself is drawn with them).
-- **Dragging round three more views**: the closed book, the open book as framed, its piles from low at the fore-edge; each as is and with the sheets' depth first.
+- **Dragging round three more views**: the closed book, the open book as framed, its piles from low at the fore-edge.
 - **Panning by hand**: the mouse's moves per second, frames drawn per second, the card's time.
 
 Each run reports frames per second, the 95th-percentile and worst frame time, the main thread's time, and the graphics card's time where it can be timed. The check puts everything back afterwards. The client viewer bundles the same file.

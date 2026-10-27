@@ -167,25 +167,13 @@ export function makeLeaf(scene, i) {
   mesh.frustumCulled = false;
   mesh.customDepthMaterial = scene.sheetDepth;
   scene.block.add(mesh);
-  // The sheet's depth alone, drawn before anything is shaded while the depth comes first (see
-  // setDepthFirst in draw.js): the same geometry, so the same points to the bit (invariant, see
-  // sheetShader); a coil's strips of holes left out (no material for their groups: three skips
-  // them), they punch their holes writing their own depth.
-  const depth = new THREE.Mesh(geo, [scene.depthFirst.faces, scene.depthFirst.faces, scene.depthFirst.edges]);
-  depth.frustumCulled = false;
-  depth.castShadow = false;
-  depth.receiveShadow = false;
-  depth.raycast = () => {};
-  depth.renderOrder = -2e6; // before every sheet (see drawOrder)
-  depth.visible = scene.depthFirst.on;
-  scene.block.add(depth);
   const profile = { x: new Float32Array(n), y: new Float32Array(n), phi: new Float32Array(n) };
   // The faces between a flying stack's sheets (see layoutLeaves): each its page's image,
   // unlit (see inkFiller).
   const fillers = [inkFiller(scene, front), inkFiller(scene, back)];
   // Every field a leaf ever has, from the start: one shape for all of them (fields added as
   // first needed made the browser compile the layout over again, the first jump's hiccup).
-  const leaf = { i, mesh, depth, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, settle: false, group: null, rows: null, rowsActive: false, written: null, pick: null, stale: true, fill: LEAF_FILL };
+  const leaf = { i, mesh, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, settle: false, group: null, rows: null, rowsActive: false, written: null, pick: null, stale: true, fill: LEAF_FILL };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
   // CPU only when a ray could meet it, into a mesh never drawn.
   leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);

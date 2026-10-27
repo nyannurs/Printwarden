@@ -161,7 +161,6 @@ export async function runProbe(scene, onProgress) {
       for (const m of pages()) m.needsUpdate = true;
     });
     await dragging("  no multisampling", () => setSamples(0), () => setSamples(samples));
-    await dragging("  sheets' depth first", () => scene.setDepthFirst(true), () => scene.setDepthFirst(false));
     const top = new Set([scene.opening - 1, scene.opening]);
     await dragging("  only the two open pages", () => {
       for (const l of scene.leaves) l.mesh.visible = top.has(l.i);
@@ -219,8 +218,6 @@ export async function runProbe(scene, onProgress) {
       };
       place();
       await dragging(label);
-      place();
-      await dragging("  sheets' depth first", () => scene.setDepthFirst(true), () => scene.setDepthFirst(false));
     }
   } finally {
     scene.debugNoPivot = false;

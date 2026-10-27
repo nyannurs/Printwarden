@@ -191,27 +191,6 @@ export function drawOrder(scene) {
 }
 
 /**
- * The sheets' depth first, or not (`scene.depthFirst.on`; off: the performance check's
- * comparison, for the author's Mac): every sheet's faces and cut edges drawn for their depth
- * alone (leaf.depth, a trivial shader) before anything is shaded, the sheets then shaded without
- * writing depth, so each point is shaded once, for the surface in front, whatever the order.
- * The same points to the bit (invariant, see sheetShader), so the picture is the same; a coil's
- * strips of holes keep writing their own depth. The pass itself builds every sheet a second
- * time (the vertex work: 1-3 ms a frame on the RTX 4060), which is why it is off: on the M4 Pro
- * it won 0.15.7's frames (48 → 120 fps, 2026-10-06) and by 2026-10-24 every view was faster
- * without it; measured again here on the code as it is.
- */
-export function setDepthFirst(scene, on) {
-  scene.depthFirst.on = on;
-  for (const leaf of scene.leaves) {
-    leaf.depth.visible = on;
-    for (const m of [leaf.front, leaf.back, leaf.mesh.material[2], ...leaf.fillers]) m.depthWrite = !on;
-  }
-  scene.sheetFiller.depthWrite = !on;
-  scene.dirty = true;
-}
-
-/**
  * A cover file's flaps (makeFlap in leaf.js) lie on the insides of the covers, a paper's
  * thickness off them: just where the first or last page lies on that cover too. Shown only
  * while their cover's inside is uncovered (the book open at it, or the page beside it in the

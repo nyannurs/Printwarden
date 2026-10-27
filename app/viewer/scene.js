@@ -18,7 +18,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { CAMERA_PRESETS, CameraRig, presetHome } from "./camera.js";
 import * as capture from "./capture.js";
-import { drawOrder, setDepthFirst, shadows } from "./draw.js";
+import { drawOrder, shadows } from "./draw.js";
 import { layoutGround, makeExtras } from "./extras.js";
 import { frameCamera, placeCamera, visiblePages, visibleSpine } from "./framing.js";
 import { bindInput, glideZoom, panBy } from "./input.js";
@@ -322,15 +322,6 @@ ${TILE_GLSL}
     this.sheetDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     this.sheetDepth.onBeforeCompile = (shader) => sheetShader(shader, this.shared);
     this.sheetDepth.customProgramCacheKey = () => "bookview-sheet";
-    // The sheets' depth drawn first (see setDepthFirst in draw.js): the faces one-sided as the
-    // pages are, the cut edges both sides. Off unless the performance check compares it.
-    const depthOnly = (side) => {
-      const m = new THREE.MeshDepthMaterial({ colorWrite: false, side });
-      m.onBeforeCompile = (shader) => sheetShader(shader, this.shared);
-      m.customProgramCacheKey = () => "bookview-depth-first";
-      return m;
-    };
-    this.depthFirst = { on: false, faces: depthOnly(THREE.FrontSide), edges: depthOnly(THREE.DoubleSide) };
     this.sheetFiller = fillerMaterial(this); // the faces between a flying stack's sheets (see layoutLeaves)
     // Cotton headbands: the bead and its cloth tail (a single sheet: seen from either side).
     this.headbandMat = new THREE.MeshStandardMaterial({ color: 0xece4d2, roughness: 0.85, side: THREE.DoubleSide });
@@ -1190,11 +1181,6 @@ ${TILE_GLSL}
   }
 
   /** For the performance check: a pan by (dx, dy) screen pixels, as the space bar and a drag make it. */
-  /** The sheets' depth drawn first, or not (see setDepthFirst in draw.js). */
-  setDepthFirst(on) {
-    setDepthFirst(this, on);
-  }
-
   debugPan(dx, dy) {
     panBy(this, dx, dy);
   }
@@ -1281,7 +1267,6 @@ ${TILE_GLSL}
   #disposeBook() {
     for (const leaf of this.leaves) {
       this.block.remove(leaf.mesh);
-      this.block.remove(leaf.depth);
       leaf.geo.dispose();
       leaf.pick.geometry.dispose();
       for (const m of [leaf.front, leaf.back]) { // (their page images are kept: see setPageTexture)
