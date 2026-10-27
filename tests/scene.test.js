@@ -33,6 +33,60 @@ test("scene: three.js shaders take our changes, and every kind of sheet draws", 
   }
 });
 
+test("the sheets' depth drawn first gives the same picture (the performance check's comparison)", async () => {
+  const box = document.createElement("div");
+  box.style.cssText = "position: fixed; left: -2000px; top: 0; width: 480px; height: 300px;";
+  document.body.append(box);
+  const scene = new BookScene(box);
+  const gl = scene.renderer.getContext();
+  const shot = () => {
+    scene.debugSample(0.5, 0.5); // renders
+    const px = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+    gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    return px;
+  };
+  const differ = (a, b) => {
+    let n = 0;
+    for (let k = 0; k < a.length; k += 4) if (Math.abs(a[k] - b[k]) > 2 || Math.abs(a[k + 1] - b[k + 1]) > 2 || Math.abs(a[k + 2] - b[k + 2]) > 2) n++;
+    return n;
+  };
+  const rig = scene.rig;
+  const views = [
+    ["framed", (n) => scene.goTo(n >> 1, { animate: false }), { azimuth: 0, elevation: rig.home.elevation, zoom: 1 }],
+    ["low at the fore-edge", (n) => scene.goTo(n >> 1, { animate: false }), { azimuth: Math.PI / 2, elevation: 0.12, zoom: 0.6 }],
+    ["from below", (n) => scene.goTo(n >> 1, { animate: false }), { azimuth: 0.7, elevation: -0.5, zoom: 0.8 }],
+    ["closed", () => { scene.goTo(0, { animate: false }); scene.setClosed(true, { animate: false }); }, { azimuth: 0, elevation: rig.home.elevation, zoom: 1 }],
+  ];
+  try {
+    for (const binding of ["perfect", "spiral", "hardcover", "saddle"]) {
+      scene.setBook({ pageCount: 48, pageSize: { width: 148, height: 210 }, binding, paper });
+      for (const [label, open, at] of views) {
+        open(scene.model.leafCount);
+        rig.free = true;
+        rig.azimuth = rig.home.azimuth + at.azimuth;
+        rig.elevation = at.elevation;
+        rig.zoom = at.zoom;
+        rig.springing = false;
+        scene.zoomBias = 1;
+        const asIs = shot();
+        scene.setDepthFirst(true);
+        const first = shot();
+        // The comparison sees the sheets: without their depth at all they draw in a heap.
+        for (const leaf of scene.leaves) leaf.depth.visible = false;
+        const heap = shot();
+        scene.setDepthFirst(false);
+        const again = shot();
+        eq(differ(asIs, again), 0, `${binding}, ${label}: the same view drawn twice`);
+        eq(differ(asIs, first), 0, `${binding}, ${label}: depth first`);
+        ok(differ(asIs, heap) > 50, `${binding}, ${label}: without depth ${differ(asIs, heap)} pixels change`);
+      }
+      scene.setClosed(false, { animate: false });
+    }
+  } finally {
+    box.remove();
+  }
+});
+
 /** A leaf's cross-section as drawn: an outline as thick as the sheet (see geometry.test.js). */
 function outlineOf(scene, leaf) {
   const p = leaf.profile;
