@@ -1268,7 +1268,7 @@ ${TILE_GLSL}
     for (const leaf of this.leaves) {
       this.block.remove(leaf.mesh);
       leaf.geo.dispose();
-      leaf.pick.geometry.dispose();
+      leaf.pick?.geometry.dispose();
       for (const m of [leaf.front, leaf.back]) { // (their page images are kept: see setPageTexture)
         for (let i = 0; i < MAX_DETAIL; i++) disposeTexture(m.userData.uniforms[`uDetail${i}`].value, this.blank);
         m.dispose();

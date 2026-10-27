@@ -175,16 +175,19 @@ export function makeLeaf(scene, i) {
   // first needed made the browser compile the layout over again, the first jump's hiccup).
   const leaf = { i, mesh, geo, front, back, fillers, profile, rise: 0, bows: new Float32Array(LEAF_ROWS), board, ...size, theta: 90, from: 90, to: 90, start: null, duration: scene.turnMs, curl: 0, curlFrom: 0, settle: false, group: null, rows: null, rowsActive: false, written: null, pick: null, stale: true, fill: LEAF_FILL };
   // Picking (a click, a zoom's aim) needs the sheet where the GPU draws it: written on the
-  // CPU only when a ray could meet it, into a mesh never drawn.
-  leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
-  leaf.pick.geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(vCount * 3), 3));
-  leaf.pick.geometry.setIndex(geo.index);
-  leaf.pick.geometry.groups = geo.groups;
-  leaf.stale = true;
+  // CPU only when a ray could meet it, into a mesh never drawn, made the first time one does
+  // (36 KB a sheet: most of a thick book's sheets are never picked, and an 8 GB machine keeps
+  // the memory).
   mesh.raycast = (raycaster, hits) => {
     if (leaf.stale) {
       const near = sheetBounds(leaf, scene.model.thickness[i]).applyMatrix4(mesh.matrixWorld);
       if (!raycaster.ray.intersectsSphere(near)) return;
+      if (!leaf.pick) {
+        leaf.pick = new THREE.Mesh(new THREE.BufferGeometry(), materials);
+        leaf.pick.geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(vCount * 3), 3));
+        leaf.pick.geometry.setIndex(geo.index);
+        leaf.pick.geometry.groups = geo.groups;
+      }
       writeLeafGeometry(leaf, leaf.pick.geometry, scene.model.thickness[i]);
       leaf.stale = false;
     }
