@@ -25,6 +25,7 @@ export function baseHeight(pageCount, aspect) {
   return Math.round(Math.min(BASE_MAX, Math.max(BASE_MIN, h)));
 }
 
+const THREADS_FILE_BYTES = 1.5 * 2 ** 30; // the threads' copies of a file together, at most
 /**
  * How many threads render pages: half the processor's, two to six; fewer on a computer with
  * little memory (three with 8 GB), and fewer for a large file: every thread holds its own copy
@@ -36,7 +37,6 @@ const poolSize = (bytes = 0) => Math.max(1, Math.min(
   Math.floor(SYSTEM_MEMORY / (2.5 * 2 ** 30)),
   Math.floor(THREADS_FILE_BYTES / Math.max(1, bytes)),
 ));
-const THREADS_FILE_BYTES = 1.5 * 2 ** 30; // the threads' copies of a file together, at most
 // A file this large goes to the threads as one Blob (each reads it into its own memory when it
 // opens); smaller files are handed over whole.
 const SHARED_FILE_BYTES = 24 * 2 ** 20;

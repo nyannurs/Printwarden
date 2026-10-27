@@ -47,7 +47,7 @@ export async function runProbe(scene, onProgress) {
     const g = gpu.length ? `   gpu ${median(gpu).toFixed(1)} ms` : "";
     return `${(1000 / q(0.5)).toFixed(0).padStart(4)} fps   p95 ${q(0.95).toFixed(1).padStart(5)} ms   worst ${s[s.length - 1].toFixed(1).padStart(5)} ms   main thread ${median(cpu).toFixed(1)} ms${g}`;
   };
-  // The graphics card's time for the frames of a run, where it can be timed (see #adaptResolution).
+  // The graphics card's time for the frames of a run, where it can be timed (scene.gpuTime, see #readGpuTime in scene.js).
   const gpuNow = (since) => (scene.gpuTime.timer && scene.gpuTime.at > since ? scene.gpuTime.ms : null);
   // One run: `step` moves something every frame; frames and main-thread time measured;
   // `parts`: that time by part too, on a line of its own.

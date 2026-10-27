@@ -533,8 +533,9 @@ export function sheetShader(shader, uniforms) {
   shader.uniforms.uSheetLift ??= { value: 0 };
   shader.uniforms.uCasterMap = uniforms.uCasterMap;
   shader.uniforms.uCasterMapOn = uniforms.uCasterMapOn;
-  // The same point from every program that draws a sheet, to the last bit: its faces' depth,
-  // drawn first, must match their shading (see makeLeaf).
+  // The same point from every program that draws a sheet, to the last bit: a sheet's faces and
+  // its cut edges are drawn by different programs and share their vertices along every edge
+  // (a hairline crack there otherwise, where the two disagree by a bit).
   shader.vertexShader = "invariant gl_Position;\n" + patchShader(shader.vertexShader, [
     ["void main() {", SHEET_VERTEX + "void main() {"],
     ["#include <beginnormal_vertex>", "vec3 objectNormal = sheetNormal();"],

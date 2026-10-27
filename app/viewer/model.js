@@ -245,9 +245,9 @@ export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 
     // pages hug the coil. (Stacked down from the centre, a 540-page block sank 17 mm into the
     // table at its cover.) Pages in the air take the ring's point at their angle, as before:
     // the lift and the hug fade as a page rises, so a turn stays continuous.
-    const s = Math.sin(psi) >= 0 ? 1 : -1; // the pile it lies in: right of the ring, or left
+    const sg = Math.sin(psi) >= 0 ? 1 : -1; // the pile it lies in: right of the ring, or left
     const flat = Math.abs(Math.sin(psi));
-    const pile = s > 0 ? total - split : split; // paper on that side
+    const pile = sg > 0 ? total - split : split; // paper on that side
     const lift = (coilPileTop(book, pile) - book.coilOpen.y) * flat;
     const holeY = book.coilOpen.y + R * Math.cos(psi) + Math.sin(t0) * off + lift;
     // Above or below the centre the ring is inside its side: the hole goes where the wire is at
@@ -255,9 +255,9 @@ export function leafProfile(book, i, theta, closed, split, curl, s, out, side = 
     // on the table had the wire through up to 4 mm of paper beside the holes of its lower pages.)
     // Kept clear of the centre while the other pile has paper (the two piles' strips mustn't meet).
     const dyRing = Math.min(R, Math.abs(holeY - book.coilOpen.y));
-    const other = s > 0 ? split : total - split;
+    const other = sg > 0 ? split : total - split;
     const onRing = Math.max(other > 1e-6 ? HOLE_OFFSET_MM + 1 : 0, Math.sqrt(Math.max(0, R * R - dyRing * dyRing)));
-    const holeX = book.coilOpen.x + s * (R - flat * (R - onRing)) + (R * Math.sin(psi) - s * R) - Math.cos(t0) * off;
+    const holeX = book.coilOpen.x + sg * (R - flat * (R - onRing)) + (R * Math.sin(psi) - sg * R) - Math.cos(t0) * off;
     const openA = { x: holeX - Math.sin(t0) * HOLE_OFFSET_MM, y: holeY - Math.cos(t0) * HOLE_OFFSET_MM };
     // Closed front up, the first leaf on top; back up (flipped through to the end), the last.
     // Each page hangs on the wire: its hole where the ring is at the page's height. The ring

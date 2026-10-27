@@ -76,37 +76,18 @@ async function sharpPages(folios, height) {
   }));
 }
 
-/** The capture's own drawings for a set of pages in the picture (`want`: folio -> px a mm on the output). */
+/** The capture's own drawings for a set of pages in the picture (`want`: folio -> px a mm on the output): the pages whole, and their finish masks and flaps (sharpenForExtras). */
 async function sharpenFor(want) {
   const a = state.analysis;
-  const n = a.book.pages.length;
   const jobs = [];
-  const finishHeights = new Map();
-  let flaps = 0;
   for (const [folio, pxPerMm] of want) {
     const g = a.geometry[folio - 1];
     if (!g || !(pxPerMm > 0)) continue;
     const w = g.trim.x1 - g.trim.x0;
     const h = g.trim.y1 - g.trim.y0;
-    const height = captureHeight(pxPerMm, h, w / h);
-    jobs.push(sharpPages([folio, ...scene.pagesWith(folio)], height));
-    const finished = state.finish?.jobs?.some((j) => j.folio === folio);
-    if (finished && (capture.finish.get(folio) ?? FINISH_HEIGHT) < height / 1.1) finishHeights.set(folio, height);
-    if (folio === 2 || folio === n - 1) flaps = Math.max(flaps, height);
+    jobs.push(sharpPages([folio, ...scene.pagesWith(folio)], captureHeight(pxPerMm, h, w / h)));
   }
-  if (finishHeights.size) {
-    jobs.push(finishAt(finishHeights).then((images) => {
-      for (const [folio, image] of images) {
-        capture.finish.set(folio, finishHeights.get(folio));
-        capture.finishImages.push(image);
-      }
-    }));
-  }
-  if (flaps > Math.max(capture.flaps, FLAP_HEIGHT) * 1.1 && scene.flaps.size) {
-    capture.flaps = flaps;
-    jobs.push(refreshFlaps(flaps));
-  }
-  await Promise.all(jobs);
+  await Promise.all([...jobs, sharpenForExtras(want)]);
 }
 
 /** The spine's artwork at `height` px, for the capture (drawn again when more than a tenth taller is wanted). */
@@ -368,7 +349,7 @@ async function sharpenForVideo(sharp, need) {
   await sharpenForExtras(extra);
 }
 
-/** The finish's masks and the cover's flaps for the pages in a video's frame (`want`: folio -> px a mm), not the pages themselves (sharpenForVideo has them). */
+/** The finish's masks and the cover's flaps for the pages in a capture (`want`: folio -> px a mm), not the pages themselves (sharpenFor and sharpenForVideo have them). */
 async function sharpenForExtras(want) {
   const a = state.analysis;
   const n = a.book.pages.length;
@@ -376,8 +357,10 @@ async function sharpenForExtras(want) {
   let flaps = 0;
   for (const [folio, pxPerMm] of want) {
     const g = a.geometry[folio - 1];
-    if (!g) continue;
-    const height = captureHeight(pxPerMm, g.trim.y1 - g.trim.y0);
+    if (!g || !(pxPerMm > 0)) continue;
+    const w = g.trim.x1 - g.trim.x0;
+    const h = g.trim.y1 - g.trim.y0;
+    const height = captureHeight(pxPerMm, h, w / h);
     if (state.finish?.jobs?.some((j) => j.folio === folio) && (capture.finish.get(folio) ?? FINISH_HEIGHT) < height / 1.1) finishHeights.set(folio, height);
     if (folio === 2 || folio === n - 1) flaps = Math.max(flaps, height);
   }

@@ -381,7 +381,7 @@ export function layoutExtras(scene) {
     // corners, so the tunnel between block and case is closed at head and foot. (Spanning
     // the block's spine alone, to 0.17.91, it left the case's corners open beside it: from
     // the end the bead read as afloat in a dark slot, and the far headband showed through.)
-    if (beadPath.length >= 2 && ex.caseSpine) {
+    if (beadPath.length >= 2) {
       const a = beadPath[beadPath.length - 1].clone().sub(beadPath[0]).normalize();
       // Into the corner, no further than a millimetre: with thick boards the case's corners
       // stand well beyond the block, and a headband wider than the block would read as one.

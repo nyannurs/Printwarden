@@ -36,7 +36,6 @@ export function layoutLeaves(scene) {
       const flat = Math.min(1, Math.abs(theta) / 60);
       return leaf.board ? 0 : PAGE_BOW_MM * (m.style.spine === "coil" ? 0.6 : 1) * open * depth * flat * flat * (3 - 2 * flat) * Math.sign(theta || 1);
     };
-    leaf.bows ??= new Float32Array(R);
     if (!leaf.rowsActive) leaf.bows.fill(bow(leaf.theta));
     else {
       // A corner-led row bows as it lies: a row already landed bows like the pile it
